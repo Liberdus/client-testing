@@ -10,6 +10,8 @@
 
 4. Once the container builds, open a shell and run `./SETUP` to clone and configure repos for a local Liberdus test network and web-client-v2.
 
+5. Use a VNC client to connect on localhost to the port mentioned by the vnc server in the devcontainer configuration terminal.
+
 ## Manually Setting up a Local Liberdus Network with web-client-v2
 
 1. Setup an environment with the following software:
