@@ -1,0 +1,56 @@
+FROM mcr.microsoft.com/playwright:v1.50.1-jammy
+
+USER root
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies (now includes tightvncserver)
+RUN apt-get update && \
+    apt-get install -y \
+    curl \
+    pkg-config \
+    tightvncserver \
+    xvfb \
+    fluxbox \
+    x11vnc \
+    ca-certificates \
+    bash-completion && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Configure VNC environment
+RUN mkdir -p /tmp/.X11-unix && \
+    chmod 1777 /tmp/.X11-unix && \
+    mkdir -p /home/pwuser/.vnc && \
+    echo "password" | vncpasswd -f > /home/pwuser/.vnc/passwd && \
+    chmod 600 /home/pwuser/.vnc/passwd && \
+    chown -R pwuser:pwuser /home/pwuser
+
+# Switch to non-root user for runtime operations
+USER pwuser
+WORKDIR /home/pwuser
+
+# Install Node.js using NVM
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash \
+    && echo 'export NVM_DIR="$HOME/.nvm"' >> ~/.bashrc \
+    && echo '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"' >> ~/.bashrc \
+    && export NVM_DIR="$HOME/.nvm" \
+    && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" \
+    && nvm install 18.16.1 \
+    && nvm alias default 18.16.1 \
+    && nvm use default \
+    && npm install -g npm@9.5.1 \
+    && corepack enable
+
+# Install Rust toolchain
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+ENV PATH="/home/pwuser/.cargo/bin:${PATH}"
+
+# Set environment variables
+ENV DISPLAY=:99 \
+    NVM_DIR="/home/pwuser/.nvm" \
+    PATH="/home/pwuser/.nvm/versions/node/v18.16.1/bin:$PATH" \
+    PLAYWRIGHT_HTML_HOST="0.0.0.0"
+    
+# Copy VNC startup script (not executed during build)
+COPY --chown=pwuser:pwuser start-vnc.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/start-vnc.sh

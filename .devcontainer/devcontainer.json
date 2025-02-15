@@ -1,0 +1,20 @@
+{
+    "name": "Playwright Test Container",
+    "dockerFile": "Dockerfile",
+    "remoteUser": "pwuser",
+    "forwardPorts": [5901],
+    
+    "runArgs": [
+        "--init",
+        "--cap-add=SYS_ADMIN",
+        "--shm-size=2gb",
+        "--user=pwuser"
+    ],
+    
+    "containerUser": "pwuser",
+    
+    "postStartCommand": "start-vnc.sh",
+    
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+    "workspaceFolder": "/workspace"
+}
