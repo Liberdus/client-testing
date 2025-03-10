@@ -6,3 +6,9 @@ proxy.log
 proxy.pid
 http.log
 http.pid
+x11vnc.log
+x11vnc.pid
+xvfb.log
+xvfb.pid
+fluxbox.log
+fluxbox.pid

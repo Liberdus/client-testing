@@ -13,8 +13,6 @@
     
     "containerUser": "pwuser",
     
-    "postStartCommand": "start-vnc.sh",
-    
     "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
     "workspaceFolder": "/workspace"
 }

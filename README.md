@@ -8,17 +8,23 @@
 
 3. From the command palette run **Rebuild and Reopen in Container**.
 
-4. Once the container builds, open a shell and run `./SETUP.sh` to clone and configure repos for a local Liberdus test network and web-client-v2.
+4. Once the container builds, open a shell and run `./liberdus-setup.sh` to clone and configure repos for a local Liberdus test network and web-client-v2.
 
-5. Use a VNC client to connect on localhost to the port mentioned by the vnc server in the devcontainer configuration terminal.
+5. Run `./vnc-start.sh` in the workspace root directory to start a VNC server for remote desktop connection to the container.
 
-6. Run `./START.sh` to start a local Liberdus test network, the liberdus-proxy, and an http-server to host web-client-v2.
+6. Use a VNC client to connect on localhost to the port mentioned by the vnc server using the provided password.
 
-7. Run `npx playwright codegen localhost:8080` to create tests for the web-client-v2 in a graphical fashion with the VNC client. 
+7. Run `./liberdus-start.sh` in the workspace root directory to start a local Liberdus test network, the liberdus-proxy, and a http-server to host web-client-v2.
 
-8. Run `./STOP.sh` to stop the local test net, proxy, and web-client http-server
+8. Navigate to the `playwright-tests` directory and run `npm install` to install dependencies.
 
-5. Use a VNC client to connect on localhost to the port mentioned by the vnc server in the devcontainer configuration terminal.
+9. Run `npx playwright open localhost:3000` in the `playwright-tests` directory to see the Liberdus network's progress on the Monitor Client in the VNC Client.
+
+10. Run `npx playwright codegen localhost:8080` in the `playwright-tests` directory to create tests for the web-client-v2 in a graphical fashion with the VNC client. 
+
+11. Run `./liberdus-stop.sh` in the workspace root directory to stop the local Liberdus test net, proxy, and web-client http-server in the container.
+
+12. Run `./vnc-stop.sh` in the workspace root directory to stop the VNC server in the container.
 
 ## Manually Setting up a Local Liberdus Network with web-client-v2
 

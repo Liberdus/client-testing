@@ -24,14 +24,6 @@ RUN apt-get update && \
 RUN echo "pwuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/pwuser && \
     chmod 0440 /etc/sudoers.d/pwuser
 
-# Configure VNC environment
-RUN mkdir -p /tmp/.X11-unix && \
-    chmod 1777 /tmp/.X11-unix && \
-    mkdir -p /home/pwuser/.vnc && \
-    echo "password" | vncpasswd -f > /home/pwuser/.vnc/passwd && \
-    chmod 600 /home/pwuser/.vnc/passwd && \
-    chown -R pwuser:pwuser /home/pwuser
-
 # Switch to non-root user for runtime operations
 USER pwuser
 WORKDIR /home/pwuser
@@ -57,7 +49,3 @@ ENV DISPLAY=:99 \
     NVM_DIR="/home/pwuser/.nvm" \
     PATH="/home/pwuser/.nvm/versions/node/v18.16.1/bin:$PATH" \
     PLAYWRIGHT_HTML_HOST="0.0.0.0"
-    
-# Copy VNC startup script (not executed during build)
-COPY --chown=pwuser:pwuser start-vnc.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/start-vnc.sh
