@@ -1,0 +1,8 @@
+liberdus-proxy/
+server/
+tools-cli-shardus-network/
+web-client-v2/
+proxy.log
+proxy.pid
+http.log
+http.pid

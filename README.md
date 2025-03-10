@@ -8,7 +8,15 @@
 
 3. From the command palette run **Rebuild and Reopen in Container**.
 
-4. Once the container builds, open a shell and run `./SETUP` to clone and configure repos for a local Liberdus test network and web-client-v2.
+4. Once the container builds, open a shell and run `./SETUP.sh` to clone and configure repos for a local Liberdus test network and web-client-v2.
+
+5. Use a VNC client to connect on localhost to the port mentioned by the vnc server in the devcontainer configuration terminal.
+
+6. Run `./START.sh` to start a local Liberdus test network, the liberdus-proxy, and an http-server to host web-client-v2.
+
+7. Run `npx playwright codegen localhost:8080` to create tests for the web-client-v2 in a graphical fashion with the VNC client. 
+
+8. Run `./STOP.sh` to stop the local test net, proxy, and web-client http-server
 
 5. Use a VNC client to connect on localhost to the port mentioned by the vnc server in the devcontainer configuration terminal.
 
@@ -18,11 +26,15 @@
    
    * Ubuntu 22.04 Jammy
    
+   * C/C++ build-essentials (gcc, make, ld)
+   
+   * libssl-dev
+
+   * pkg-config 1.8.0
+
    * Node.js 18.16.1
    
    * Rust 1.74
-   
-   * pkg-config 1.8.0
    
    * Python 3.x
 
@@ -101,7 +113,7 @@
 
 6. Run automated tests against the web client.
    
-   * Install Playwright brower binaries and their dependencies with:
+   * Install Playwright browser binaries and their dependencies with:
      
      ```bash
      npx playwright install --with-deps

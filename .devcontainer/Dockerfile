@@ -3,19 +3,26 @@ FROM mcr.microsoft.com/playwright:v1.50.1-jammy
 USER root
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies (now includes tightvncserver)
+# Install system dependencies (now includes tightvncserver and sudo)
 RUN apt-get update && \
     apt-get install -y \
     curl \
     pkg-config \
+    build-essential \
+    libssl-dev \
     tightvncserver \
     xvfb \
     fluxbox \
     x11vnc \
     ca-certificates \
-    bash-completion && \
+    bash-completion \
+    sudo && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+
+# Add pwuser to sudoers with passwordless access
+RUN echo "pwuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/pwuser && \
+    chmod 0440 /etc/sudoers.d/pwuser
 
 # Configure VNC environment
 RUN mkdir -p /tmp/.X11-unix && \
@@ -41,8 +48,8 @@ RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | b
     && npm install -g npm@9.5.1 \
     && corepack enable
 
-# Install Rust toolchain
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+# Install Rust toolchain (specifically version 1.74.0)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.74.0 --profile minimal
 ENV PATH="/home/pwuser/.cargo/bin:${PATH}"
 
 # Set environment variables
