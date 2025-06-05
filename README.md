@@ -1,5 +1,9 @@
 # Automated Liberdus Web Client Testing
 
+## Demo Video
+
+https://drive.google.com/file/d/19oWRpK_AJUo3G3hHYYGN_ZryAT-CSjyd/view?usp=sharing
+
 ## Usage
 
 1. Make sure you have the dev containers extension for vscode.
