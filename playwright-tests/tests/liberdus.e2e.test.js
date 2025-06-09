@@ -2,10 +2,6 @@
 
 const { test, expect } = require('@playwright/test');
 
-// ─────── Config ──────────────────────────────────────────────────
-const APP_URL      = 'https://liberdus.com/dev';
-const VIEWPORT     = { width: 430, height: 945 };
-
 // ─────── Logging utility ────────────────────────────────────────
 const log = (msg) => console.log(`[E2E TEST] ${msg}`);
 
@@ -148,9 +144,9 @@ test.describe.serial('Smoke test', () => {
   let page;
 
   test.beforeAll(async ({browser: pwBrowser}) => {
-    log(`Launching browser for E2E tests against ${APP_URL}`);
+    log(`Launching browser`);
     browser = pwBrowser;
-    context = await browser.newContext({ viewport: VIEWPORT });
+    context = await browser.newContext();
     page    = await context.newPage();
 
     // Auto-accept beforeunload dialogs
@@ -170,8 +166,8 @@ test.describe.serial('Smoke test', () => {
   });
 
   test.beforeEach(async () => {
-    log(`Navigating to ${APP_URL} for new test.`);
-    await page.goto(APP_URL, { waitUntil: 'networkidle' });
+    log(`Navigating to / for new test.`);
+    await page.goto("", { waitUntil: 'networkidle' });
     await expect(page.locator('#welcomeScreen')).toBeVisible({ timeout: 30_000 });
   });
 
@@ -310,6 +306,8 @@ test.describe.serial('Smoke test', () => {
 
     test('should sign out successfully', async () => {
       log('Test: Sign Out');
+      // wait for UI animation
+      await page.waitForTimeout(1000);
       await page.click('#toggleMenu');
       await expect(page.locator('#menuModal')).toBeVisible();
       await page.click('#handleSignOut');
@@ -333,17 +331,17 @@ test.describe('Multi User Tests', () => {
     const msg2 = 'Hello from user2!';
 
     // Create two isolated contexts
-    const ctx1 = await browser.newContext({ viewport: VIEWPORT });
-    const ctx2 = await browser.newContext({ viewport: VIEWPORT });
+    const ctx1 = await browser.newContext();
+    const ctx2 = await browser.newContext();
     const pg1  = await ctx1.newPage();
     const pg2  = await ctx2.newPage();
     try {
       // User 1 signup
-      await pg1.goto(APP_URL, { waitUntil: 'networkidle' });
+      await pg1.goto("", { waitUntil: 'networkidle' });
       await createAndSignInUser(pg1, user1);
 
       // User 2 signup
-      await pg2.goto(APP_URL, { waitUntil: 'networkidle' });
+      await pg2.goto("", { waitUntil: 'networkidle' });
       await createAndSignInUser(pg2, user2);
 
       // Wait a bit so backend knows both users
@@ -374,18 +372,18 @@ test.describe('Multi User Tests', () => {
     const toll = 3; // Set toll amount
 
     // Create two isolated contexts
-    const ctx1 = await browser.newContext({ viewport: VIEWPORT });
-    const ctx2 = await browser.newContext({ viewport: VIEWPORT });
+    const ctx1 = await browser.newContext();
+    const ctx2 = await browser.newContext();
     const pg1  = await ctx1.newPage();
     const pg2  = await ctx2.newPage();
 
     try{
       // User 1 signup
-      await pg1.goto(APP_URL, { waitUntil: 'networkidle' });
+      await pg1.goto("", { waitUntil: 'networkidle' });
       await createAndSignInUser(pg1, user1);
 
       // User 2 signup
-      await pg2.goto(APP_URL, { waitUntil: 'networkidle' });
+      await pg2.goto("", { waitUntil: 'networkidle' });
       await createAndSignInUser(pg2, user2);
 
       // Wait a bit so backend knows both users
