@@ -321,7 +321,7 @@ test.describe.serial('Smoke test', () => {
 
 test.describe('Multi User Tests', () => {
 
-  test('should allow two users to message each other (separate contexts)', async ({browserName, browser}) => {
+  test('should allow two users to message each other', async ({browserName, browser}) => {
     test.setTimeout(5 * 60 * 1000);
     log('Test: Two-user messaging scenario');
 
@@ -363,7 +363,7 @@ test.describe('Multi User Tests', () => {
     }
   });
 
-  test('should increase user1 wallet balance by toll when messaged by user2', async ({browserName, browser}) => {
+  test('should receive toll on read and on reply', async ({browserName, browser}) => {
     test.setTimeout(10 * 60 * 1000);
     log('Test: Wallet toll increases on message receipt');
     const user1 = `${browserName}tolla${Date.now().toString().slice(-6)}`;
