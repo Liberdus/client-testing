@@ -1,28 +1,27 @@
+const { expect } = require("@playwright/test");
+
 // Helper to create and sign in a new user
 async function createAndSignInUser(page, username) {
     await page.goto('', { waitUntil: 'networkidle' });
-    // Try both welcomeScreen and createAccountButton for compatibility
-    try {
-        await page.waitForSelector('#welcomeScreen', { state: 'visible', timeout: 30_000 });
-    } catch {
-        await page.waitForSelector('#createAccountButton', { state: 'visible', timeout: 30_000 });
-    }
+    await expect(page.locator('#welcomeScreen')).toBeVisible();
+    await expect(page.locator('#createAccountButton')).toBeVisible();
     await page.click('#createAccountButton');
-    await page.waitForSelector('#createAccountModal', { state: 'visible' });
-    await page.fill('#newUsername', username);
-    await page.waitForTimeout(3_000);
-    const usernameStatus = await page.locator('#newUsernameAvailable').textContent().catch(() => '');
-    if (usernameStatus !== 'available') {
-        throw new Error(`Username "${username}" not available: ${usernameStatus}`);
-    }
+    await expect(page.locator('#createAccountModal')).toBeVisible();
+    await page.locator('#newUsername').pressSequentially(username);
+    await expect(page.locator('#newUsernameAvailable')).toHaveText('available');
     const createBtn = page.locator('#createAccountForm button[type="submit"]');
-    await page.waitForSelector('#createAccountForm button[type="submit"]:enabled');
+    await expect(createBtn).toBeEnabled();
     await createBtn.click();
-    await page.waitForSelector('#chatsScreen', { state: 'visible', timeout: 30_000 });
+    // expect loading toast to appear
+    await expect(page.locator('.toast.loading.show')).toBeVisible();
+    // wait for the loading toast to disappear
+    await page.waitForSelector('.toast.loading.show', { state: 'detached' });
+    await expect(page.locator('#chatsScreen')).toBeVisible();
     const appName = await page.locator('.app-name').textContent();
-    if (appName.trim() !== username) throw new Error('App name in header does not match username');
+    await expect(appName.trim()).toBe(username);
 }
 
+// creates a unique username based on the browser name and current timestamp
 function generateUsername(browserName) {
     const browserInitial = browserName[0];
     const timestamp = Date.now().toString().slice(-8);
