@@ -57,6 +57,6 @@ async function checkReceivedMessage(page, senderUsername, message) {
 }
 
 module.exports = {
-    sendMessageTo,
-    checkReceivedMessage
+  sendMessageTo,
+  checkReceivedMessage
 };

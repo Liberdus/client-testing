@@ -107,7 +107,7 @@ test.describe('Friend Status E2E', () => {
         const userABalanceBefore = await getLiberdusBalance(a.page);
 
         // User A sets status to Acquaintance
-        await setFriendStatus(a.page, b.username, FriendStatus.ACQUAINTANCE);   
+        await setFriendStatus(a.page, b.username, FriendStatus.ACQUAINTANCE);
 
         // User B sends message
         await b.page.click('#switchToChats');
@@ -122,7 +122,7 @@ test.describe('Friend Status E2E', () => {
         await a.page.click('#switchToChats');
         await a.page.locator('#chatList .chat-name', { hasText: b.username }).click();
         await expect(a.page.locator('#chatModal')).toBeVisible();
-        await expect(a.page.locator('#chatModal .messages-list .message.received')).toHaveCount(2, {timeout: 15000});
+        await expect(a.page.locator('#chatModal .messages-list .message.received')).toHaveCount(2, { timeout: 15000 });
         // close chat modal to send read receipt
         await a.page.click('#closeChatModal');
 
@@ -174,7 +174,7 @@ test.describe('Friend Status E2E', () => {
         await b.page.click('#switchToChats');
         await b.page.locator('#chatList .chat-name', { hasText: a.username }).click();
         await expect(b.page.locator('#chatModal')).toBeVisible();
-        await expect(b.page.locator('#chatModal .messages-list .message.received')).toHaveCount(1, {timeout: 15000});
+        await expect(b.page.locator('#chatModal .messages-list .message.received')).toHaveCount(1, { timeout: 15000 });
 
         // User B opens contact info for A and sees full profile
         await b.page.click('.chat-user-info');
