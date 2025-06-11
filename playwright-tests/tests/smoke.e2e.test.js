@@ -1,7 +1,7 @@
 // liberdus.e2e.spec.js
 
 const { test, expect } = require('../fixtures/newUserFixture');
-const { createAndSignInUser } = require('../helpers/userHelper');
+const { createAndSignInUser } = require('../helpers/userHelpers');
 
 const log = (msg) => console.log(`[E2E TEST] ${msg}`);
 let RECIPIENT;

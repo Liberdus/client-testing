@@ -1,7 +1,7 @@
 // liberdus.e2e.spec.js
 
 const { test, expect } = require('@playwright/test');
-const { createAndSignInUser } = require('../helpers/userHelper');
+const { createAndSignInUser } = require('../helpers/userHelpers');
 
 // ─────── Logging utility ────────────────────────────────────────
 const log = (msg) => console.log(`[E2E TEST] ${msg}`);
@@ -231,4 +231,3 @@ test.describe('Multi User Tests', () => {
     }
   });
 });
-

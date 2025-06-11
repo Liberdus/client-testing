@@ -1,15 +1,18 @@
 const { test: base, expect } = require('@playwright/test');
-const { createAndSignInUser } = require('../helpers/userHelper');
+const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 
 exports.test = base.extend({
   username: async ({ browserName }, use) => {
-    const browserInitial = browserName[0];
-    const timestamp = Date.now().toString().slice(-8);
-    const rand = Math.floor(Math.random() * 1e10).toString().padStart(10, '0');
-    const username = `${browserInitial}${timestamp}${rand}`.slice(0, 19);
+    const username = generateUsername(browserName);
     await use(username);
   },
-  page: async ({ browser, username }, use) => {
+  page: async ({ browser, username }, use, testInfo) => {
+    // Attach the username to the test report for easy access
+    await testInfo.attach('username.txt', {
+        body: username,
+        contentType: 'text/plain',
+    });
+
     const context = await browser.newContext();
     const page = await context.newPage();
     page.on('dialog', async dialog => {
