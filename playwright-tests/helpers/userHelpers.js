@@ -23,6 +23,14 @@ async function createAndSignInUser(page, username) {
     if (appName.trim() !== username) throw new Error('App name in header does not match username');
 }
 
+function generateUsername(browserName) {
+    const browserInitial = browserName[0];
+    const timestamp = Date.now().toString().slice(-8);
+    const rand = Math.floor(Math.random() * 1e10).toString().padStart(10, '0');
+    return `${browserInitial}${timestamp}${rand}`.slice(0, 19);
+}
+
 module.exports = {
     createAndSignInUser,
+    generateUsername
 };
