@@ -19,6 +19,7 @@ async function createAndSignInUser(page, username) {
     await expect(page.locator('#chatsScreen')).toBeVisible();
     const appName = await page.locator('.app-name').textContent();
     await expect(appName.trim()).toBe(username);
+    await expect(page.locator('#wsStatusIndicator.ws-green')).toBeVisible({ timeout: 10_000 });
 }
 
 // creates a unique username based on the browser name and current timestamp
