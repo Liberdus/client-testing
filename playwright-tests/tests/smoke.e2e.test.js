@@ -77,9 +77,11 @@ test.describe('Tests requiring recipient user', () => {
     await page.click('#chatSendMoneyButton');
     await expect(page.locator('#sendAssetFormModal')).toBeVisible();
 
+    const usernameStatus = page.locator('#sendToAddressError');
+    await expect(usernameStatus).toHaveText('found', { timeout: 10_000 });
+
     // Fill and Submit Send Form
-    await page.type('#sendAmount', amount.toString());
-    await page.waitForTimeout(1_000);
+    await page.fill('#sendAmount', amount.toString());
     const sendButton = page.locator('#sendAssetFormModal button[type="submit"]');
     await expect(sendButton).toBeEnabled();
     await sendButton.click();
