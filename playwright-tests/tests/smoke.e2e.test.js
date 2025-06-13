@@ -28,7 +28,7 @@ test.describe('Tests requiring recipient user', () => {
     await page.click('#newChatButton');
     await expect(page.locator('#newChatModal')).toBeVisible();
 
-    await page.type('#chatRecipient', recipient);
+    await page.fill('#chatRecipient', recipient);
     await page.waitForTimeout(3_000);
     const recipientStatus = await page.locator('#chatRecipientError').textContent().catch(() => '');
     expect(recipientStatus).toBe('found');
@@ -39,7 +39,7 @@ test.describe('Tests requiring recipient user', () => {
 
     await expect(page.locator('#chatModal')).toBeVisible();
     const testMessage = 'Hello from E2E test!'
-    await page.type('#chatModal .message-input', testMessage);
+    await page.fill('#chatModal .message-input', testMessage);
     await page.click('#handleSendMessage');
     await page.waitForTimeout(3_000);
 
@@ -63,7 +63,7 @@ test.describe('Tests requiring recipient user', () => {
     // Open New Chat 
     await page.click('#newChatButton');
     await expect(page.locator('#newChatModal')).toBeVisible();
-    await page.type('#chatRecipient', recipient);
+    await page.fill('#chatRecipient', recipient);
     await page.waitForTimeout(3_000);
     const recipientStatus = await page.locator('#chatRecipientError').textContent().catch(() => '');
     expect(recipientStatus).toBe('found');
@@ -138,11 +138,11 @@ test('Should set toll', async ({ page }) => {
 });
 
 test('Should update profile', async ({ page, username }) => {
-  const name = username + "Name";
-  const email = username + "@example.com";
-  const phone = '5555555555';
-  const linkedin = username + "LinkedIn";
-  const x = username + "X";
+  const name = "Testername";
+  const email = "tester@example.com";
+  const phone = "5555555";
+  const linkedin = "testerlinkedin";
+  const x = "testerx";
   await page.locator('#toggleMenu').click();
   await page.getByText('Profile', { exact: true }).click();
   await page.locator('#name').fill(name);
