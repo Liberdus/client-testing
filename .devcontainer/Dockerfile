@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright:v1.50.1-jammy
+FROM mcr.microsoft.com/playwright:v1.52.0-jammy
 
 USER root
 ENV DEBIAN_FRONTEND=noninteractive
@@ -34,8 +34,8 @@ RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | b
     && echo '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"' >> ~/.bashrc \
     && export NVM_DIR="$HOME/.nvm" \
     && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" \
-    && nvm install 18.16.1 \
-    && nvm alias default 18.16.1 \
+    && nvm install 18.19.1 \
+    && nvm alias default 18.19.1 \
     && nvm use default \
     && npm install -g npm@9.5.1 \
     && corepack enable
