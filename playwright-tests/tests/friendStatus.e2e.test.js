@@ -142,11 +142,11 @@ test.describe('Friend Status E2E', () => {
 
     test('Friend: A fills profile, sets status Friend, B sees full profile', async ({ users }) => {
         const { a, b } = users;
-        const name = a.username + 'Name';
-        const email = a.username + '@example.com';
-        const phone = '5555555555';
-        const linkedin = a.username + 'LinkedIn';
-        const x = a.username + 'X';
+        const name = "Testername";
+        const email = "tester@example.com";
+        const phone = "5555555";
+        const linkedin = "testerlinkedin";
+        const x = "testerx";
 
         // User A fills out profile
         await a.page.click('#toggleMenu');
