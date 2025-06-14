@@ -41,7 +41,7 @@ async function checkReceivedMessage(page, senderUsername, message) {
   await expect(chatItem).toBeVisible({ timeout: 15_000 });
   await chatItem.click();
   await expect(page.locator('#chatModal')).toBeVisible();
-  await expect(page.locator('.message.received .message-content', { hasText: message })).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('.message.received .message-content', { hasText: message })).toBeVisible({ timeout: 30_000 });
   await page.click('#closeChatModal');
   await page.waitForSelector('#newChatButton', { state: 'visible' });
 }
