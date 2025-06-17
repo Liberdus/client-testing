@@ -54,7 +54,7 @@ test('QR Code: Receive from A, scan and send from B', async ({ users }, testInfo
 
     // Get base64 image from the QR
     const dataUrl = await a.page.$eval('#qrcode img', img => img.src);
-    const base64 = dataUrl.replace(/^data:image\/gif;base64,/, '');
+    const base64 = dataUrl.replace(/^data:image\/[a-zA-Z]+;base64,/, '');
     const buffer = Buffer.from(base64, 'base64');
 
     // Save image to disk
@@ -103,10 +103,6 @@ test('QR Code: Receive from A, scan and send from B', async ({ users }, testInfo
         expect(transactionAddress).toContain(`To: ${a.username}`);
         await b.page.click('#closeHistoryModal');
 
-        const [userABalanceAfter, userBBalanceAfter] = await Promise.all([
-            getLiberdusBalance(a.page),
-            getLiberdusBalance(b.page)
-        ]);
         // expect balances to have changed by the amount sent using bignumber comparison at fixed 6 precision
         const expectedABalance = parseFloat(userABalanceBefore) + parseFloat(qrAmount);
         const expectedBBalance = parseFloat(userBBalanceBefore) - parseFloat(qrAmount) - networkParams.networkFee;
