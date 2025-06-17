@@ -1,6 +1,6 @@
 const { test: base, expect } = require('@playwright/test');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
-const { getLiberdusBalance, expectLiberdusBalanceToEqual } = require('../helpers/walletHelpers');
+const { getLiberdusBalance } = require('../helpers/walletHelpers');
 const { sendMessageTo } = require('../helpers/messageHelpers');
 const networkParams = require('../helpers/networkParams');
 
@@ -75,6 +75,7 @@ const test = base.extend({
             // User B starts chat and messages user A
             await sendMessageTo(pageB, userA, 'init chat from B');
             balanceB -= NETWORK_FEE; // B pays network fee for sending message
+            balanceB -= DEFAULT_TOLL; // B pays default toll for sending message
             // wait for User A to receive the message
             await pageA.click('#switchToChats');
             await expect(
@@ -156,6 +157,7 @@ test.describe('Friend Status E2E', () => {
         // User A sets status to Acquaintance
         await setFriendStatus(a.page, b.username, FriendStatus.ACQUAINTANCE);
         expectedBalanceA -= NETWORK_FEE; // A pays network fee for setting friend status
+        expectedBalanceB += DEFAULT_TOLL; // toll refunded to B
 
         // User B sends message
         await b.page.click('#switchToChats');
