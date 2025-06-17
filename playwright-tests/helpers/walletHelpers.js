@@ -1,5 +1,9 @@
+const { expect } = require('@playwright/test');
+
 // Helper to get Liberdus asset balance from wallet
 async function getLiberdusBalance(page) {
+    await page.click('#switchToWallet');
+    await expect(page.locator('#walletScreen.active')).toBeVisible();
     await page.click('#refreshBalance');
     // Find the asset row containing 'Liberdus'
     const assetRow = page.locator('#assetsList > div').filter({ hasText: 'Liberdus' }).first();
@@ -12,6 +16,15 @@ async function getLiberdusBalance(page) {
     return balanceText;
 }
 
-export {
-    getLiberdusBalance
+// Wait for Liberdus balance to equal expected value (as string or number), with timeout (ms)
+async function expectLiberdusBalanceToEqual(page, expected, timeout = 30000) {
+    await expect(async () => {
+        const balance = await getLiberdusBalance(page);
+        expect(balance).toEqual(expected.toString());
+    }).toPass({ timeout });
+}
+
+module.exports = {
+    getLiberdusBalance,
+    expectLiberdusBalanceToEqual
 };
