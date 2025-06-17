@@ -2,6 +2,9 @@
 
 const { test, expect } = require('@playwright/test');
 const { createAndSignInUser } = require('../helpers/userHelpers');
+const { getLiberdusBalance } = require('../helpers/walletHelpers');
+const { sendMessageTo, checkReceivedMessage } = require('../helpers/messageHelpers');
+const { generateUsername } = require('../helpers/userHelpers');
 
 // ─────── Logging utility ────────────────────────────────────────
 const log = (msg) => console.log(`[E2E TEST] ${msg}`);
@@ -10,97 +13,13 @@ const log = (msg) => console.log(`[E2E TEST] ${msg}`);
 const NETWORK_FEE = 0.1; // Default network fee for transactions
 const NETWORK_TOLL_TAX = 0.01; // 1% network fee on tolls
 
-// ─────── Helper utilities ─────────────────────
-
-async function sendMessageTo(page, recipientUsername, message) {
-  // Ensure we are on Chats screen
-  await page.click('#switchToChats');
-  await page.waitForSelector('#newChatButton', { state: 'visible', timeout: 10_000 });
-  await page.click('#newChatButton');
-  await page.waitForSelector('#newChatModal', { state: 'visible' });
-  await page.type('#chatRecipient', recipientUsername);
-  await page.waitForTimeout(3_000);
-
-  const recipientStatus = await page.locator('#chatRecipientError').textContent().catch(() => '');
-  if (recipientStatus !== 'found') {
-    throw new Error(`Recipient "${recipientUsername}" not found or error: ${recipientStatus}`);
-  }
-
-  const continueBtn = page.locator('#newChatForm button[type="submit"]');
-  await expect(continueBtn).toBeEnabled();
-  await continueBtn.click();
-
-  await page.waitForSelector('#chatModal', { state: 'visible', timeout: 15_000 });
-  await page.type('#chatModal .message-input', message);
-  await page.click('#handleSendMessage');
-  await page.waitForTimeout(3_000);
-
-  // If an error toast appears, fail fast
-  if (await page.locator('.toast.error.show').count()) {
-    const errText = await page.locator('.toast.error.show').textContent();
-    throw new Error(`Error toast displayed after sending message: ${errText}`);
-  }
-
-  await page.waitForFunction(
-    text => {
-      const msgs = document.querySelectorAll('#chatModal .messages-list .message.sent .message-content');
-      return Array.from(msgs).some(m => m.textContent.includes(text));
-    },
-    message,
-    { timeout: 15_000 }
-  );
-  await page.click('#closeChatModal');
-  await page.waitForSelector('#newChatButton', { state: 'visible' });
-}
-
-async function checkReceivedMessage(page, senderUsername, message) {
-  // switch to Chats screen
-  await page.click('#switchToChats');
-  await expect(page.locator('#chatsScreen.active')).toBeVisible();
-  // Updated selector to match chat item by username text
-  const chatItem = page.locator(
-    '#chatList > li > div.chat-content > div.chat-header > div.chat-name',
-    { hasText: senderUsername }
-  );
-  await expect(chatItem).toBeVisible({ timeout: 15_000 });
-  await chatItem.click();
-  await page.waitForSelector('#chatModal', { state: 'visible', timeout: 15_000 });
-  await page.waitForFunction(
-    text => {
-      const msgs = document.querySelectorAll('#chatModal .messages-list .message.received .message-content');
-      return Array.from(msgs).some(m => m.textContent.includes(text));
-    },
-    message,
-    { timeout: 15_000 }
-  );
-  await page.click('#closeChatModal');
-  await page.waitForSelector('#newChatButton', { state: 'visible' });
-}
-
-// Helper to get Liberdus asset balance from wallet
-async function getLiberdusBalance(page) {
-  const assetRows = await page.$$('#assetsList > div');
-  for (const row of assetRows) {
-    const name = await row.$eval('.asset-info > .asset-name', el => el.textContent.trim()).catch(() => '');
-    if (name === 'Liberdus') {
-      const balanceText = await page.locator('.asset-balance').evaluate(el => {
-        // Get only the text content before the <span>
-        return el.childNodes[0].textContent.trim();
-      }); 
-      return balanceText;
-    }
-  }
-  throw new Error('Liberdus asset not found in wallet');
-}
-
 test.describe('Multi User Tests', () => {
 
   test('should allow two users to message each other', async ({browserName, browser}) => {
-    test.setTimeout(5 * 60 * 1000);
     log('Test: Two-user messaging scenario');
 
-    const user1 = `${browserName}e2e1${Date.now().toString().slice(-6)}`;
-    const user2 = `${browserName}e2e2${Date.now().toString().slice(-6)}`;
+    const user1 = generateUsername(browserName);
+    const user2 = generateUsername(browserName);
     const msg1 = 'Hello from user1!';
     const msg2 = 'Hello from user2!';
 
@@ -110,25 +29,18 @@ test.describe('Multi User Tests', () => {
     const pg1  = await ctx1.newPage();
     const pg2  = await ctx2.newPage();
     try {
-      // User 1 signup
-      await pg1.goto("", { waitUntil: 'networkidle' });
-      await createAndSignInUser(pg1, user1);
-
-      // User 2 signup
-      await pg2.goto("", { waitUntil: 'networkidle' });
-      await createAndSignInUser(pg2, user2);
-
-      // Wait a bit so backend knows both users
-      await pg1.waitForTimeout(5_000);
+      // Create users
+      await Promise.all([
+          createAndSignInUser(pg1, user1),
+          createAndSignInUser(pg2, user2)
+      ]);
 
       // User2 ➜ User1
       await sendMessageTo(pg2, user1, msg2);
-      await pg1.waitForTimeout(5_000);
       await checkReceivedMessage(pg1, user2, msg2);
 
       // User1 ➜ User2
       await sendMessageTo(pg1, user2, msg1);
-      await pg2.waitForTimeout(5_000);
       await checkReceivedMessage(pg2, user1, msg1);
     } finally {
       await ctx1.close();
@@ -138,10 +50,9 @@ test.describe('Multi User Tests', () => {
   });
 
   test('should receive toll on read and on reply', async ({browserName, browser}) => {
-    test.setTimeout(10 * 60 * 1000);
     log('Test: Wallet toll increases on message receipt');
-    const user1 = `${browserName}tolla${Date.now().toString().slice(-6)}`;
-    const user2 = `${browserName}tollb${Date.now().toString().slice(-6)}`;
+    const user1 = generateUsername(browserName);
+    const user2 = generateUsername(browserName);
     const msg2 = 'Hello with toll!';
     const toll = 3; // Set toll amount
 
@@ -217,7 +128,7 @@ test.describe('Multi User Tests', () => {
 
       // User1 check wallet balance again for the second half of the toll
       await pg1.click('#switchToWallet');
-      await pg1.waitForSelector('#walletScreen.active', { timeout: 10_000 });
+      await expect(pg1.locator('#walletScreen.active')).toBeVisible();
       await pg1.waitForTimeout(20_000);
       await pg1.click('#refreshBalance');
       const finalBalance = await getLiberdusBalance(pg1);

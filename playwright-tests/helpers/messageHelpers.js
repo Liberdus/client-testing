@@ -37,21 +37,11 @@ async function checkReceivedMessage(page, senderUsername, message) {
   await page.click('#switchToChats');
   await expect(page.locator('#chatsScreen.active')).toBeVisible();
   // Updated selector to match chat item by username text
-  const chatItem = page.locator(
-    '#chatList > li > div.chat-content > div.chat-header > div.chat-name',
-    { hasText: senderUsername }
-  );
+  const chatItem = page.locator('.chat-name', { hasText: senderUsername });
   await expect(chatItem).toBeVisible({ timeout: 15_000 });
   await chatItem.click();
-  await page.waitForSelector('#chatModal', { state: 'visible', timeout: 15_000 });
-  await page.waitForFunction(
-    text => {
-      const msgs = document.querySelectorAll('#chatModal .messages-list .message.received .message-content');
-      return Array.from(msgs).some(m => m.textContent.includes(text));
-    },
-    message,
-    { timeout: 15_000 }
-  );
+  await expect(page.locator('#chatModal')).toBeVisible();
+  await expect(page.locator('.message.received .message-content', { hasText: message })).toBeVisible({ timeout: 30_000 });
   await page.click('#closeChatModal');
   await page.waitForSelector('#newChatButton', { state: 'visible' });
 }
