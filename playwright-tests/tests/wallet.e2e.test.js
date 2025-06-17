@@ -110,6 +110,8 @@ test('QR Code: Receive from A, scan and send from B', async ({ users }, testInfo
         await expectLiberdusBalanceToEqual(b.page, expectedBBalance.toFixed(6));
     } finally {
         // delete the QR file after test
-        fs.unlinkSync(qrPath);
+        if (fs.existsSync(qrPath)) {
+            fs.unlinkSync(qrPath);
+        }
     }
 });
