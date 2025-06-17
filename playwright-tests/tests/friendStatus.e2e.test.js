@@ -249,7 +249,7 @@ test.describe('Friend Status E2E', () => {
         await expect(b.page.locator("#contactInfoX")).toHaveText(x);
     });
 
-    test('Aquaintance -> Other: Message fails if status changed to require toll', async ({ users }) => {
+    test('Acquaintance -> Other: Message fails if status changed to require toll', async ({ users }) => {
         const { a, b } = users;
 
         // User A opens chat with B and types a message but does not send
