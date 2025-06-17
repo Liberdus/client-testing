@@ -268,7 +268,7 @@ test.describe('Friend Status E2E', () => {
         await expect(a.page.locator('.toast.error.show')).toBeVisible({timeout: 15_000 });
     });
 
-    test('Aquaintance -> Blocked: Message fails if blocked', async ({ users }) => {
+    test('Acquaintance -> Blocked: Message fails if blocked', async ({ users }) => {
         const { a, b } = users;
 
         // User A opens chat with B and types a message but does not send
