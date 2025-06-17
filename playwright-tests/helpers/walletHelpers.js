@@ -24,7 +24,7 @@ async function expectLiberdusBalanceToEqual(page, expected, timeout = 30000) {
     }).toPass({ timeout });
 }
 
-export {
+module.exports = {
     getLiberdusBalance,
     expectLiberdusBalanceToEqual
 };
