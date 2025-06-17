@@ -2,11 +2,12 @@ const { test: base, expect } = require('@playwright/test');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 const { getLiberdusBalance } = require('../helpers/walletHelpers');
 const { sendMessageTo } = require('../helpers/messageHelpers');
+const networkParams = require('../helpers/networkParams');
 
 // Constants
-const NETWORK_FEE = 0.1; // Default network fee for transactions
+const NETWORK_FEE = networkParams.networkFee;
 const TOLL = 10;
-const DEFAULT_TOLL = 1;
+const DEFAULT_TOLL = networkParams.defaultToll;
 
 // enum for friend status
 const FriendStatus = {
@@ -29,6 +30,26 @@ async function setFriendStatus(page, username, status) {
     await page.click('#closeContactInfoModal');
 }
 
+/**
+ * Opens the friend modal for the given username and returns the current friend status value.
+ * Closes the modals after retrieving the value.
+ * @param {import('@playwright/test').Page} page
+ * @param {string} username
+ * @returns {Promise<number>} The current friend status value
+ */
+async function getCurrentFriendStatus(page, username) {
+    await page.click('#switchToContacts');
+    await expect(page.locator('#contactsScreen.active')).toBeVisible();
+    await page.locator('#contactsList .chat-name', { hasText: username }).click();
+    await expect(page.locator('#contactInfoModal.active')).toBeVisible();
+    await page.click('#addFriendButtonContactInfo');
+    await expect(page.locator('#friendModal.active')).toBeVisible();
+    const checked = await page.locator('#friendForm input[type=radio]:checked').getAttribute('value');
+    await page.click('#closeFriendModal');
+    await page.click('#closeContactInfoModal');
+    return Number(checked);
+}
+
 const test = base.extend({
     users: async ({ browser, browserName }, use, testInfo) => {
         const ctxA = await browser.newContext();
@@ -37,6 +58,8 @@ const test = base.extend({
         const pageB = await ctxB.newPage();
         const userA = generateUsername(browserName);
         const userB = generateUsername(browserName);
+        let balanceA = networkParams.defaultBalance;
+        let balanceB = networkParams.defaultBalance;
 
         // Attach both usernames to the report
         await testInfo.attach('test-users.json', {
@@ -51,6 +74,8 @@ const test = base.extend({
             ]);
             // User B starts chat and messages user A
             await sendMessageTo(pageB, userA, 'init chat from B');
+            balanceB -= NETWORK_FEE; // B pays network fee for sending message
+            balanceB -= DEFAULT_TOLL; // B pays default toll for sending message
             // wait for User A to receive the message
             await pageA.click('#switchToChats');
             await expect(
@@ -65,9 +90,10 @@ const test = base.extend({
             await pageA.click('#saveNewTollButton');
             await pageA.click('#closeTollModal');
             await pageA.click('#closeMenu');
+            balanceA -= NETWORK_FEE; // A pays network fee for setting toll
             await use({
-                a: { username: userA, page: pageA, ctx: ctxA },
-                b: { username: userB, page: pageB, ctx: ctxB },
+                a: { username: userA, page: pageA, ctx: ctxA, balance: balanceA },
+                b: { username: userB, page: pageB, ctx: ctxB, balance: balanceB },
             });
         } finally {
             // Ensure we close the pages and contexts even if test fails
@@ -78,6 +104,18 @@ const test = base.extend({
 });
 
 test.describe('Friend Status E2E', () => {
+    
+    test('Should have default statuses Other for User A and Acquaintance for User B', async ({ users }) => {
+        const { a, b } = users;
+
+        const [checkedA, checkedB] = await Promise.all([
+            getCurrentFriendStatus(a.page, b.username),
+            getCurrentFriendStatus(b.page, a.username)
+        ]);
+        expect(checkedA).toBe(FriendStatus.OTHER);
+        expect(checkedB).toBe(FriendStatus.ACQUAINTANCE);
+    });
+
     test('Block: User A blocks User B, B cannot message', async ({ users }) => {
         const { a, b } = users;
 
@@ -97,17 +135,29 @@ test.describe('Friend Status E2E', () => {
         expect(errorToast).toContain('You are blocked by this user');
     });
 
+    test('Block: User A blocks User B, B cannot send money', async ({ users }) => {
+        const { a, b } = users;
+        // User A blocks User B
+        await setFriendStatus(a.page, b.username, FriendStatus.BLOCKED);
+        // User B tries to send money to User A
+        await b.page.click('#switchToWallet');
+        await b.page.click('#openSendAssetFormModal');
+        await expect(b.page.locator('#sendAssetFormModal')).toBeVisible();
+        await b.page.fill('#sendToAddress', a.username);
+        await b.page.fill('#sendAmount', '10');
+        expect(b.page.locator('#sendAssetFormModal button[type="submit"]')).toBeDisabled();
+    });
+
+
     test('Acquaintance: B initial toll refunded, no toll for B msg to A', async ({ users }) => {
         const { a, b } = users;
-
-        // get balance both users
-        await b.page.click('#switchToWallet');
-        const userBBalanceBefore = await getLiberdusBalance(b.page);
-        await a.page.click('#switchToWallet');
-        const userABalanceBefore = await getLiberdusBalance(a.page);
+        let expectedBalanceA = a.balance;
+        let expectedBalanceB = b.balance;
 
         // User A sets status to Acquaintance
         await setFriendStatus(a.page, b.username, FriendStatus.ACQUAINTANCE);
+        expectedBalanceA -= NETWORK_FEE; // A pays network fee for setting friend status
+        expectedBalanceB += DEFAULT_TOLL; // toll refunded to B
 
         // User B sends message
         await b.page.click('#switchToChats');
@@ -117,6 +167,7 @@ test.describe('Friend Status E2E', () => {
         await b.page.type('#chatModal .message-input', msgFromB);
         await b.page.click('#handleSendMessage');
         await b.page.click('#closeChatModal');
+        expectedBalanceB -= NETWORK_FEE; // B pays network fee for sending message
 
         // User A receives message
         await a.page.click('#switchToChats');
@@ -126,18 +177,15 @@ test.describe('Friend Status E2E', () => {
         // close chat modal to send read receipt
         await a.page.click('#closeChatModal');
 
-
-        // User A checks balance after
-        await a.page.click('#switchToWallet');
-        const userABalanceAfter = await getLiberdusBalance(a.page);
-        await b.page.click('#switchToWallet');
-        const userBBalanceAfter = await getLiberdusBalance(b.page);
-        // User A should have paid only the network fee for reading the message and setting the toll
-        const expectedBalanceA = (userABalanceBefore - NETWORK_FEE * 2).toFixed(6);
-        expect(userABalanceAfter).toEqual(expectedBalanceA);
+        await expect(async () => {
+            const actualBalanceA = await getLiberdusBalance(a.page);
+            expect(actualBalanceA).toEqual(expectedBalanceA.toFixed(6));
+        }).toPass({ timeout: 30000 });
         // User B should have paid only the network fee for sending the message and gets the original toll back
-        const expectedBalanceB = (userBBalanceBefore - NETWORK_FEE + DEFAULT_TOLL).toFixed(6);
-        expect(userBBalanceAfter).toEqual(expectedBalanceB);
+        await expect(async () => {
+            const actualBalanceB = await getLiberdusBalance(b.page);
+            expect(actualBalanceB).toEqual(expectedBalanceB.toFixed(6));
+        }).toPass({ timeout: 30000 });
     });
 
     test('Friend: A fills profile, sets status Friend, B sees full profile', async ({ users }) => {
@@ -147,6 +195,21 @@ test.describe('Friend Status E2E', () => {
         const phone = "5555555";
         const linkedin = "testerlinkedin";
         const x = "testerx";
+
+        // User B checks A's profile before any updates
+        await b.page.click('#switchToContacts');
+        await expect(b.page.locator('#contactsScreen.active')).toBeVisible();
+        await b.page.locator('#contactsList .chat-name', { hasText: a.username }).click();
+        await expect(b.page.locator('#contactInfoModal.active')).toBeVisible();
+        // Check that profile fields are not provided
+        await expect(b.page.locator("#contactInfoUsername")).toHaveText(a.username);
+        await expect(b.page.locator("#contactInfoName")).toHaveText('Not provided');
+        await expect(b.page.locator("#contactInfoEmail")).toHaveText('Not provided');
+        await expect(b.page.locator("#contactInfoPhone")).toHaveText('Not provided');
+        await expect(b.page.locator("#contactInfoLinkedin")).toHaveText('Not provided');
+        await expect(b.page.locator("#contactInfoX")).toHaveText('Not provided');
+        await b.page.click('#closeContactInfoModal');
+
 
         // User A fills out profile
         await a.page.click('#toggleMenu');
@@ -184,5 +247,45 @@ test.describe('Friend Status E2E', () => {
         await expect(b.page.locator("#contactInfoPhone")).toHaveText(phone);
         await expect(b.page.locator("#contactInfoLinkedin")).toHaveText(linkedin);
         await expect(b.page.locator("#contactInfoX")).toHaveText(x);
+    });
+
+    test('Acquaintance -> Other: Message fails if status changed to require toll', async ({ users }) => {
+        const { a, b } = users;
+
+        // User A opens chat with B and types a message but does not send
+        await a.page.click('#switchToChats');
+        await a.page.locator('#chatList .chat-name', { hasText: b.username }).click();
+        await expect(a.page.locator('#chatModal')).toBeVisible();
+        await a.page.fill('#chatModal .message-input', 'pending message');
+
+        // User B sets User A's status to OTHER
+        await setFriendStatus(b.page, a.username, FriendStatus.OTHER);
+
+        // User A tries to send the message
+        await a.page.click('#handleSendMessage');
+
+        // Expect an error toast to appear for User A
+        await expect(a.page.locator('.toast.error.show')).toBeVisible({timeout: 15_000 });
+    });
+
+    test('Acquaintance -> Blocked: Message fails if blocked', async ({ users }) => {
+        const { a, b } = users;
+
+        // User A opens chat with B and types a message but does not send
+        await a.page.click('#switchToChats');
+        await a.page.locator('#chatList .chat-name', { hasText: b.username }).click();
+        await expect(a.page.locator('#chatModal')).toBeVisible();
+        await a.page.fill('#chatModal .message-input', 'pending message');
+
+        // User B sets User A's status to BLOCKED
+        await setFriendStatus(b.page, a.username, FriendStatus.BLOCKED);
+
+        // User A tries to send the message
+        await a.page.click('#handleSendMessage');
+
+        // Expect an error toast to appear for User A
+        await expect(a.page.locator('.toast.error.show')).toBeVisible({timeout: 15_000 });
+        // Check that the message is marked as failed
+        await expect(a.page.locator('.message.sent', { hasText: 'pending message' })).toHaveAttribute('data-status', 'failed');
     });
 });
