@@ -3,6 +3,7 @@ const { createAndSignInUser, generateUsername } = require('../helpers/userHelper
 const { getLiberdusBalance } = require('../helpers/walletHelpers');
 const { sendMessageTo } = require('../helpers/messageHelpers');
 const networkParams = require('../helpers/networkParams');
+const { time } = require('console');
 
 // Constants
 const NETWORK_FEE = networkParams.networkFee;
@@ -28,6 +29,17 @@ async function setFriendStatus(page, username, status) {
     await page.click('#friendForm button[type="submit"]');
     await page.waitForTimeout(5_000); // wait for block to propagate
     await page.click('#closeContactInfoModal');
+}
+
+async function setToll(page, amount) {
+    await page.click('#toggleMenu');
+    await expect(page.locator('#menuModal')).toBeVisible();
+    await page.click('#openToll');
+    await expect(page.locator('#tollModal')).toBeVisible();
+    await page.fill('#newTollAmountInput', amount.toString());
+    await page.click('#saveNewTollButton');
+    await page.click('#closeTollModal');
+    await page.click('#closeMenu');
 }
 
 /**
@@ -82,14 +94,7 @@ const test = base.extend({
                 pageA.locator('#chatList .chat-name', { hasText: userB })
             ).toBeVisible({ timeout: 15_000 });
             // User A sets a toll
-            await pageA.click('#toggleMenu');
-            await expect(pageA.locator('#menuModal')).toBeVisible({ timeout: 5_000 });
-            await pageA.click('#openToll');
-            await expect(pageA.locator('#tollModal')).toBeVisible({ timeout: 5_000 });
-            await pageA.fill('#newTollAmountInput', TOLL.toString());
-            await pageA.click('#saveNewTollButton');
-            await pageA.click('#closeTollModal');
-            await pageA.click('#closeMenu');
+            await setToll(pageA, TOLL);
             balanceA -= NETWORK_FEE; // A pays network fee for setting toll
             await use({
                 a: { username: userA, page: pageA, ctx: ctxA, balance: balanceA },
@@ -104,7 +109,7 @@ const test = base.extend({
 });
 
 test.describe('Friend Status E2E', () => {
-    
+
     test('Should have default statuses Other for User A and Acquaintance for User B', async ({ users }) => {
         const { a, b } = users;
 
@@ -265,7 +270,7 @@ test.describe('Friend Status E2E', () => {
         await a.page.click('#handleSendMessage');
 
         // Expect an error toast to appear for User A
-        await expect(a.page.locator('.toast.error.show')).toBeVisible({timeout: 15_000 });
+        await expect(a.page.locator('.toast.error.show')).toBeVisible({ timeout: 15_000 });
     });
 
     test('Acquaintance -> Blocked: Message fails if blocked', async ({ users }) => {
@@ -284,8 +289,63 @@ test.describe('Friend Status E2E', () => {
         await a.page.click('#handleSendMessage');
 
         // Expect an error toast to appear for User A
-        await expect(a.page.locator('.toast.error.show')).toBeVisible({timeout: 15_000 });
+        await expect(a.page.locator('.toast.error.show')).toBeVisible({ timeout: 15_000 });
         // Check that the message is marked as failed
         await expect(a.page.locator('.message.sent', { hasText: 'pending message' })).toHaveAttribute('data-status', 'failed');
+    });
+
+    test('Send LIB: status changed to OTHER before submit, error and form persists', async ({ users }) => {
+        const { a, b } = users;
+        const sendAmount = '1';
+        const memo = 'test memo 123';
+
+        const tollTxProcessed = b.page.waitForEvent('console', {
+            predicate: msg =>
+                msg.text().toLowerCase().includes('toll transaction successfully processed'),
+        }, { timeout: 30_000 });
+
+        // User A opens wallet and prepares send form
+        await a.page.click('#switchToWallet');
+        await a.page.click('#openSendAssetFormModal');
+        await expect(a.page.locator('#sendAssetFormModal')).toBeVisible();
+        await a.page.fill('#sendToAddress', b.username);
+        await a.page.fill('#sendAmount', sendAmount);
+        await a.page.fill('#sendMemo', memo);
+
+        // expect #tollMemo to contain Toll: free
+        await expect(a.page.locator('#tollMemo')).toHaveText(/^toll: free/i);
+
+        // Wait for username validation
+        await expect(a.page.locator('#sendToAddressError')).toHaveText('found', { timeout: 10_000 });
+
+        // Before A submits, B changes A's status to OTHER
+        await setFriendStatus(b.page, a.username, FriendStatus.OTHER);
+        await setToll(b.page, 5);
+
+        // wait for the toll change transaction to be processed
+        await tollTxProcessed;
+
+        // A submits the send form
+        const sendButton = a.page.locator('#sendAssetFormModal button[type="submit"]');
+        await expect(sendButton).toBeEnabled();
+        await sendButton.click();
+
+        // A gets confirmation modal, submits again
+        await expect(a.page.locator('#sendAssetConfirmModal')).toBeVisible();
+        await a.page.click('#confirmSendButton');
+
+        // Should get error toast
+        await expect(a.page.locator('.toast.error.show')).toBeVisible({ timeout: 10_000 });
+
+        // Close confirmation modal if still open
+        if (await a.page.locator('#sendAssetConfirmModal').isVisible()) {
+            await a.page.click('#closeSendAssetConfirmModal');
+        }
+
+        // Should return to send asset modal with same values
+        await expect(a.page.locator('#sendAssetFormModal')).toBeVisible();
+        await expect(a.page.locator('#sendToAddress')).toHaveValue(b.username);
+        await expect(a.page.locator('#sendAmount')).toHaveValue(sendAmount);
+        await expect(a.page.locator('#sendMemo')).toHaveValue(memo);
     });
 });
