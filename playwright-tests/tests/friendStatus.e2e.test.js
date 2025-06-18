@@ -300,9 +300,10 @@ test.describe('Friend Status E2E', () => {
         const memo = 'test memo 123';
 
         const tollTxProcessed = b.page.waitForEvent('console', {
+            timeout: 30_000,
             predicate: msg =>
-                msg.text().toLowerCase().includes('toll transaction successfully processed'),
-        }, { timeout: 30_000 });
+                /toll transaction successfully processed/i.test(msg.text())
+        });
 
         // User A opens wallet and prepares send form
         await a.page.click('#switchToWallet');
