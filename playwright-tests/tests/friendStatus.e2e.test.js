@@ -3,7 +3,6 @@ const { createAndSignInUser, generateUsername } = require('../helpers/userHelper
 const { getLiberdusBalance } = require('../helpers/walletHelpers');
 const { sendMessageTo } = require('../helpers/messageHelpers');
 const networkParams = require('../helpers/networkParams');
-const { time } = require('console');
 
 // Constants
 const NETWORK_FEE = networkParams.networkFee;
