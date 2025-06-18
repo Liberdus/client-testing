@@ -347,5 +347,6 @@ test.describe('Friend Status E2E', () => {
         await expect(a.page.locator('#sendToAddress')).toHaveValue(b.username);
         await expect(a.page.locator('#sendAmount')).toHaveValue(sendAmount);
         await expect(a.page.locator('#sendMemo')).toHaveValue(memo);
+        await expect(a.page.locator('#tollMemo')).toHaveText(/^toll: 5/i);
     });
 });
