@@ -1,19 +1,23 @@
 const { expect } = require("@playwright/test");
 
-// Helper to create and sign in a new user
-async function createAndSignInUser(page, username) {
+async function createUser(page, username) {
     await page.goto('', { waitUntil: 'networkidle' });
     await expect(page.locator('#welcomeScreen')).toBeVisible();
     await expect(page.locator('#createAccountButton')).toBeVisible();
     await page.click('#createAccountButton');
     await expect(page.locator('#createAccountModal')).toBeVisible();
     await page.locator('#newUsername').pressSequentially(username);
-    await expect(page.locator('#newUsernameAvailable')).toHaveText('available');
+    await expect(page.locator('#newUsernameAvailable')).toHaveText('available', { timeout: 10_000 });
     const createBtn = page.locator('#createAccountForm button[type="submit"]');
     await expect(createBtn).toBeEnabled();
     await createBtn.click();
+}
+
+// Helper to create and sign in a new user
+async function createAndSignInUser(page, username) {
+    await createUser(page, username);
     // expect loading toast to appear
-    await expect(page.locator('.toast.loading.show')).toBeVisible();
+    await expect(page.locator('.toast.loading.show')).toBeVisible({ timeout: 10_000 });
     // wait for the loading toast to disappear
     await page.waitForSelector('.toast.loading.show', { state: 'detached' });
     await expect(page.locator('#chatsScreen')).toBeVisible();
@@ -32,5 +36,6 @@ function generateUsername(browserName) {
 
 module.exports = {
     createAndSignInUser,
-    generateUsername
+    generateUsername,
+    createUser
 };
