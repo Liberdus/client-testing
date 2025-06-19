@@ -86,6 +86,7 @@ const test = base.extend({
             // User B starts chat and messages user A
             await sendMessageTo(pageB, userA, 'init chat from B');
             balanceB -= NETWORK_FEE; // B pays network fee for sending message
+            balanceB -= NETWORK_FEE; // B pays network fee for update_toll_required
             balanceB -= DEFAULT_TOLL; // B pays default toll for sending message
             // wait for User A to receive the message
             await pageA.click('#switchToChats');
