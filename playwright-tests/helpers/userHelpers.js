@@ -1,5 +1,4 @@
 const { expect } = require("@playwright/test");
-const { create } = require("domain");
 
 async function createUser(page, username) {
     await page.goto('', { waitUntil: 'networkidle' });
