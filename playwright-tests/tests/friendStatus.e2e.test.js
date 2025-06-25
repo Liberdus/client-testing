@@ -136,8 +136,7 @@ test.describe('Friend Status E2E', () => {
         await b.page.locator('#chatModal .message-input').fill('blocked msg');
         await b.page.click('#handleSendMessage');
         // expect an error toast to appear ignore inner text
-        const errorToast = await b.page.locator('.toast.error.show').textContent();
-        expect(errorToast).toContain('You are blocked by this user');
+        await expect(b.page.locator('.toast.error.show', { hasText: /You are blocked by this user/i })).toBeVisible({ timeout: 10_000 });
     });
 
     test('Block: User A blocks User B, B cannot send money', async ({ users }) => {
@@ -270,7 +269,7 @@ test.describe('Friend Status E2E', () => {
         await a.page.click('#handleSendMessage');
 
         // Expect an error toast to appear for User A
-        await expect(a.page.locator('.toast.error.show')).toBeVisible({ timeout: 15_000 });
+        await expect(a.page.locator('.toast.error.show', { hasText: 'toll' })).toBeVisible({ timeout: 15_000 });
     });
 
     test('Acquaintance -> Blocked: Message fails if blocked', async ({ users }) => {
@@ -289,7 +288,7 @@ test.describe('Friend Status E2E', () => {
         await a.page.click('#handleSendMessage');
 
         // Expect an error toast to appear for User A
-        await expect(a.page.locator('.toast.error.show')).toBeVisible({ timeout: 15_000 });
+        await expect(a.page.locator('.toast.error.show', {hasText:'blocked'})).toBeVisible({ timeout: 15_000 });
         // Check that the message is marked as failed
         await expect(a.page.locator('.message.sent', { hasText: 'pending message' })).toHaveAttribute('data-status', 'failed');
     });
@@ -336,7 +335,7 @@ test.describe('Friend Status E2E', () => {
         await a.page.click('#confirmSendButton');
 
         // Should get error toast
-        await expect(a.page.locator('.toast.error.show')).toBeVisible({ timeout: 10_000 });
+        await expect(a.page.locator('.toast.error.show', { hasText: /5 LIB/i })).toBeVisible({ timeout: 10_000 });
 
         // Close confirmation modal if still open
         if (await a.page.locator('#sendAssetConfirmModal').isVisible()) {
