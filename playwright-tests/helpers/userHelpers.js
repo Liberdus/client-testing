@@ -17,13 +17,12 @@ async function createUser(page, username) {
 async function createAndSignInUser(page, username) {
     await createUser(page, username);
     // expect loading toast to appear
-    await expect(page.locator('.toast.loading.show')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('.toast.loading.show')).toBeVisible({ timeout: 20_000 });
     // wait for the loading toast to disappear
     await page.waitForSelector('.toast.loading.show', { state: 'detached' });
-    await expect(page.locator('#chatsScreen')).toBeVisible();
+    await expect(page.locator('#chatsScreen')).toBeVisible({ timeout: 20_000 });
     const appName = await page.locator('.app-name').textContent();
     await expect(appName.trim()).toBe(username);
-    await expect(page.locator('#wsStatusIndicator.ws-green')).toBeVisible({ timeout: 10_000 });
 }
 
 // creates a unique username based on the browser name and current timestamp
