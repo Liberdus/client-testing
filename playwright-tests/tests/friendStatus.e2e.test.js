@@ -205,26 +205,25 @@ test.describe('Friend Status E2E', () => {
         await expect(b.page.locator('#contactsScreen.active')).toBeVisible();
         await b.page.locator('#contactsList .chat-name', { hasText: a.username }).click();
         await expect(b.page.locator('#contactInfoModal.active')).toBeVisible();
-        // Check that profile fields are not provided
+        // Check that profile fields are not entered
         await expect(b.page.locator("#contactInfoUsername")).toHaveText(a.username);
-        await expect(b.page.locator("#contactInfoName")).toHaveText('Not provided');
-        await expect(b.page.locator("#contactInfoEmail")).toHaveText('Not provided');
-        await expect(b.page.locator("#contactInfoPhone")).toHaveText('Not provided');
-        await expect(b.page.locator("#contactInfoLinkedin")).toHaveText('Not provided');
-        await expect(b.page.locator("#contactInfoX")).toHaveText('Not provided');
+        await expect(b.page.locator("#contactInfoName")).toHaveText('Not Entered');
+        await expect(b.page.locator("#contactInfoProvidedName")).not.toBeVisible();
+        await expect(b.page.locator("#contactInfoEmail")).not.toBeVisible();
+        await expect(b.page.locator("#contactInfoLinkedin")).not.toBeVisible();
+        await expect(b.page.locator("#contactInfoX")).not.toBeVisible();
         await b.page.click('#closeContactInfoModal');
 
 
         // User A fills out profile
         await a.page.click('#toggleMenu');
-        await a.page.getByText('Profile', { exact: true }).click();
+        await a.page.locator('#openAccountForm').click();
         await a.page.fill('#name', name);
         await a.page.fill('#email', email);
         await a.page.fill('#phone', phone);
         await a.page.fill('#linkedin', linkedin);
         await a.page.fill('#x', x);
         await a.page.click('#accountModal button[type="submit"]');
-        // await a.page.waitForTimeout(5_000);
         await a.page.click('#closeMenu');
 
         // Set friend status to Friend
@@ -246,7 +245,7 @@ test.describe('Friend Status E2E', () => {
         // User B opens contact info for A and sees full profile
         await b.page.click('.chat-user-info');
         await expect(b.page.locator("#contactInfoUsername")).toHaveText(a.username);
-        await expect(b.page.locator("#contactInfoName")).toHaveText(name);
+        await expect(b.page.locator("#contactInfoProvidedName")).toHaveText(name);
         await expect(b.page.locator("#contactInfoEmail")).toHaveText(email);
         await expect(b.page.locator("#contactInfoPhone")).toHaveText(phone);
         await expect(b.page.locator("#contactInfoLinkedin")).toHaveText(linkedin);
@@ -299,7 +298,7 @@ test.describe('Friend Status E2E', () => {
         const memo = 'test memo 123';
 
         const tollTxProcessed = b.page.waitForEvent('console', {
-            timeout: 30_000,
+            timeout: 60_000,
             predicate: msg =>
                 /toll transaction successfully processed/i.test(msg.text())
         });

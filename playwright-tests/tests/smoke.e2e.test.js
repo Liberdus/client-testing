@@ -144,7 +144,7 @@ test('Should update profile', async ({ page, username }) => {
   const linkedin = "testerlinkedin";
   const x = "testerx";
   await page.locator('#toggleMenu').click();
-  await page.getByText('Profile', { exact: true }).click();
+  await page.locator('#openAccountForm').click();
   await page.locator('#name').fill(name);
   await page.locator('#email').fill(email);
   await page.locator('#phone').fill(phone);
@@ -157,16 +157,10 @@ test('Should update profile', async ({ page, username }) => {
   // Verify the profile was updated
   await page.getByText('Profile', { exact: true }).click();
   await expect(page.locator('#accountForm')).toMatchAriaSnapshot(`
-    - text: Name
     - textbox "Name": ${name}
-    - text: Email
     - textbox "Email": ${email}
-    - text: Phone
     - textbox "Phone": ${phone}
-    - text: LinkedIn
     - textbox "LinkedIn": ${linkedin}
-    - text: X
-    - textbox "X": ${x}
-    - button "Update Profile"
+    - textbox "X-Twitter": ${x}
     `);
 });
