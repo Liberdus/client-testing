@@ -29,8 +29,8 @@ async function createAndSignInUser(page, username) {
 function generateUsername(browserName) {
     const browserInitial = browserName[0];
     const timestamp = Date.now().toString().slice(-8);
-    const rand = Math.floor(Math.random() * 1e10).toString().padStart(10, '0');
-    return `${browserInitial}${timestamp}${rand}`.slice(0, 19);
+    const rand = Math.floor(Math.random() * 1000000).toString().padStart(6, '0');
+    return `${browserInitial}${timestamp}${rand}`; // Total: 1 + 8 + 6 = 15 characters
 }
 
 module.exports = {

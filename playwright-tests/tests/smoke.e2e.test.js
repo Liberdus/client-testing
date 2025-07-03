@@ -1,7 +1,7 @@
 // liberdus.e2e.spec.js
 
 const { test, expect } = require('../fixtures/newUserFixture');
-const { createAndSignInUser } = require('../helpers/userHelpers');
+const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 
 const log = (msg) => console.log(`[E2E TEST] ${msg}`);
 let RECIPIENT;
@@ -10,10 +10,7 @@ test.describe('Tests requiring recipient user', () => {
   // Create the recipient user once before all tests
   test.beforeAll(async ({ browser, browserName }) => {
     const page = await browser.newPage();
-    const browserInitial = browserName[0];
-    const timestamp = Date.now().toString().slice(-8);
-    const rand = Math.floor(Math.random() * 1000).toString().padStart(10, '0');
-    const recipientName = `r${browserInitial}${timestamp}${rand}`.slice(0, 19);
+    const recipientName = generateUsername(browserName);
 
     await createAndSignInUser(page, recipientName);
     RECIPIENT = recipientName;
