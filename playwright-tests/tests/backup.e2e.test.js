@@ -107,3 +107,58 @@ test.describe('Account Backup and Restore', () => {
         }
     });
 });
+
+[
+    { name: 'with password', password: 'testpassword123' },
+    { name: 'without password', password: '' }
+].forEach(({ name, password }) => {
+    test(`should backup and restore multiple accounts ${name}`, async ({ page, browser, browserName }, testInfo) => {
+        const backupFilePath = testInfo.outputPath(path.join('backups', `${name}.json`));
+        const username1 = generateUsername(browserName);
+        const username2 = generateUsername(browserName);
+        // Create first user
+        await createAndSignInUser(page, username1);
+
+        // Create second user
+        await createAndSignInUser(page, username2);
+
+        // Backup all accounts from welcome screen
+        await page.goto('');
+        await expect(page.locator('#welcomeScreen')).toBeVisible();
+        await page.click('#openBackupModalButton');
+        await expect(page.locator('#exportModal')).toBeVisible();
+        if (password) {
+            await page.fill('#exportPassword', password);
+        }
+        const downloadPromise = page.waitForEvent('download');
+        await page.click('#exportForm button[type="submit"]');
+        const download = await downloadPromise;
+        await download.saveAs(backupFilePath);
+        await page.context().close();
+
+        // Restore in a new context
+        const newContext = await browser.newContext();
+        try {
+            const newPage = await newContext.newPage();
+            await restoreAccount(newPage, backupFilePath, password);
+
+            // After restoring, expect to be on the welcome screen with a sign-in button
+            await expect(newPage.locator('#welcomeScreen')).toBeVisible();
+            await expect(newPage.locator('#signInButton')).toBeVisible();
+
+            // Click sign in and verify both accounts are in the dropdown
+            await newPage.click('#signInButton');
+            const userDropdown = newPage.locator('#username');
+            await expect(userDropdown).toContainText(username1);
+            await expect(userDropdown).toContainText(username2);
+
+            // Sign in as first user and verify
+            await userDropdown.selectOption(username1);
+            await newPage.click('#signInForm button[type="submit"]');
+            await expect(newPage.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
+            await expect(newPage.locator('.app-name')).toHaveText(username1);
+        } finally {
+            await newContext.close();
+        }
+    });
+})
