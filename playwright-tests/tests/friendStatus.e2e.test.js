@@ -26,7 +26,11 @@ async function setFriendStatus(page, username, status) {
     await expect(page.locator('#friendModal.active')).toBeVisible();
     await page.check(`#friendForm input[type=radio][value="${status.toString()}"]`);
     await page.click('#friendForm button[type="submit"]');
-    await page.waitForTimeout(5_000); // wait for block to propagate
+    await page.waitForEvent('console', {
+        timeout: 60_000,
+        predicate: msg =>
+            /update_toll_required transaction successfully processed/i.test(msg.text())
+    });
     await page.click('#closeContactInfoModal');
 }
 
@@ -37,6 +41,11 @@ async function setToll(page, amount) {
     await expect(page.locator('#tollModal')).toBeVisible();
     await page.fill('#newTollAmountInput', amount.toString());
     await page.click('#saveNewTollButton');
+    await page.waitForEvent('console', {
+        timeout: 60_000,
+        predicate: msg =>
+            /toll transaction successfully processed/i.test(msg.text())
+    });
     await page.click('#closeTollModal');
     await page.click('#closeMenu');
 }
@@ -287,7 +296,7 @@ test.describe('Friend Status E2E', () => {
         await a.page.click('#handleSendMessage');
 
         // Expect an error toast to appear for User A
-        await expect(a.page.locator('.toast.error.show', {hasText:'blocked'})).toBeVisible({ timeout: 15_000 });
+        await expect(a.page.locator('.toast.error.show', { hasText: 'blocked' })).toBeVisible({ timeout: 15_000 });
         // Check that the message is marked as failed
         await expect(a.page.locator('.message.sent', { hasText: 'pending message' })).toHaveAttribute('data-status', 'failed');
     });
@@ -296,12 +305,6 @@ test.describe('Friend Status E2E', () => {
         const { a, b } = users;
         const sendAmount = '1';
         const memo = 'test memo 123';
-
-        const tollTxProcessed = b.page.waitForEvent('console', {
-            timeout: 60_000,
-            predicate: msg =>
-                /toll transaction successfully processed/i.test(msg.text())
-        });
 
         // User A opens wallet and prepares send form
         await a.page.click('#switchToWallet');
@@ -320,9 +323,6 @@ test.describe('Friend Status E2E', () => {
         // Before A submits, B changes A's status to OTHER
         await setFriendStatus(b.page, a.username, FriendStatus.OTHER);
         await setToll(b.page, 5);
-
-        // wait for the toll change transaction to be processed
-        await tollTxProcessed;
 
         // A submits the send form
         const sendButton = a.page.locator('#sendAssetFormModal button[type="submit"]');

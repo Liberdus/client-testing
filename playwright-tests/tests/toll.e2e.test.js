@@ -21,6 +21,11 @@ async function setToll(page, amount) {
     await expect(page.locator('#tollModal')).toBeVisible();
     await page.fill('#newTollAmountInput', amount.toString());
     await page.click('#saveNewTollButton');
+    await page.waitForEvent('console', {
+        timeout: 60_000,
+        predicate: msg =>
+            /toll transaction successfully processed/i.test(msg.text())
+    });
     await page.click('#closeTollModal');
     await page.click('#closeMenu');
 }
@@ -34,7 +39,11 @@ async function setFriendStatus(page, username, status) {
     await expect(page.locator('#friendModal.active')).toBeVisible();
     await page.check(`#friendForm input[type=radio][value="${status.toString()}"]`);
     await page.click('#friendForm button[type="submit"]');
-    await page.waitForTimeout(5_000);
+    await page.waitForEvent('console', {
+        timeout: 60_000,
+        predicate: msg =>
+            /update_toll_required transaction successfully processed/i.test(msg.text())
+    });
     await page.click('#closeContactInfoModal');
 }
 
@@ -162,11 +171,6 @@ test('Toll is charged when sender has blocked recipient', async ({ users }) => {
 
     // User B sets toll to 5
     await setToll(b.page, TOLL);
-    await b.page.waitForEvent('console', {
-            timeout: 60_000,
-            predicate: msg =>
-                /toll transaction successfully processed/i.test(msg.text())
-        });
 
     await sendMessageTo(a.page, b.username, 'Hello B!');
     let expectedBalance = a.balance - TOLL - networkParams.networkFee * 2;
