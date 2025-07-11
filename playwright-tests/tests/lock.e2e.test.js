@@ -18,10 +18,9 @@ test('Lock and Unlock Account', async ({ browser, browserName}) => {
     await page.fill('#newPassword', password);
     await page.fill('#confirmNewPassword', password);
     await page.click('#lockForm button[type="submit"]');
-    await expect(page.locator('#lockModal')).not.toBeVisible();
+    await expect(page.locator('.toast.success.show')).toBeVisible({ timeout: 15_000 });
 
     // 3 sign out
-    await page.click('#toggleMenu');
     await page.click('#handleSignOut');
     await expect(page.locator('#welcomeScreen')).toBeVisible();
 
@@ -49,6 +48,7 @@ test('Change Lock Password', async ({ browser, browserName}) => {
     await page.fill('#newPassword', password);
     await page.fill('#confirmNewPassword', password);
     await page.click('#lockForm button[type="submit"]');
+    await expect(page.locator('.toast.success.show')).toBeVisible({ timeout: 15_000 });
 
     // 3 change the password
     await page.click('#openLockModal');
@@ -87,6 +87,7 @@ test('Remove Lock', async ({ browser, browserName}) => {
     await page.fill('#newPassword', password);
     await page.fill('#confirmNewPassword', password);
     await page.click('#lockForm button[type="submit"]');
+    await expect(page.locator('.toast.success.show')).toBeVisible({ timeout: 15_000 });
 
     // 3 sign out
     await page.click('#handleSignOut');
