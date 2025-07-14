@@ -170,8 +170,9 @@ test.describe('Offline Tests', () => {
         // user1 opens a new page to check if the draft is saved
         const draftPage = await user1.context.newPage();
         try {
-            // Navigate to the chat modal
-            await draftPage.goto('');
+            await user1.context.setOffline(false);
+            await draftPage.goto(''); // this fails in webkit when offline, so we set it online first
+            await user1.context.setOffline(true);
             await draftPage.locator('#signInButton').click();
             await draftPage.locator('.chat-name', { hasText: user2.username }).click();
 
