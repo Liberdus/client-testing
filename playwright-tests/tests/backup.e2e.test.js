@@ -29,7 +29,9 @@ async function restoreAccount(page, backupFilePath, password = '') {
     if (password) {
         await page.fill('#importPassword', password);
     }
-
+    await page.on('dialog', async dialog => {
+        await dialog.accept();
+    });
     await page.click('#importForm button[type="submit"]');
 }
 
