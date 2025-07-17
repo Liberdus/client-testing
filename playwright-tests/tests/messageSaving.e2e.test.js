@@ -1,6 +1,8 @@
 const { test: base, expect } = require('@playwright/test');
 const { sendMessageTo, checkReceivedMessage } = require('../helpers/messageHelpers');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
+const { getLocalStorage, getMessagesBetweenUsers } = require('../helpers/localStorageHelpers');
+
 
 const test = base.extend({
     messageUsers: async ({ browserName, browser }, use) => {
@@ -64,7 +66,7 @@ const test = base.extend({
 
 test.describe('Message Saving Tests', () => {
 
-    test('should save messages after both users explicitly sign out and sign back in', async ({ messageUsers }) => {
+    test('should save messages on sign out', async ({ messageUsers }) => {
         const { users: { user1, user2 }, messages } = messageUsers;
 
         try {
@@ -72,7 +74,7 @@ test.describe('Message Saving Tests', () => {
                 messages[0].content,
                 messages[1].content,
                 messages[2].content,
-                messages[3].content 
+                messages[3].content
             ];
 
             // Explicitly sign out both users
@@ -87,6 +89,16 @@ test.describe('Message Saving Tests', () => {
             await expect(user2.page.locator('#menuModal')).toBeVisible();
             await user2.page.click('#handleSignOut');
             await expect(user2.page.locator('#welcomeScreen')).toBeVisible({ timeout: 30_000 });
+
+            // Check that messages ARE present in localStorage after signing out
+            const user1LocalStorage = await getLocalStorage(user1.page);
+            const user2LocalStorage = await getLocalStorage(user2.page);
+            const storedUser1Messages = getMessagesBetweenUsers(user1LocalStorage, user1.username, user2.username);
+            const storedUser2Messages = getMessagesBetweenUsers(user2LocalStorage, user2.username, user1.username);
+            
+            // When signing out, messages should still be in localStorage
+            expect(storedUser1Messages.length).toBe(expectedMessages.length);
+            expect(storedUser2Messages.length).toBe(expectedMessages.length);
 
             // Sign back in as both users (should automatically sign in from localStorage)
             // Sign in user1
@@ -134,7 +146,7 @@ test.describe('Message Saving Tests', () => {
         }
     });
 
-    test('should save messages after closing and reopening the page', async ({ messageUsers }) => {
+    test('should download messages after browser closes without saving', async ({ messageUsers }) => {
         const { users: { user1, user2 }, messages } = messageUsers;
 
         try {
@@ -142,7 +154,7 @@ test.describe('Message Saving Tests', () => {
                 messages[0].content,
                 messages[1].content,
                 messages[2].content,
-                messages[3].content 
+                messages[3].content
             ];
 
             // Close both users' pages (but keep their contexts)
@@ -153,14 +165,24 @@ test.describe('Message Saving Tests', () => {
             const newPage1 = await user1.context.newPage();
             const newPage2 = await user2.context.newPage();
 
-            // After reopening, should be at welcome screen, click sign in for both users
+            // After reopening, should be at welcome screen
             await newPage1.goto('');
             await newPage1.waitForSelector('#welcomeScreen', { timeout: 30_000 });
+            await newPage2.goto('');
+            await newPage2.waitForSelector('#welcomeScreen', { timeout: 30_000 });
+
+            // Check that messages are NOT present in localStorage before signing in (on welcome screen)            
+            const user1LocalStorage = await getLocalStorage(newPage1);
+            const user2LocalStorage = await getLocalStorage(newPage2);
+            const storedUser1Messages = getMessagesBetweenUsers(user1LocalStorage, user1.username, user2.username);
+            const storedUser2Messages = getMessagesBetweenUsers(user2LocalStorage, user2.username, user1.username);
+            expect(storedUser1Messages.length).toBe(0);
+            expect(storedUser2Messages.length).toBe(0);
+
+            // Now click sign in for both users
             await newPage1.click('#signInButton');
             await expect(newPage1.locator('#chatsScreen')).toBeVisible({ timeout: 20_000 });
 
-            await newPage2.goto('');
-            await newPage2.waitForSelector('#welcomeScreen', { timeout: 30_000 });
             await newPage2.click('#signInButton');
             await expect(newPage2.locator('#chatsScreen')).toBeVisible({ timeout: 20_000 });
 
@@ -200,4 +222,68 @@ test.describe('Message Saving Tests', () => {
         }
     });
 
+    test('should save messages after refreshing the page', async ({ messageUsers }) => {
+        const { users: { user1, user2 }, messages } = messageUsers;
+
+        try {
+            const expectedMessages = [
+                messages[0].content,
+                messages[1].content,
+                messages[2].content,
+                messages[3].content
+            ];
+
+            // Refresh both users' pages
+            await user1.page.reload();
+            await expect(user1.page.locator('#welcomeScreen')).toBeVisible({ timeout: 30_000 });
+
+            await user2.page.reload();
+            await expect(user2.page.locator('#welcomeScreen')).toBeVisible({ timeout: 30_000 });
+
+            // Check that messages ARE present in localStorage after refreshing
+            const user1LocalStorage = await getLocalStorage(user1.page);
+            const user2LocalStorage = await getLocalStorage(user2.page);
+            const storedUser1Messages = getMessagesBetweenUsers(user1LocalStorage, user1.username, user2.username);
+            const storedUser2Messages = getMessagesBetweenUsers(user2LocalStorage, user2.username, user1.username);
+            expect(storedUser1Messages.length).toBe(0);
+            expect(storedUser2Messages.length).toBe(0);
+
+            // sign in
+            await user1.page.click('#signInButton');
+            await expect(user1.page.locator('#chatsScreen')).toBeVisible({ timeout: 20_000 });
+            await user2.page.click('#signInButton');
+            await expect(user2.page.locator('#chatsScreen')).toBeVisible({ timeout: 20_000 });
+
+            // Verify both sent and received messages persisted for user1 after refresh
+            const chatItem1 = user1.page.locator('.chat-name', { hasText: user2.username });
+            await expect(chatItem1).toBeVisible({ timeout: 15_000 });
+            await chatItem1.click();
+            await expect(user1.page.locator('#chatModal')).toBeVisible();
+
+            // Explicitly check message count and content for user1
+            const user1Messages = await user1.page.locator('#chatModal .messages-list .message').allTextContents();
+            expect(user1Messages.length).toBe(expectedMessages.length);
+            for (let i = 0; i < expectedMessages.length; i++) {
+                expect(user1Messages[i]).toContain(expectedMessages[i]);
+            }
+
+            // Also verify user2's messages are still available
+            await expect(user2.page.locator('#chatsScreen.active')).toBeVisible();
+            const chatItem2 = user2.page.locator('.chat-name', { hasText: user1.username });
+            await expect(chatItem2).toBeVisible({ timeout: 15_000 });
+            await chatItem2.click();
+            await expect(user2.page.locator('#chatModal')).toBeVisible();
+
+            // Explicitly check message count and content for user2
+            const user2Messages = await user2.page.locator('#chatModal .messages-list .message').allTextContents();
+            expect(user2Messages.length).toBe(expectedMessages.length);
+            for (let i = 0; i < expectedMessages.length; i++) {
+                expect(user2Messages[i]).toContain(expectedMessages[i]);
+            }
+
+        } finally {
+            await user1.context.close();
+            await user2.context.close();
+        }
+    });
 });
