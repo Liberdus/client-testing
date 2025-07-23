@@ -214,6 +214,7 @@ test.describe('File Attachment Tests', () => {
 
   test('should allow removing an attachment', async ({ page, username }) => {
     const recipient = RECIPIENT;
+    const fileName = 'test-image.png';
 
     // Open New Chat
     await page.click('#newChatButton');
@@ -231,13 +232,11 @@ test.describe('File Attachment Tests', () => {
 
     // Set the file input for upload
     const fileInput = page.locator('#chatFileInput');
-    const testFilePath = path.join(__dirname, '..', 'fixtures', 'test-image.png');
+    const testFilePath = path.join(__dirname, '..', 'fixtures', fileName);
     await fileInput.setInputFiles(testFilePath);
 
     // Verify attachment preview appears
-    const attachmentLink = page.locator('.message.sent .attachment-link');
-    await expect(attachmentLink).toBeVisible({ timeout: 15000 });
-    await expect(attachmentLink).toHaveText(fileName);
+    await expect(page.locator('#attachmentPreview .attachment-name', { hasText: fileName })).toBeVisible();
 
     // Click remove attachment button
     await page.click('.remove-attachment');
