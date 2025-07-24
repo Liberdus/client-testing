@@ -89,6 +89,7 @@ test('Change Lock Password', async ({ lockedUser }) => {
     // 3 change the password
     await page.click('#openLockModal');
     await expect(page.locator('#lockModal')).toBeVisible();
+    await page.click('#changePasswordButton');
     const newPassword = 'newPassword';
     await page.fill('#oldPassword', password);
     await page.fill('#newPassword', newPassword);
@@ -123,8 +124,8 @@ test('Remove Lock', async ({ lockedUser }) => {
     await page.click('#toggleMenu');
     await page.click('#openLockModal');
     await expect(page.locator('#lockModal')).toBeVisible();
+    await page.click('#removeLockButton');
     await page.fill('#oldPassword', password);
-    await expect(page.locator('#lockForm button[type="submit"]')).toHaveText('Remove Password');
     await page.click('#lockForm button[type="submit"]');
 
     // 6 sign out
