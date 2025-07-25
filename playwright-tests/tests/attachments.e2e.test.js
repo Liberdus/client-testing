@@ -2,16 +2,16 @@ const { test, expect } = require('../fixtures/newUserFixture');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
-// RECIPIENT will store the username of the user who will receive messages
-let RECIPIENT;
-// Store the browser context for the recipient user
-let RECIPIENT_CONTEXT;
-// SENDER is automatically created and signed in by the newUserFixture
-
-// Helper to create test files
-async function createTestFile(fileName, sizeInMB = 0.5, type = 'image/png') {
-  const filePath = path.join(__dirname, '..', 'fixtures', fileName);
+// Helper to create test files with unique names based on test info to avoid conflicts in parallel runs
+async function createTestFile(baseFileName, sizeInMB = 0.5, type = 'image/png', uniqueId) {
+  // Generate a unique filename by adding the unique ID before the extension
+  const fileExt = path.extname(baseFileName);
+  const fileNameWithoutExt = path.basename(baseFileName, fileExt);
+  const uniqueFileName = `${fileNameWithoutExt}-${uniqueId}${fileExt}`;
+  
+  const filePath = path.join(__dirname, '..', 'fixtures', uniqueFileName);
   const dirPath = path.dirname(filePath);
 
   // Create directory if it doesn't exist
@@ -30,7 +30,7 @@ async function createTestFile(fileName, sizeInMB = 0.5, type = 'image/png') {
     // Add some data to make it a valid PNG
     buffer.write('IHDR', 8);
     fs.writeFileSync(filePath, buffer);
-  } else if (fileName.endsWith('.pdf')) {
+  } else if (baseFileName.endsWith('.pdf')) {
     // Create a simple PDF file
     const buffer = Buffer.alloc(sizeInBytes, 0);
     // PDF header
@@ -45,25 +45,21 @@ async function createTestFile(fileName, sizeInMB = 0.5, type = 'image/png') {
     fs.writeFileSync(filePath, buffer);
   }
 
-  return filePath;
+  return { filePath, fileName: uniqueFileName };
 }
 
-// Helper to clean up test files
-async function cleanUpTestFiles() {
+// Helper to clean up test files for a specific test run
+async function cleanUpTestFiles(uniqueId) {
   const fixturesDir = path.join(__dirname, '..', 'fixtures');
-  const filesToCleanup = [
-    'test-image.png',
-    'test-pdf.pdf',
-    'test-large.png',
-    'test-invalid.xyz',
-    // Add multi-attachment test files
-    'test-image-1.png',
-    'test-image-2.png',
-    'test-image-3.png',
-    'test-pdf-1.pdf',
-    'test-pdf-2.pdf'
-  ];
-
+  if (!fs.existsSync(fixturesDir)) {
+    return;
+  }
+  
+  const files = fs.readdirSync(fixturesDir);
+  
+  // Only clean up files specific to this test run (with the unique ID)
+  const filesToCleanup = files.filter(file => file.includes(`-${uniqueId}`));
+  
   for (const file of filesToCleanup) {
     const filePath = path.join(fixturesDir, file);
     if (fs.existsSync(filePath)) {
@@ -73,46 +69,88 @@ async function cleanUpTestFiles() {
 }
 
 test.describe('File Attachment Tests', () => {
+  // Create a unique ID for this test run to avoid conflicts in parallel execution
+  const testRunUniqueId = crypto.randomUUID().substring(0, 8);
+  
+  // Per-test fixture to hold recipient info for this specific test run
+  let testRecipient = {
+    username: null,
+    context: null
+  };
+  
+  // File paths for this test run
+  let testFiles = {
+    image: null,
+    pdf: null,
+    large: null,
+    invalid: null
+  };
+  
   // Create test files and recipient user before all tests
   test.beforeAll(async ({ browser, browserName }) => {
-    // Create test files
-    await createTestFile('test-image.png', 0.5, 'image/png');
-    await createTestFile('test-pdf.pdf', 0.5, 'application/pdf');
-    await createTestFile('test-large.png', 11, 'image/png'); // Over the 10MB limit
-    await createTestFile('test-invalid.xyz', 0.1);
+    // Create test files with unique names for this test run
+    const imageResult = await createTestFile('test-image.png', 0.5, 'image/png', testRunUniqueId);
+    const pdfResult = await createTestFile('test-pdf.pdf', 0.5, 'application/pdf', testRunUniqueId);
+    const largeResult = await createTestFile('test-large.png', 11, 'image/png', testRunUniqueId); // Over the 10MB limit
+    const invalidResult = await createTestFile('test-invalid.xyz', 0.1, 'application/octet-stream', testRunUniqueId);
+    
+    // Store file info for this test run
+    testFiles.image = imageResult;
+    testFiles.pdf = pdfResult;
+    testFiles.large = largeResult;
+    testFiles.invalid = invalidResult;
 
     // Create downloads directory if it doesn't exist
-    const downloadsDir = path.join(__dirname, '..', 'test-results', 'downloads');
+    const downloadsDir = path.join(__dirname, '..', 'test-results', 'downloads', testRunUniqueId);
     if (!fs.existsSync(downloadsDir)) {
       fs.mkdirSync(downloadsDir, { recursive: true });
     }
 
-    // Create recipient user
+    // Create a unique recipient user for this test run
     // Note: The sender user is automatically created and signed in by the newUserFixture for each test
-    RECIPIENT_CONTEXT = await browser.newContext();
-    const recipientPage = await RECIPIENT_CONTEXT.newPage();
+    testRecipient.context = await browser.newContext();
+    const recipientPage = await testRecipient.context.newPage();
     const recipientName = generateUsername(browserName);
 
     await createAndSignInUser(recipientPage, recipientName);
-    RECIPIENT = recipientName;
+    testRecipient.username = recipientName;
     await recipientPage.close();
   });
 
   test.afterAll(async () => {
-    await cleanUpTestFiles();
-    if (RECIPIENT_CONTEXT) {
-      await RECIPIENT_CONTEXT.close();
+    // Clean up files specific to this test run
+    await cleanUpTestFiles(testRunUniqueId);
+    
+    // Clean up the downloads folder for this test run
+    const downloadsDir = path.join(__dirname, '..', 'test-results', 'downloads', testRunUniqueId);
+    if (fs.existsSync(downloadsDir)) {
+      try {
+        const files = fs.readdirSync(downloadsDir);
+        for (const file of files) {
+          fs.unlinkSync(path.join(downloadsDir, file));
+        }
+        fs.rmdirSync(downloadsDir);
+      } catch (error) {
+        console.error(`Failed to clean up downloads dir: ${error}`);
+      }
+    }
+    
+    // Close the browser context
+    if (testRecipient.context) {
+      await testRecipient.context.close();
     }
   });
 
 
   [
-    { name: 'image attachment', fileName: 'test-image.png' },
-    { name: 'PDF attachment', fileName: 'test-pdf.pdf' }
+    { name: 'image attachment', fileKey: 'image' },
+    { name: 'PDF attachment', fileKey: 'pdf' }
   ].forEach(testCase => {
     test(`should upload and preview a valid ${testCase.name}`, async ({ page, username }) => {
-      const recipient = RECIPIENT;
-      const fileName = testCase.fileName;
+      const recipient = testRecipient.username;
+      const fileInfo = testFiles[testCase.fileKey];
+      const fileName = fileInfo.fileName;
+      const testFilePath = fileInfo.filePath;
 
       // Open New Chat
       await page.click('#newChatButton');
@@ -129,7 +167,6 @@ test.describe('File Attachment Tests', () => {
 
       // Set the file input for upload
       const fileInput = page.locator('#chatFileInput');
-      const testFilePath = path.join(__dirname, '..', 'fixtures', fileName);
       await fileInput.setInputFiles(testFilePath);
 
       // Verify attachment preview appears
@@ -144,14 +181,16 @@ test.describe('File Attachment Tests', () => {
       }
 
       // Verify message with attachment was sent
-      const attachmentLink = page.locator('.message.sent .attachment-link');
+      const attachmentLink = page.locator('.message.sent .attachment-label');
       await expect(attachmentLink).toBeVisible({ timeout: 15000 });
       await expect(attachmentLink).toHaveText(fileName);
     });
   });
 
   test('should show error for file over size limit', async ({ page, username }) => {
-    const recipient = RECIPIENT;
+    const recipient = testRecipient.username;
+    const fileInfo = testFiles.large;
+    const testFilePath = fileInfo.filePath;
 
     // Open New Chat
     await page.click('#newChatButton');
@@ -169,7 +208,6 @@ test.describe('File Attachment Tests', () => {
 
     // Set the file input for upload
     const fileInput = page.locator('#chatFileInput');
-    const testFilePath = path.join(__dirname, '..', 'fixtures', 'test-large.png');
     await fileInput.setInputFiles(testFilePath);
 
     // Verify error toast appears for file size limit
@@ -182,7 +220,9 @@ test.describe('File Attachment Tests', () => {
   });
 
   test('should show error for invalid file type', async ({ page, username }) => {
-    const recipient = RECIPIENT;
+    const recipient = testRecipient.username;
+    const fileInfo = testFiles.invalid;
+    const testFilePath = fileInfo.filePath;
 
     // Open New Chat
     await page.click('#newChatButton');
@@ -200,7 +240,6 @@ test.describe('File Attachment Tests', () => {
 
     // Set the file input for upload with an invalid file type
     const fileInput = page.locator('#chatFileInput');
-    const testFilePath = path.join(__dirname, '..', 'fixtures', 'test-invalid.xyz');
     await fileInput.setInputFiles(testFilePath);
 
     // Verify error toast appears for invalid file type
@@ -213,8 +252,10 @@ test.describe('File Attachment Tests', () => {
   });
 
   test('should allow removing an attachment', async ({ page, username }) => {
-    const recipient = RECIPIENT;
-    const fileName = 'test-image.png';
+    const recipient = testRecipient.username;
+    const fileInfo = testFiles.image;
+    const fileName = fileInfo.fileName;
+    const testFilePath = fileInfo.filePath;
 
     // Open New Chat
     await page.click('#newChatButton');
@@ -232,7 +273,6 @@ test.describe('File Attachment Tests', () => {
 
     // Set the file input for upload
     const fileInput = page.locator('#chatFileInput');
-    const testFilePath = path.join(__dirname, '..', 'fixtures', fileName);
     await fileInput.setInputFiles(testFilePath);
 
     // Verify attachment preview appears
@@ -246,8 +286,10 @@ test.describe('File Attachment Tests', () => {
   });
 
   test('should download own attachments', async ({ page, context, username }) => {
-    const recipient = RECIPIENT;
-    const fileName = 'test-image.png';
+    const recipient = testRecipient.username;
+    const fileInfo = testFiles.image;
+    const fileName = fileInfo.fileName;
+    const testFilePath = fileInfo.filePath;
 
     // Start waiting for download before clicking
     const downloadPromise = page.waitForEvent('download');
@@ -267,7 +309,6 @@ test.describe('File Attachment Tests', () => {
 
     // Set the file input for upload
     const fileInput = page.locator('#chatFileInput');
-    const testFilePath = path.join(__dirname, '..', 'fixtures', fileName);
     await fileInput.setInputFiles(testFilePath);
 
     // Send message with attachment
@@ -280,7 +321,7 @@ test.describe('File Attachment Tests', () => {
     }
 
     // Verify message with attachment was sent
-    const attachmentLink = page.locator('.message.sent .attachment-link');
+    const attachmentLink = page.locator('.message.sent .attachment-label');
     await expect(attachmentLink).toBeVisible({ timeout: 15000 });
     await expect(attachmentLink).toHaveText(fileName);
 
@@ -292,7 +333,9 @@ test.describe('File Attachment Tests', () => {
 
     // Verify the downloaded file has the correct name
     expect(download.suggestedFilename()).toBe(fileName);
-    const downloadPath = path.join(__dirname, '..', 'test-results', 'downloads', download.suggestedFilename());
+    
+    // Use a unique path for this test run to avoid conflicts
+    const downloadPath = path.join(__dirname, '..', 'test-results', 'downloads', testRunUniqueId, download.suggestedFilename());
 
     try {
       // Save the download to a temporary location and verify it exists
@@ -311,19 +354,17 @@ test.describe('File Attachment Tests', () => {
       // Check if file contents match (byte by byte comparison)
       expect(downloadedFileBuffer.equals(originalFileBuffer)).toBe(true);
     } finally {
-      // Clean up downloaded file
-      if (fs.existsSync(downloadPath)) {
-        fs.unlinkSync(downloadPath);
-      }
+      // Clean up is handled in afterAll
     }
   });
 
   test('should verify recipient receives message and attachment and can download it', async ({ page, username, browser }) => {
     const sender = username;
-    const recipient = RECIPIENT;
+    const recipient = testRecipient.username;
+    const fileInfo = testFiles.image;
+    const fileName = fileInfo.fileName;
+    const testFilePath = fileInfo.filePath;
     const testMessage = 'Message with attachment for verification';
-    const fileName = 'test-image.png';
-    const originalFilePath = path.join(__dirname, '..', 'fixtures', fileName);
 
     // Send a message with attachment from sender
     await page.click('#newChatButton');
@@ -340,7 +381,7 @@ test.describe('File Attachment Tests', () => {
 
     // Set the file input for upload
     const fileInput = page.locator('#chatFileInput');
-    await fileInput.setInputFiles(originalFilePath);
+    await fileInput.setInputFiles(testFilePath);
 
     // Add text to message
     await page.fill('.message-input', testMessage);
@@ -354,10 +395,10 @@ test.describe('File Attachment Tests', () => {
     }
 
     // Verify message was sent
-    await expect(page.locator('.message.sent .attachment-link', { hasText: fileName })).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('.message.sent .attachment-label', { hasText: fileName })).toBeVisible({ timeout: 15000 });
 
     // Reuse the recipient context that was created in beforeAll
-    const recipientPage = await RECIPIENT_CONTEXT.newPage();
+    const recipientPage = await testRecipient.context.newPage();
 
     try {
       // Start waiting for download before clicking
@@ -378,7 +419,7 @@ test.describe('File Attachment Tests', () => {
 
       // Verify recipient received both the message text and attachment
       await expect(recipientPage.locator('.message.received .message-content', { hasText: testMessage })).toBeVisible({ timeout: 15000 });
-      const recipientAttachmentLink = recipientPage.locator('.message.received .attachment-link', { hasText: fileName });
+      const recipientAttachmentLink = recipientPage.locator('.message.received .attachment-label', { hasText: fileName });
       await expect(recipientAttachmentLink).toBeVisible({ timeout: 15000 });
       
       // Click on the attachment link to download it
@@ -390,8 +431,8 @@ test.describe('File Attachment Tests', () => {
       // Verify the downloaded file has the correct name
       expect(download.suggestedFilename()).toBe(fileName);
       
-      // Save the download to a temporary location
-      const downloadPath = path.join(__dirname, '..', 'test-results', 'downloads', `recipient-${download.suggestedFilename()}`);
+      // Use a unique path for this test run to avoid conflicts
+      const downloadPath = path.join(__dirname, '..', 'test-results', 'downloads', testRunUniqueId, `recipient-${download.suggestedFilename()}`);
       
       try {
         // Save the download to a temporary location and verify it exists
@@ -401,7 +442,7 @@ test.describe('File Attachment Tests', () => {
         expect(fs.existsSync(downloadPath)).toBe(true);
         
         // Compare the original uploaded file with the downloaded file
-        const originalFileBuffer = fs.readFileSync(originalFilePath);
+        const originalFileBuffer = fs.readFileSync(testFilePath);
         const downloadedFileBuffer = fs.readFileSync(downloadPath);
         
         // Check if file sizes match
@@ -410,10 +451,7 @@ test.describe('File Attachment Tests', () => {
         // Check if file contents match (byte by byte comparison)
         expect(downloadedFileBuffer.equals(originalFileBuffer)).toBe(true);
       } finally {
-        // Clean up downloaded file
-        if (fs.existsSync(downloadPath)) {
-          fs.unlinkSync(downloadPath);
-        }
+        // Clean up is handled in afterAll
       }
     } finally {
       await recipientPage.close();
@@ -422,23 +460,27 @@ test.describe('File Attachment Tests', () => {
 
   test('should send and download multiple attachments', async ({ page, username, browser }) => {
     const sender = username;
-    const recipient = RECIPIENT;
+    const recipient = testRecipient.username;
     const testMessage = 'Message with multiple attachments';
     
     // Define multiple attachments to test with
-    const attachments = [
-      { name: 'test-image-1.png', type: 'image/png' },
-      { name: 'test-image-2.png', type: 'image/png' },
-      { name: 'test-pdf-1.pdf', type: 'application/pdf' },
-      { name: 'test-pdf-2.pdf', type: 'application/pdf' },
-      { name: 'test-image-3.png', type: 'image/png' }
+    const attachmentTypes = [
+      { baseName: 'test-image-1.png', type: 'image/png' },
+      { baseName: 'test-image-2.png', type: 'image/png' },
+      { baseName: 'test-pdf-1.pdf', type: 'application/pdf' },
+      { baseName: 'test-pdf-2.pdf', type: 'application/pdf' },
+      { baseName: 'test-image-3.png', type: 'image/png' }
     ];
     
-    // Create all the test files
-    const filePaths = [];
-    for (const attachment of attachments) {
-      const filePath = await createTestFile(attachment.name, 0.2, attachment.type);
-      filePaths.push(filePath);
+    // Create all the test files with unique names
+    const attachments = [];
+    for (const attachment of attachmentTypes) {
+      const result = await createTestFile(attachment.baseName, 0.2, attachment.type, `${testRunUniqueId}-multi`);
+      attachments.push({
+        filePath: result.filePath,
+        fileName: result.fileName,
+        type: attachment.type
+      });
     }
         
     // STEP 1: SENDER SENDS MULTIPLE ATTACHMENTS
@@ -456,17 +498,18 @@ test.describe('File Attachment Tests', () => {
     await expect(page.locator('#chatModal')).toBeVisible();
     
     // Add all files one by one
-    for (const filePath of filePaths) {
+    for (let i = 0; i < attachments.length; i++) {
+      const attachment = attachments[i];
+      
       // Set the file input for upload
       const fileInput = page.locator('#chatFileInput');
-      await fileInput.setInputFiles(filePath);
+      await fileInput.setInputFiles(attachment.filePath);
       
       // Verify attachment preview appears for each file
-      const fileName = path.basename(filePath);
-      await expect(page.locator('#attachmentPreview .attachment-name', { hasText: fileName })).toBeVisible();
+      await expect(page.locator('#attachmentPreview .attachment-name', { hasText: attachment.fileName })).toBeVisible();
       
       // Add text to message if it's the last attachment
-      if (filePath === filePaths[filePaths.length - 1]) {
+      if (i === attachments.length - 1) {
         await page.fill('.message-input', testMessage);
       }
     }
@@ -481,13 +524,12 @@ test.describe('File Attachment Tests', () => {
     
     // Verify messages with attachments were sent
     for (const attachment of attachments) {
-      const attachmentLink = page.locator('.message.sent .attachment-link', { hasText: attachment.name });
+      const attachmentLink = page.locator('.message.sent .attachment-label', { hasText: attachment.fileName });
       await expect(attachmentLink).toBeVisible({ timeout: 15000 });
     }
     
     // STEP 2: RECIPIENT RECEIVES AND DOWNLOADS ALL ATTACHMENTS
-    const recipientPage = await RECIPIENT_CONTEXT.newPage();
-    const downloadedFiles = [];
+    const recipientPage = await testRecipient.context.newPage();
     
     try {
       // Sign in as recipient
@@ -509,7 +551,7 @@ test.describe('File Attachment Tests', () => {
       // Verify and download each attachment
       for (const attachment of attachments) {        
         // Verify the attachment link is visible
-        const attachmentLink = recipientPage.locator('.message.received .attachment-link', { hasText: attachment.name });
+        const attachmentLink = recipientPage.locator('.message.received .attachment-label', { hasText: attachment.fileName });
         await expect(attachmentLink).toBeVisible({ timeout: 15000 });
         
         // Set up download listener for this specific attachment
@@ -520,11 +562,10 @@ test.describe('File Attachment Tests', () => {
         
         // Wait for download to start
         const download = await downloadPromise;
-        expect(download.suggestedFilename()).toBe(attachment.name);
+        expect(download.suggestedFilename()).toBe(attachment.fileName);
         
-        // Define path for the downloaded file
-        const downloadPath = path.join(__dirname, '..', 'test-results', 'downloads', `multi-${download.suggestedFilename()}`);
-        downloadedFiles.push(downloadPath);
+        // Define path for the downloaded file with unique ID to avoid conflicts
+        const downloadPath = path.join(__dirname, '..', 'test-results', 'downloads', testRunUniqueId, `multi-${download.suggestedFilename()}`);
         
         // Save the download
         await download.saveAs(downloadPath);
@@ -532,11 +573,8 @@ test.describe('File Attachment Tests', () => {
         // Verify file was downloaded
         expect(fs.existsSync(downloadPath)).toBe(true);
         
-        // Get original file for comparison
-        const originalFilePath = path.join(__dirname, '..', 'fixtures', attachment.name);
-        
         // Compare files
-        const originalFileBuffer = fs.readFileSync(originalFilePath);
+        const originalFileBuffer = fs.readFileSync(attachment.filePath);
         const downloadedFileBuffer = fs.readFileSync(downloadPath);
         
         // Check file sizes
@@ -546,15 +584,10 @@ test.describe('File Attachment Tests', () => {
         expect(downloadedFileBuffer.equals(originalFileBuffer)).toBe(true);
       }
     } finally {
-      // Clean up downloaded files
-      for (const filePath of downloadedFiles) {
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-        }
-      }
-      
       // Close recipient page
       await recipientPage.close();
+      
+      // Clean up is handled in afterAll
     }
   });
 });
