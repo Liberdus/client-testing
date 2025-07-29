@@ -123,8 +123,8 @@ test('should sign out successfully', async ({ page }) => {
 
 test('Should set toll', async ({ page }) => {
   const toll = 5;
-  await page.click('#toggleMenu');
-  await page.waitForSelector('#menuModal', { timeout: 5_000 });
+  await page.click('#toggleSettings');
+  await page.waitForSelector('#settingsModal', { timeout: 5_000 });
   await page.click('#openToll');
   await page.waitForSelector('#tollModal', { timeout: 5_000 });
   await page.fill('#newTollAmountInput', toll.toString());
@@ -140,7 +140,7 @@ test('Should update profile', async ({ page, username }) => {
   const phone = "5555555";
   const linkedin = "testerlinkedin";
   const x = "testerx";
-  await page.locator('#toggleMenu').click();
+  await page.locator('#toggleSettings').click();
   await page.locator('#openAccountForm').click();
   await page.locator('#name').fill(name);
   await page.locator('#email').fill(email);

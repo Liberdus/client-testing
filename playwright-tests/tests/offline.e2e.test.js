@@ -243,9 +243,9 @@ test.describe('Offline Tests', () => {
         // Set user offline
         await setUserOfflineAndWaitForIndicator(context, page);
 
-        // Navigate to menu 
-        await page.locator('#toggleMenu').click();
-        await expect(page.locator('#menuModal')).toBeVisible();
+        // Navigate to settings
+        await page.locator('#toggleSettings').click();
+        await expect(page.locator('#settingsModal')).toBeVisible();
 
         // Open toll modal
         await page.locator('#openToll').click();
@@ -265,9 +265,9 @@ test.describe('Offline Tests', () => {
         // Set user offline
         await setUserOfflineAndWaitForIndicator(context, page);
 
-        // Navigate to menu 
-        await page.locator('#toggleMenu').click();
-        await expect(page.locator('#menuModal')).toBeVisible();
+        // Navigate to settings
+        await page.locator('#toggleSettings').click();
+        await expect(page.locator('#settingsModal')).toBeVisible();
 
         // Open profile modal
         await page.locator('#openAccountForm').click();

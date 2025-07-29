@@ -15,8 +15,8 @@ const FriendStatus = {
 };
 
 async function setToll(page, amount) {
-    await page.click('#toggleMenu');
-    await expect(page.locator('#menuModal')).toBeVisible();
+    await page.click('#toggleSettings');
+    await expect(page.locator('#settingsModal')).toBeVisible();
     await page.click('#openToll');
     await expect(page.locator('#tollModal')).toBeVisible();
     await page.fill('#newTollAmountInput', amount.toString());
@@ -27,7 +27,7 @@ async function setToll(page, amount) {
             /toll transaction successfully processed/i.test(msg.text())
     });
     await page.click('#closeTollModal');
-    await page.click('#closeMenu');
+    await page.click('#closeSettings');
 }
 
 async function setFriendStatus(page, username, status) {

@@ -2,8 +2,8 @@ const { test: base, expect } = require('@playwright/test');
 const { generateUsername, createAndSignInUser } = require('../helpers/userHelpers');
 
 async function lockAccount(page, password) {
-    await page.click('#toggleMenu');
-    await expect(page.locator('#menuModal')).toBeVisible();
+    await page.click('#toggleSettings');
+    await expect(page.locator('#settingsModal')).toBeVisible();
     await page.click('#openLockModal');
     await expect(page.locator('#lockModal')).toBeVisible();
     await page.fill('#newPassword', password);
@@ -13,7 +13,7 @@ async function lockAccount(page, password) {
 }
 
 async function signOut(page) {
-    await page.click('#handleSignOut');
+    await page.click('#handleSignOutSettings');
     await expect(page.locator('#welcomeScreen')).toBeVisible();
 }
 
@@ -121,7 +121,7 @@ test('Remove Lock', async ({ lockedUser }) => {
     await expect(page.locator('#header .app-name')).toHaveText(username);
 
     // 5 remove the password
-    await page.click('#toggleMenu');
+    await page.click('#toggleSettings');
     await page.click('#openLockModal');
     await expect(page.locator('#lockModal')).toBeVisible();
     await page.click('#removeLockButton');
