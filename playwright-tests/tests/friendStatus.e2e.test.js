@@ -35,8 +35,8 @@ async function setFriendStatus(page, username, status) {
 }
 
 async function setToll(page, amount) {
-    await page.click('#toggleMenu');
-    await expect(page.locator('#menuModal')).toBeVisible();
+    await page.click('#toggleSettings');
+    await expect(page.locator('#settingsModal')).toBeVisible();
     await page.click('#openToll');
     await expect(page.locator('#tollModal')).toBeVisible();
     await page.fill('#newTollAmountInput', amount.toString());
@@ -47,7 +47,7 @@ async function setToll(page, amount) {
             /toll transaction successfully processed/i.test(msg.text())
     });
     await page.click('#closeTollModal');
-    await page.click('#closeMenu');
+    await page.click('#closeSettings');
 }
 
 /**
@@ -225,7 +225,7 @@ test.describe('Friend Status E2E', () => {
 
 
         // User A fills out profile
-        await a.page.click('#toggleMenu');
+        await a.page.click('#toggleSettings');
         await a.page.locator('#openAccountForm').click();
         await a.page.fill('#name', name);
         await a.page.fill('#email', email);
@@ -233,7 +233,7 @@ test.describe('Friend Status E2E', () => {
         await a.page.fill('#linkedin', linkedin);
         await a.page.fill('#x', x);
         await a.page.click('#accountModal button[type="submit"]');
-        await a.page.click('#closeMenu');
+        await a.page.click('#closeSettings');
 
         // Set friend status to Friend
         await setFriendStatus(a.page, b.username, FriendStatus.FRIEND);

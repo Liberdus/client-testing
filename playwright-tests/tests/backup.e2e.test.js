@@ -3,8 +3,8 @@ const { createAndSignInUser, generateUsername } = require('../helpers/userHelper
 const path = require('path');
 
 async function backupAccount(page, backupFilePath, password = '') {
-    await page.click('#toggleMenu');
-    await expect(page.locator('#menuModal')).toBeVisible();
+    await page.click('#toggleSettings');
+    await expect(page.locator('#settingsModal')).toBeVisible();
     await page.click('#openExportForm');
     await expect(page.locator('#exportModal')).toBeVisible();
 

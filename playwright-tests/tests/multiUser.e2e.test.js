@@ -75,8 +75,8 @@ test.describe('Multi User Tests', () => {
       await pg1.waitForTimeout(5_000);
 
       // User 1 set toll
-      await pg1.click('#toggleMenu');
-      await pg1.waitForSelector('#menuModal', { timeout: 5_000 });
+      await pg1.click('#toggleSettings');
+      await pg1.waitForSelector('#settingsModal', { timeout: 5_000 });
       await pg1.click('#openToll');
       await pg1.waitForSelector('#tollModal', { timeout: 5_000 });
       await pg1.fill('#newTollAmountInput', toll.toString());
@@ -86,7 +86,7 @@ test.describe('Multi User Tests', () => {
       expect(tollText.trim().startsWith(toll.toString())).toBeTruthy();
       // close out of toggle menu
       await pg1.click('#closeTollModal');
-      await pg1.click('#closeMenu');
+      await pg1.click('#closeSettings');
 
       // User1 Check wallet balance
       await pg1.click('#switchToWallet');
