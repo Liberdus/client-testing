@@ -5,15 +5,16 @@ const path = require('path');
 async function backupAccount(page, backupFilePath, password = '') {
     await page.click('#toggleSettings');
     await expect(page.locator('#settingsModal')).toBeVisible();
-    await page.click('#openExportForm');
-    await expect(page.locator('#exportModal')).toBeVisible();
+    await page.click('#openBackupForm');
+    await expect(page.locator('#backupModal')).toBeVisible();
 
     if (password) {
-        await page.fill('#exportPassword', password);
+        await page.fill('#backupPassword', password);
+        await page.fill('#backupPasswordConfirm', password);
     }
 
     const downloadPromise = page.waitForEvent('download');
-    await page.click('#exportForm button[type="submit"]');
+    await page.click('#backupForm button[type="submit"]');
     const download = await downloadPromise;
     await download.saveAs(backupFilePath);
 }
@@ -108,6 +109,38 @@ test.describe('Account Backup and Restore', () => {
             await newContext.close();
         }
     });
+
+    test('should require matching password confirmation before enabling backup submit button', async ({ page }) => {
+        // Create and sign in user
+        await createAndSignInUser(page, username);
+
+        // Navigate to backup modal
+        await page.click('#toggleSettings');
+        await expect(page.locator('#settingsModal')).toBeVisible();
+        await page.click('#openBackupForm');
+        await expect(page.locator('#backupModal')).toBeVisible();
+
+        // Submit button should be enabled initially (for no password case)
+        const submitButton = page.locator('#backupForm button[type="submit"]');
+        await expect(submitButton).toBeEnabled();
+
+        // Enter password without confirmation - button should be disabled
+        await page.fill('#backupPassword', 'password123');
+        await expect(submitButton).toBeDisabled();
+
+        // Enter different confirmation - button should remain disabled
+        await page.fill('#backupPasswordConfirm', 'differentPassword');
+        await expect(submitButton).toBeDisabled();
+
+        // Enter matching confirmation - button should be enabled
+        await page.fill('#backupPasswordConfirm', 'password123');
+        await expect(submitButton).toBeEnabled();
+
+        // Clear both fields - button should be enabled (for no password case)
+        await page.fill('#backupPassword', '');
+        await page.fill('#backupPasswordConfirm', '');
+        await expect(submitButton).toBeEnabled();
+    });
 });
 
 [
@@ -128,12 +161,13 @@ test.describe('Account Backup and Restore', () => {
         await page.goto('');
         await expect(page.locator('#welcomeScreen')).toBeVisible();
         await page.click('#openBackupModalButton');
-        await expect(page.locator('#exportModal')).toBeVisible();
+        await expect(page.locator('#backupModal')).toBeVisible();
         if (password) {
-            await page.fill('#exportPassword', password);
+            await page.fill('#backupPassword', password);
+            await page.fill('#backupPasswordConfirm', password);
         }
         const downloadPromise = page.waitForEvent('download');
-        await page.click('#exportForm button[type="submit"]');
+        await page.click('#backupForm button[type="submit"]');
         const download = await downloadPromise;
         await download.saveAs(backupFilePath);
         await page.context().close();
