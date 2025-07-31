@@ -146,7 +146,7 @@ test.describe('Message Saving Tests', () => {
         }
     });
 
-    test('should download messages after browser closes without saving', async ({ messageUsers }) => {
+    test('should save messages when browser is closed', async ({ messageUsers }) => {
         const { users: { user1, user2 }, messages } = messageUsers;
 
         try {
@@ -176,8 +176,8 @@ test.describe('Message Saving Tests', () => {
             const user2LocalStorage = await getLocalStorage(newPage2);
             const storedUser1Messages = getMessagesBetweenUsers(user1LocalStorage, user1.username, user2.username);
             const storedUser2Messages = getMessagesBetweenUsers(user2LocalStorage, user2.username, user1.username);
-            expect(storedUser1Messages.length).toBe(0);
-            expect(storedUser2Messages.length).toBe(0);
+            expect(storedUser1Messages.length).toBe(expectedMessages.length);
+            expect(storedUser2Messages.length).toBe(expectedMessages.length);
 
             // Now click sign in for both users
             await newPage1.click('#signInButton');
