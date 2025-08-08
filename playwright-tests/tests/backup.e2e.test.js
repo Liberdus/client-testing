@@ -197,4 +197,86 @@ test.describe('Account Backup and Restore', () => {
             await newContext.close();
         }
     });
-})
+});
+
+[
+    { name: 'with password', password: 'backupallpassword123' },
+    { name: 'without password', password: '' }
+].forEach(({ name, password }) => {
+    test(`should backup all accounts from settings using the checkbox ${name}`, async ({ page, browser, browserName }, testInfo) => {
+        const backupFilePath = testInfo.outputPath(path.join('backups', `settings-all-accounts-${name}.json`));
+        const username1 = generateUsername(browserName);
+        const username2 = generateUsername(browserName);
+        
+        // Create first user
+        await createAndSignInUser(page, username1);
+
+        // Create second user
+        await createAndSignInUser(page, username2);
+
+        // Sign in as the first user
+        await page.goto('');
+        await expect(page.locator('#welcomeScreen')).toBeVisible();
+        await page.click('#signInButton');
+        const userDropdown = page.locator('#username');
+        await userDropdown.selectOption(username1);
+        await page.click('#signInForm button[type="submit"]');
+        await expect(page.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
+        
+        // Open settings and backup modal
+        await page.click('#toggleSettings');
+        await expect(page.locator('#settingsModal')).toBeVisible();
+        await page.click('#openBackupForm');
+        await expect(page.locator('#backupModal')).toBeVisible();
+        
+        // Check the backup all accounts checkbox
+        await page.check('#backupAllAccounts');
+        
+        // Set password for encryption if provided
+        if (password) {
+            await page.fill('#backupPassword', password);
+            await page.fill('#backupPasswordConfirm', password);
+        }
+        
+        // Backup all accounts
+        const downloadPromise = page.waitForEvent('download');
+        await page.click('#backupForm button[type="submit"]');
+        const download = await downloadPromise;
+        await download.saveAs(backupFilePath);
+        await page.context().close();
+
+        // Restore in a new context
+        const newContext = await browser.newContext();
+        try {
+            const newPage = await newContext.newPage();
+            await restoreAccount(newPage, backupFilePath, password);
+
+            // After restoring, expect to be on the welcome screen with a sign-in button
+            await expect(newPage.locator('#welcomeScreen')).toBeVisible();
+            await expect(newPage.locator('#signInButton')).toBeVisible();
+
+            // Click sign in and verify both accounts are in the dropdown
+            await newPage.click('#signInButton');
+            const restoreUserDropdown = newPage.locator('#username');
+            await expect(restoreUserDropdown).toContainText(username1);
+            await expect(restoreUserDropdown).toContainText(username2);
+
+            // Sign in as first user and verify
+            await restoreUserDropdown.selectOption(username1);
+            await newPage.click('#signInForm button[type="submit"]');
+            await expect(newPage.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
+            await expect(newPage.locator('.app-name')).toHaveText(username1);
+            
+            // Go back to welcome screen and sign in as second user
+            await newPage.goto('');
+            await expect(newPage.locator('#welcomeScreen')).toBeVisible();
+            await newPage.click('#signInButton');
+            await restoreUserDropdown.selectOption(username2);
+            await newPage.click('#signInForm button[type="submit"]');
+            await expect(newPage.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
+            await expect(newPage.locator('.app-name')).toHaveText(username2);
+        } finally {
+            await newContext.close();
+        }
+    });
+});
