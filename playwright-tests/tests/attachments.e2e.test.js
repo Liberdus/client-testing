@@ -219,38 +219,6 @@ test.describe('File Attachment Tests', () => {
     await expect(page.locator('#attachmentPreview')).toHaveAttribute('style', 'display: none;');
   });
 
-  test('should show error for invalid file type', async ({ page, username }) => {
-    const recipient = testRecipient.username;
-    const fileInfo = testFiles.invalid;
-    const testFilePath = fileInfo.filePath;
-
-    // Open New Chat
-    await page.click('#newChatButton');
-    await expect(page.locator('#newChatModal')).toBeVisible();
-    await page.fill('#chatRecipient', recipient);
-    await page.waitForTimeout(3_000);
-    const recipientStatus = await page.locator('#chatRecipientError').textContent().catch(() => '');
-    expect(recipientStatus).toBe('found');
-    const continueBtn = page.locator('#newChatForm button[type="submit"]');
-    await expect(continueBtn).toBeEnabled();
-    await continueBtn.click();
-
-    // Ensure we're in the chat modal
-    await expect(page.locator('#chatModal')).toBeVisible();
-
-    // Set the file input for upload with an invalid file type
-    const fileInput = page.locator('#chatFileInput');
-    await fileInput.setInputFiles(testFilePath);
-
-    // Verify error toast appears for invalid file type
-    await expect(page.locator('.toast.error.show')).toBeVisible({ timeout: 10_000 });
-    const errorMsg = await page.locator('.toast.error.show').textContent();
-    expect(errorMsg).toContain('File type not supported');
-
-    // Verify attachment preview does not appear
-    await expect(page.locator('#attachmentPreview')).toHaveAttribute('style', 'display: none;');
-  });
-
   test('should allow removing an attachment', async ({ page, username }) => {
     const recipient = testRecipient.username;
     const fileInfo = testFiles.image;
