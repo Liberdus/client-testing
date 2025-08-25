@@ -3,7 +3,7 @@ const { createAndSignInUser, generateUsername } = require('../helpers/userHelper
 
 
 
-// Tiny script injected into the sender context so getUserMedia({audio:true}) returns a real MediaStream
+// script injected into the sender context so getUserMedia({audio:true}) returns a real MediaStream
 function mockMicInitScript() {
     (function () {
         const OriginalGUM = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
@@ -33,6 +33,7 @@ function mockMicInitScript() {
     })();
 }
 
+// instrumentWebAudio sets up hooks to analyze audio output in the page context
 function instrumentWebAudio() {
     (function () {
         const contexts = [];
