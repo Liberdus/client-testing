@@ -6,8 +6,6 @@ const { getLiberdusBalance } = require('../helpers/walletHelpers');
 const { sendMessageTo, checkReceivedMessage } = require('../helpers/messageHelpers');
 const { generateUsername } = require('../helpers/userHelpers');
 
-// ─────── Logging utility ────────────────────────────────────────
-const log = (msg) => console.log(`[E2E TEST] ${msg}`);
 
 // Constants
 const NETWORK_FEE = 0.1; // Default network fee for transactions
@@ -16,8 +14,6 @@ const NETWORK_TOLL_TAX = 0.01; // 1% network fee on tolls
 test.describe('Multi User Tests', () => {
 
   test('should allow two users to message each other', async ({browserName, browser}) => {
-    log('Test: Two-user messaging scenario');
-
     const user1 = generateUsername(browserName);
     const user2 = generateUsername(browserName);
     const msg1 = 'Hello from user1!';
@@ -45,12 +41,10 @@ test.describe('Multi User Tests', () => {
     } finally {
       await ctx1.close();
       await ctx2.close();
-      log('Two-user messaging test completed.');
     }
   });
 
   test('should receive toll on read and on reply', async ({browserName, browser}) => {
-    log('Test: Wallet toll increases on message receipt');
     const user1 = generateUsername(browserName);
     const user2 = generateUsername(browserName);
     const msg2 = 'Hello with toll!';
@@ -94,10 +88,8 @@ test.describe('Multi User Tests', () => {
       await pg1.waitForTimeout(20_000);
       await pg1.click('#refreshBalance');
       const balanceBefore = await getLiberdusBalance(pg1);
-      log(`User1 initial balance: ${balanceBefore}`);
 
       // User2 ➜ User1
-      log(`User2 (${user2}) sending message to User1 (${user1})`);
       await sendMessageTo(pg2, user1, msg2);
 
       // User1: Wait for message, then check wallet balance
@@ -138,7 +130,6 @@ test.describe('Multi User Tests', () => {
     } finally {
       await ctx1.close();
       await ctx2.close();
-      log('Wallet toll test completed.');
     }
   });
 });

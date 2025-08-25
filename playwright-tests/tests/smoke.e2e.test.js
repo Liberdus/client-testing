@@ -3,7 +3,6 @@
 const { test, expect } = require('../fixtures/newUserFixture');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 
-const log = (msg) => console.log(`[E2E TEST] ${msg}`);
 let RECIPIENT;
 
 test.describe('Tests requiring recipient user', () => {
@@ -14,12 +13,10 @@ test.describe('Tests requiring recipient user', () => {
 
     await createAndSignInUser(page, recipientName);
     RECIPIENT = recipientName;
-    log(`Created recipient user: ${RECIPIENT}`);
     await page.close();
   });
 
   test('should open New Chat modal, start a chat, and send a message', async ({ page }) => {
-    log('Test: New Chat and Send Message');
     const recipient = RECIPIENT;
 
     await page.click('#newChatButton');
@@ -53,7 +50,6 @@ test.describe('Tests requiring recipient user', () => {
   });
 
   test('should send LIB to contact with no memo, and check history', async ({ page }) => {
-    log('Test: Send LIB to Contact and Check History');
     const recipient = RECIPIENT;
     const amount = 20;
 
@@ -102,7 +98,6 @@ test.describe('Tests requiring recipient user', () => {
 });
 
 test('should navigate to Contacts and Wallet views', async ({ page }) => {
-  log('Test: Navigation (Contacts, Wallet)');
   await page.click('#switchToContacts');
   await expect(page.locator('#contactsScreen.active')).toBeVisible();
   await page.click('#switchToWallet');
@@ -112,7 +107,6 @@ test('should navigate to Contacts and Wallet views', async ({ page }) => {
 });
 
 test('should sign out successfully', async ({ page }) => {
-  log('Test: Sign Out');
   // wait for UI animation
   await page.waitForTimeout(1000);
   await page.click('#toggleMenu');
