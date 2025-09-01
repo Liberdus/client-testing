@@ -36,6 +36,53 @@ async function restoreAccount(page, backupFilePath, password = '') {
     await page.click('#importForm button[type="submit"]');
 }
 
+// New helpers for lock & sign out to support additional tests
+async function setLock(page, password) {
+    // Opens lock modal from settings and sets a device lock password
+    await page.click('#toggleSettings');
+    await expect(page.locator('#settingsModal')).toBeVisible();
+    await page.click('#openLockModal');
+    await expect(page.locator('#lockModal')).toBeVisible();
+    // If change / remove buttons exist we always perform a fresh set (simple path)
+    await page.fill('#newPassword', password);
+    await page.fill('#confirmNewPassword', password);
+    await page.click('#lockForm button[type="submit"]');
+    await expect(page.locator('.toast.success.show')).toBeVisible({ timeout: 15_000 });
+}
+
+async function signOut(page) {
+    // Uses settings sign out button (aligns with other tests) then waits for welcome screen
+    await page.click('#handleSignOutSettings');
+    await expect(page.locator('#welcomeScreen')).toBeVisible();
+}
+
+// Profile helpers
+async function openProfileModal(page) {
+    await page.click('#toggleSettings');
+    await expect(page.locator('#settingsModal')).toBeVisible();
+    await page.click('#openAccountForm');
+    await expect(page.locator('#accountModal.active')).toBeVisible();
+}
+
+async function updateProfileName(page, newName) {
+    await openProfileModal(page);
+    await page.fill('#name', newName);
+    await page.click('#accountForm button[type="submit"]');
+    // wait for toast
+    await expect(page.locator('.toast.success.show')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('#settingsModal')).toBeVisible();
+    await page.click('#closeSettings');
+}
+
+async function getProfileName(page) {
+    await openProfileModal(page);
+    const value = await page.inputValue('#name');
+    await page.click('#closeAccountForm');
+    await expect(page.locator('#settingsModal')).toBeVisible();
+    await page.click('#closeSettings');
+    return value.trim();
+}
+
 test.describe('Account Backup and Restore', () => {
     let username;
     let backupFilePath;
@@ -140,6 +187,207 @@ test.describe('Account Backup and Restore', () => {
         await page.fill('#backupPassword', '');
         await page.fill('#backupPasswordConfirm', '');
         await expect(submitButton).toBeEnabled();
+    });
+});
+
+// -------------------------------------------------------------
+// New scenarios for welcome-screen restore with overwrite/lock
+// -------------------------------------------------------------
+
+test.describe('Welcome Screen Restore - New Behavior', () => {
+    test('should require backup account lock password when restoring locked backup', async ({ page, browser, browserName }, testInfo) => {
+        const username = generateUsername(browserName);
+        const lockPassword = 'deviceLockPw1!';
+        const backupFilePath = testInfo.outputPath(path.join('backups', `${username}-locked-backup.json`));
+
+        // Create user & set device lock, then backup (no explicit backup password)
+        await createAndSignInUser(page, username);
+        await setLock(page, lockPassword);
+        await page.click('#openBackupForm');
+        await expect(page.locator('#backupModal')).toBeVisible();
+        await page.click('#backupAllAccounts');
+        const downloadPromise = page.waitForEvent('download');
+        await page.click('#backupForm button[type="submit"]');
+        const download = await downloadPromise;
+        await download.saveAs(backupFilePath);
+        await page.context().close();
+
+        // Restore in a new context
+        const restoreCtx = await browser.newContext();
+        try {
+            const restorePage = await restoreCtx.newPage();
+            await restorePage.goto('');
+            await expect(restorePage.locator('#welcomeScreen')).toBeVisible();
+            await restorePage.click('#importAccountButton');
+            await expect(restorePage.locator('#importModal')).toBeVisible();
+            await restorePage.setInputFiles('#importFile', backupFilePath);
+
+            await restorePage.fill('#backupAccountLock', lockPassword);
+            restorePage.on('dialog', dialog => dialog.accept());
+            await restorePage.click('#importForm button[type="submit"]');
+
+            // After restore expect to remain on welcome screen and be able to sign in
+            await expect(restorePage.locator('#welcomeScreen')).toBeVisible();
+            await restorePage.click('#signInButton');
+            await expect(restorePage.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
+            await expect(restorePage.locator('.app-name')).toHaveText(username);
+        } finally {
+            await restoreCtx.close();
+        }
+    });
+
+    test('should re-encrypt imported accounts with new device lock password', async ({ browser, browserName }, testInfo) => {
+        // Device A: create locked backup
+        const ctxA = await browser.newContext();
+        const pageA = await ctxA.newPage();
+        const usernameA = generateUsername(browserName);
+        const lockA = 'LockAPass!';
+        const backupFilePath = testInfo.outputPath(path.join('backups', `${usernameA}-reencrypt.json`));
+        try {
+            await createAndSignInUser(pageA, usernameA);
+            await setLock(pageA, lockA);
+            await pageA.click('#openBackupForm');
+            await expect(pageA.locator('#backupModal')).toBeVisible();
+            await pageA.click('#backupAllAccounts');
+            const downloadPromise = pageA.waitForEvent('download');
+            await pageA.click('#backupForm button[type="submit"]');
+            const download = await downloadPromise;
+            await download.saveAs(backupFilePath);
+        } finally {
+            await ctxA.close();
+        }
+
+        // Device B: create existing account & its own lock, then restore backup from A
+        const ctxB = await browser.newContext();
+        const pageB = await ctxB.newPage();
+        const existingUsername = generateUsername(browserName);
+        const lockB = 'LockBPass!';
+        try {
+            await createAndSignInUser(pageB, existingUsername);
+            await setLock(pageB, lockB);
+            await pageB.click('#handleSignOutSettings');
+            await expect(pageB.locator('#welcomeScreen')).toBeVisible();
+
+            // Start restore
+            await pageB.click('#importAccountButton');
+            await pageB.fill('#password', lockB);
+            await pageB.click('#unlockForm button[type="submit"]');
+            await expect(pageB.locator('#importModal')).toBeVisible();
+            // wait 1 second
+            await pageB.waitForTimeout(1000);
+            await pageB.setInputFiles('#importFile', backupFilePath);
+            await pageB.fill('#backupAccountLock', lockA); // provide original backup lock
+            pageB.on('dialog', dialog => dialog.accept());
+            await pageB.click('#importForm button[type="submit"]');
+            await expect(pageB.locator('#welcomeScreen')).toBeVisible();
+
+            // Attempt unlock with old password (should fail)
+            await pageB.click('#signInButton');
+            await expect(pageB.locator('#unlockModal.active')).toBeVisible();
+
+            // Unlock with new device password
+            await pageB.fill('#password', lockB);
+            await pageB.click('#unlockForm button[type="submit"]')
+
+            // verify imported account present in dropdown (union of accounts)
+            const dropdown = pageB.locator('#username');
+            await expect(dropdown).toContainText(usernameA);
+            await expect(dropdown).toContainText(existingUsername);
+        } finally {
+            await ctxB.close();
+        }
+    });
+
+    test('should restore without overwrite keeping local profile changes (name unchanged)', async ({ browser, browserName }, testInfo) => {
+        const username = generateUsername(browserName);
+        const originalName = 'Original Name';
+        const modifiedName = 'Modified Name';
+        const backupFilePath = testInfo.outputPath(path.join('backups', 'no-overwrite-profile.json'));
+
+        const ctx = await browser.newContext();
+        const page = await ctx.newPage();
+        try {
+            await createAndSignInUser(page, username);
+            // Set original profile name
+            await updateProfileName(page, originalName);
+
+            // Backup current state (go to welcome first)
+            await page.goto('');
+            await page.click('#openBackupModalButton');
+            await expect(page.locator('#backupModal')).toBeVisible();
+            const dl1 = page.waitForEvent('download');
+            await page.click('#backupForm button[type="submit"]');
+            const download = await dl1; await download.saveAs(backupFilePath);
+
+            // Modify profile locally
+            await page.click('#signInButton');
+            await expect(page.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
+            await updateProfileName(page, modifiedName);
+
+            // sign out
+            await page.click('#toggleSettings');
+            await page.click('#handleSignOutSettings');
+            await expect(page.locator('#welcomeScreen')).toBeVisible();
+
+            // Restore WITHOUT overwrite
+            await page.click('#importAccountButton');
+            await page.setInputFiles('#importFile', backupFilePath);
+            page.on('dialog', dialog => dialog.accept());
+            await page.click('#importForm button[type="submit"]');
+            await expect(page.locator('#welcomeScreen')).toBeVisible();
+
+            // Sign in & verify name stayed modified (local change preserved)
+            await page.click('#signInButton');
+            await expect(page.locator('#chatsScreen.active')).toBeVisible();
+            const current = await getProfileName(page);
+            expect(current).toBe(modifiedName);
+        } finally { await ctx.close(); }
+    });
+
+    test('should overwrite conflicting profile data when checkbox checked (name reverted to backup)', async ({ browser, browserName }, testInfo) => {
+        const username = generateUsername(browserName);
+        const originalName = 'Original Namerevert';
+        const modifiedName = 'Locally Changedname';
+        const backupFilePath = testInfo.outputPath(path.join('backups', 'with-overwrite-profile.json'));
+
+        const ctx = await browser.newContext();
+        const page = await ctx.newPage();
+        try {
+            await createAndSignInUser(page, username);
+            await updateProfileName(page, originalName);
+
+            // Backup state
+            await page.goto('');
+            await page.click('#openBackupModalButton');
+            await expect(page.locator('#backupModal')).toBeVisible();
+            const dl1 = page.waitForEvent('download');
+            await page.click('#backupForm button[type="submit"]');
+            const download = await dl1; await download.saveAs(backupFilePath);
+
+            // Modify profile locally
+            await page.click('#signInButton');
+            await expect(page.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
+            await updateProfileName(page, modifiedName);
+            
+            // sign out
+            await page.click('#toggleSettings');
+            await page.click('#handleSignOutSettings');
+            await expect(page.locator('#welcomeScreen')).toBeVisible();
+
+            // Restore WITH overwrite
+            await page.click('#importAccountButton');
+            await page.setInputFiles('#importFile', backupFilePath);
+            await page.check('#overwriteAccountsCheckbox');
+            page.on('dialog', dialog => dialog.accept());
+            await page.click('#importForm button[type="submit"]');
+            await expect(page.locator('#welcomeScreen')).toBeVisible();
+
+            // Sign in & verify name reverted to original from backup
+            await page.click('#signInButton');
+            await expect(page.locator('#chatsScreen.active')).toBeVisible();
+            const current = await getProfileName(page);
+            expect(current).toBe(originalName);
+        } finally { await ctx.close(); }
     });
 });
 
