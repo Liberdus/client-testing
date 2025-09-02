@@ -37,8 +37,11 @@ async function restoreAccount(page, backupFilePath, password = '') {
 }
 
 async function setLock(page, password) {
-    await page.click('#toggleSettings');
-    await expect(page.locator('#settingsModal')).toBeVisible();
+    // if settingsModal.active is not visible
+    if (!await page.locator('#settingsModal.active').isVisible()) {
+        await page.click('#toggleSettings');
+    }
+    await expect(page.locator('#settingsModal.active')).toBeVisible();
     await page.click('#openLockModal');
     await expect(page.locator('#lockModal')).toBeVisible();
     await page.fill('#newPassword', password);
@@ -275,6 +278,84 @@ test.describe('Backup and Restore Scenarios', () => {
                 await expect(restorePage.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
                 await expect(restorePage.locator('.app-name')).toHaveText(username);
             } finally { await restoreCtx.close(); }
+        });
+
+        ;[
+            { name: 'without backup password', backupPassword: '' },
+            { name: 'with backup password', backupPassword: 'SingleAcctBackupPw123!' }
+        ].forEach(({ name, backupPassword }) => {
+            test(`single account overwrite restore retains original lock (${name})`, async ({ browser, browserName }, testInfo) => {
+                const username = generateUsername(browserName);
+                const originalLock = 'OriginalLockPw1!';
+                const newLock = 'ChangedLockPw2!';
+                const backupFilePath = testInfo.outputPath(path.join('backups', `single-acct-overwrite-${name.replace(/\s+/g, '-')}.json`));
+
+                // Create context and sign into the new account
+                const ctx = await browser.newContext();
+                const page = await ctx.newPage();
+                try {
+                    await createAndSignInUser(page, username);
+                    // Set original device lock
+                    await setLock(page, originalLock);
+
+                    // Open settings backup form (single account) while signed in
+                    await page.click('#openBackupForm');
+                    await expect(page.locator('#backupModal')).toBeVisible();
+                    // Ensure single account only (do NOT check #backupAllAccounts)
+                    const allAccountsCheckbox = page.locator('#backupAllAccounts');
+                    if (await allAccountsCheckbox.isChecked()) {
+                        await page.uncheck('#backupAllAccounts');
+                    }
+                    if (backupPassword) {
+                        await page.fill('#backupPassword', backupPassword);
+                        await page.fill('#backupPasswordConfirm', backupPassword);
+                    }
+                    const downloadPromise = page.waitForEvent('download');
+                    await page.click('#backupForm button[type="submit"]');
+                    const download = await downloadPromise; await download.saveAs(backupFilePath);
+
+                    // Change the device lock AFTER backup
+                    await expect(page.locator('#settingsModal.active')).toBeVisible();
+                    await page.click('#openLockModal');
+                    await expect(page.locator('#lockModal.active')).toBeVisible();
+                    await page.click('#changePasswordButton');
+                    await page.fill('#oldPassword', originalLock);
+                    await page.fill('#newPassword', newLock);
+                    await page.fill('#confirmNewPassword', newLock);
+                    await page.click('#lockForm button[type="submit"]');
+                    await expect(page.locator('.toast.success.show')).toBeVisible({ timeout: 15_000 });
+
+                    // Sign out
+                    await page.click('#handleSignOutSettings');
+                    await expect(page.locator('#welcomeScreen')).toBeVisible();
+
+                    // Start restore flow WITH overwrite using original lock
+                    await page.click('#importAccountButton');
+                    await expect(page.locator('#unlockModal.active')).toBeVisible();
+                    await page.fill('#password', newLock);
+                    await page.click('#unlockForm button[type="submit"]');
+                    await expect(page.locator('#importModal.active')).toBeVisible();
+                    await page.setInputFiles('#importFile', backupFilePath);
+                    if (backupPassword) {
+                        await page.fill('#importPassword', backupPassword);
+                    }
+                    await page.fill('#backupAccountLock', originalLock);
+                    await page.check('#overwriteAccountsCheckbox');
+                    page.on('dialog', dialog => dialog.accept());
+                    await page.click('#importForm button[type="submit"]');
+                    await expect(page.locator('#welcomeScreen')).toBeVisible();
+
+                    // Sign in (should succeed with restored account)
+                    await page.click('#signInButton');
+                    await expect(page.locator('#unlockModal.active')).toBeVisible();
+                    await page.fill('#password', newLock);
+                    await page.click('#unlockForm button[type="submit"]');
+                    await expect(page.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
+                    await expect(page.locator('.app-name')).toHaveText(username);
+                } finally {
+                    await ctx.close();
+                }
+            });
         });
 
         test('re-encrypt imported accounts with new device lock', async ({ browser, browserName }, testInfo) => {
