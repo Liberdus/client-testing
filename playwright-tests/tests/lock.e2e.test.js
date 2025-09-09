@@ -163,15 +163,15 @@ test('Should require unlock before restoring account when locked', async ({ lock
     await signOut(page);
     
     // Attempt to restore account
-    await page.click('#importAccountButton');
+    await page.click('#openWelcomeMenu');
     
     // Should show unlock modal first
-    await expect(page.locator('#unlockModal')).toBeVisible();
+    await expect(page.locator('#unlockModal.active')).toBeVisible();
     
     // Enter correct password
     await page.fill('#password', password);
     await page.click('#unlockForm button[type="submit"]');
     
-    // After unlock, restore account modal should appear
+    await page.click('#welcomeOpenRestore');
     await expect(page.locator('#importModal.active')).toBeVisible({ timeout: 5000 });
 });

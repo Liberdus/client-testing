@@ -22,7 +22,8 @@ async function backupAccount(page, backupFilePath, password = '') {
 async function restoreAccount(page, backupFilePath, password = '') {
     await page.goto('');
     await expect(page.locator('#welcomeScreen')).toBeVisible();
-    await page.click('#importAccountButton');
+    await page.click("#openWelcomeMenu")
+    await page.click('#welcomeOpenRestore');
     await expect(page.locator('#importModal')).toBeVisible();
 
     await page.setInputFiles('#importFile', backupFilePath);
@@ -92,9 +93,7 @@ test.describe('Backup and Restore Scenarios', () => {
             try {
                 const newPage = await newContext.newPage();
                 await newPage.goto('');
-                await expect(newPage.locator('#welcomeScreen')).toBeVisible();
-                await expect(newPage.locator('#createAccountButton')).toBeVisible();
-                await expect(newPage.locator('#importAccountButton')).toBeVisible();
+                await expect(newPage.locator('#welcomeScreen')).toBeVisible();;
                 await expect(newPage.locator('#signInButton')).not.toBeVisible();
                 await restoreAccount(newPage, backupFilePath);
                 await expect(newPage.locator('#welcomeScreen')).toBeVisible();
@@ -115,8 +114,6 @@ test.describe('Backup and Restore Scenarios', () => {
                 const newPage = await newContext.newPage();
                 await newPage.goto('');
                 await expect(newPage.locator('#welcomeScreen')).toBeVisible();
-                await expect(newPage.locator('#createAccountButton')).toBeVisible();
-                await expect(newPage.locator('#importAccountButton')).toBeVisible();
                 await expect(newPage.locator('#signInButton')).not.toBeVisible();
                 await restoreAccount(newPage, backupFilePath, password);
                 await expect(newPage.locator('#welcomeScreen')).toBeVisible();
@@ -162,7 +159,8 @@ test.describe('Backup and Restore Scenarios', () => {
                 await createAndSignInUser(page, username2);
                 await page.goto('');
                 await expect(page.locator('#welcomeScreen')).toBeVisible();
-                await page.click('#openBackupModalButton');
+                await page.click('#openWelcomeMenu');
+                await page.click('#welcomeOpenBackup');
                 await expect(page.locator('#backupModal')).toBeVisible();
                 if (password) {
                     await page.fill('#backupPassword', password);
@@ -267,7 +265,8 @@ test.describe('Backup and Restore Scenarios', () => {
                 const restorePage = await restoreCtx.newPage();
                 await restorePage.goto('');
                 await expect(restorePage.locator('#welcomeScreen')).toBeVisible();
-                await restorePage.click('#importAccountButton');
+                await restorePage.click('#openWelcomeMenu');
+                await restorePage.click('#welcomeOpenRestore');
                 await expect(restorePage.locator('#importModal')).toBeVisible();
                 await restorePage.setInputFiles('#importFile', backupFilePath);
                 await restorePage.fill('#backupAccountLock', lockPassword);
@@ -330,10 +329,11 @@ test.describe('Backup and Restore Scenarios', () => {
                     await expect(page.locator('#welcomeScreen')).toBeVisible();
 
                     // Start restore flow WITH overwrite using original lock
-                    await page.click('#importAccountButton');
+                    await page.click('#openWelcomeMenu');
                     await expect(page.locator('#unlockModal.active')).toBeVisible();
                     await page.fill('#password', newLock);
                     await page.click('#unlockForm button[type="submit"]');
+                    await page.click('#welcomeOpenRestore');
                     await expect(page.locator('#importModal.active')).toBeVisible();
                     await page.setInputFiles('#importFile', backupFilePath);
                     if (backupPassword) {
@@ -383,9 +383,10 @@ test.describe('Backup and Restore Scenarios', () => {
                 await setLock(pageB, lockB);
                 await pageB.click('#handleSignOutSettings');
                 await expect(pageB.locator('#welcomeScreen')).toBeVisible();
-                await pageB.click('#importAccountButton');
+                await pageB.click('#openWelcomeMenu');
                 await pageB.fill('#password', lockB);
                 await pageB.click('#unlockForm button[type="submit"]');
+                await pageB.click('#welcomeOpenRestore');
                 await expect(pageB.locator('#importModal')).toBeVisible();
                 await pageB.waitForTimeout(1000);
                 await pageB.setInputFiles('#importFile', backupFilePath);
@@ -419,18 +420,21 @@ test.describe('Backup and Restore Scenarios', () => {
                 await createAndSignInUser(page, username);
                 await updateProfileName(page, originalName);
                 await page.goto('');
-                await page.click('#openBackupModalButton');
-                await expect(page.locator('#backupModal')).toBeVisible();
+                await page.click('#openWelcomeMenu');
+                await page.click('#welcomeOpenBackup');
+                await expect(page.locator('#backupModal.active')).toBeVisible();
                 const dl1 = page.waitForEvent('download');
                 await page.click('#backupForm button[type="submit"]');
                 const download = await dl1; await download.saveAs(backupFilePath);
+                await page.click('#closeWelcomeMenu');
                 await page.click('#signInButton');
                 await expect(page.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
                 await updateProfileName(page, modifiedName);
                 await page.click('#toggleSettings');
                 await page.click('#handleSignOutSettings');
                 await expect(page.locator('#welcomeScreen')).toBeVisible();
-                await page.click('#importAccountButton');
+                await page.click('#openWelcomeMenu');
+                await page.click('#welcomeOpenRestore');
                 await page.setInputFiles('#importFile', backupFilePath);
                 page.on('dialog', dialog => dialog.accept());
                 await page.click('#importForm button[type="submit"]');
@@ -452,18 +456,21 @@ test.describe('Backup and Restore Scenarios', () => {
                 await createAndSignInUser(page, username);
                 await updateProfileName(page, originalName);
                 await page.goto('');
-                await page.click('#openBackupModalButton');
-                await expect(page.locator('#backupModal')).toBeVisible();
+                await page.click('#openWelcomeMenu');
+                await page.click('#welcomeOpenBackup');
+                await expect(page.locator('#backupModal.active')).toBeVisible();
                 const dl1 = page.waitForEvent('download');
                 await page.click('#backupForm button[type="submit"]');
                 const download = await dl1; await download.saveAs(backupFilePath);
+                await page.click('#closeWelcomeMenu');
                 await page.click('#signInButton');
                 await expect(page.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
                 await updateProfileName(page, modifiedName);
                 await page.click('#toggleSettings');
                 await page.click('#handleSignOutSettings');
                 await expect(page.locator('#welcomeScreen')).toBeVisible();
-                await page.click('#importAccountButton');
+                await page.click('#openWelcomeMenu');
+                await page.click('#welcomeOpenRestore');
                 await page.setInputFiles('#importFile', backupFilePath);
                 await page.check('#overwriteAccountsCheckbox');
                 page.on('dialog', dialog => dialog.accept());
