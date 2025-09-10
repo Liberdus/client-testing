@@ -5,11 +5,7 @@ const { createAndSignInUser } = require('../helpers/userHelpers');
 const { getLiberdusBalance } = require('../helpers/walletHelpers');
 const { sendMessageTo, checkReceivedMessage } = require('../helpers/messageHelpers');
 const { generateUsername } = require('../helpers/userHelpers');
-
-
-// Constants
-const NETWORK_FEE = 0.1; // Default network fee for transactions
-const NETWORK_TOLL_TAX = 0.01; // 1% network fee on tolls
+const networkParams = require('../helpers/networkParams');
 
 test.describe('Multi User Tests', () => {
 
@@ -48,7 +44,8 @@ test.describe('Multi User Tests', () => {
     const user1 = generateUsername(browserName);
     const user2 = generateUsername(browserName);
     const msg2 = 'Hello with toll!';
-    const toll = 3; // Set toll amount
+    const toll = .01; // Set toll amount
+    const tollInLib = toll / networkParams.stabilityFactor;
 
     // Create two isolated contexts
     const ctx1 = await browser.newContext();
@@ -76,7 +73,7 @@ test.describe('Multi User Tests', () => {
       await pg1.fill('#newTollAmountInput', toll.toString());
       await pg1.click('#saveNewTollButton');
       await pg1.waitForTimeout(1_000);
-      const tollText = await pg1.locator('#tollAmountLIB').textContent();
+      const tollText = await pg1.locator('#tollAmountUSD').textContent();
       expect(tollText.trim().startsWith(toll.toString())).toBeTruthy();
       // close out of toggle menu
       await pg1.click('#closeTollModal');
@@ -104,11 +101,11 @@ test.describe('Multi User Tests', () => {
       const balanceAfter = await getLiberdusBalance(pg1);
       
       // Only half the toll is received on read minus the 1% network fee on tolls
-      const readToll = (toll / 2);
-      const readTollAfterTax = readToll - (readToll * NETWORK_TOLL_TAX); // 1% network fee on tolls
+      const readToll = (tollInLib / 2);
+      const readTollAfterTax = readToll - (readToll * networkParams.networkTollTax); // 1% network fee on tolls
 
       const balanceBeforeNum = parseFloat(balanceBefore);
-      let expectedBalance = balanceBeforeNum + readTollAfterTax - NETWORK_FEE;
+      let expectedBalance = balanceBeforeNum + readTollAfterTax - networkParams.networkFee;
       // UI round to 6 decimal places
       expect(balanceAfter.toString()).toEqual(expectedBalance.toFixed(6));
 
@@ -124,7 +121,7 @@ test.describe('Multi User Tests', () => {
       await pg1.waitForTimeout(20_000);
       await pg1.click('#refreshBalance');
       const finalBalance = await getLiberdusBalance(pg1);
-      const expectedFinalBalance = expectedBalance + readTollAfterTax - NETWORK_FEE;
+      const expectedFinalBalance = expectedBalance + readTollAfterTax - networkParams.networkFee;
       // UI round to 6 decimal places
       expect(finalBalance).toEqual(expectedFinalBalance.toFixed(6));
     } finally {

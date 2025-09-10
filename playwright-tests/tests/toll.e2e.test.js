@@ -6,7 +6,7 @@ const { sendMessageTo } = require('../helpers/messageHelpers');
 const { send } = require('process');
 
 // Constants
-const TOLL = 5;
+const TOLL = .01;
 const FriendStatus = {
     BLOCKED: 0,
     OTHER: 1,
@@ -86,6 +86,7 @@ const test = base.extend({
 
         // User B sets toll to 5
         await setToll(b.page, TOLL);
+        const tollInLib = TOLL / networkParams.stabilityFactor;
         await a.page.click('#switchToChats');
 
         let tollText = '';
@@ -144,9 +145,9 @@ const test = base.extend({
         await a.page.click('#switchToWallet');
         await a.page.click('#refreshBalance');
         await expect(a.page.locator('#walletScreen.active')).toBeVisible();
-        - (TOLL * 3) - (networkParams.networkFee * 3);
+        - (tollInLib * 3) - (networkParams.networkFee * 3);
         let expectedBalance = a.balance;
-        expectedBalance -= (TOLL * 3);
+        expectedBalance -= (tollInLib * 3);
         expectedBalance -= (networkParams.networkFee * 4); // 3 messages + 1 for creating contact
 
         await expectLiberdusBalanceToEqual(a.page, expectedBalance.toFixed(6));
@@ -159,7 +160,7 @@ const test = base.extend({
         await a.page.waitForTimeout(5_000);
 
         // User A's balance should be refunded 5*3
-        const expectedAfterRefund = expectedBalance + (TOLL * 3);
+        const expectedAfterRefund = expectedBalance + (tollInLib * 3);
         await expectLiberdusBalanceToEqual(a.page, expectedAfterRefund.toFixed(6));
     });
 });
@@ -171,9 +172,10 @@ test('Toll is charged when sender has blocked recipient', async ({ users }) => {
 
     // User B sets toll to 5
     await setToll(b.page, TOLL);
+    const tollInLib = TOLL / networkParams.stabilityFactor;
 
     await sendMessageTo(a.page, b.username, 'Hello B!');
-    let expectedBalance = a.balance - TOLL - networkParams.networkFee * 2;
+    let expectedBalance = a.balance - tollInLib - networkParams.networkFee * 2;
     await expectLiberdusBalanceToEqual(a.page, expectedBalance.toFixed(6));
 
 
@@ -181,7 +183,7 @@ test('Toll is charged when sender has blocked recipient', async ({ users }) => {
     expectedBalance -= networkParams.networkFee;
     // User A sends a message to B
     await sendMessageTo(a.page, b.username, 'Hello B Blocked!');
-    expectedBalance -= TOLL + networkParams.networkFee;
+    expectedBalance -= tollInLib + networkParams.networkFee;
 
     // Check A's balance
     await expectLiberdusBalanceToEqual(a.page, expectedBalance.toFixed(6));
