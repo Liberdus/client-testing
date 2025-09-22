@@ -124,7 +124,7 @@ test('Should set toll', async ({ page }) => {
   await page.fill('#newTollAmountInput', toll.toString());
   await page.click('#saveNewTollButton');
   await page.waitForTimeout(1_000);
-  const tollText = await page.locator('#tollAmountLIB').textContent();
+  const tollText = await page.locator('#tollAmountUSD').textContent();
   expect(tollText.trim().startsWith(toll.toString())).toBeTruthy();
 });
 

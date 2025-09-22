@@ -59,8 +59,8 @@ test.describe('Delete Message Tests', () => {
         await sentMsg.click();
 
         // Both options should be visible for sent messages
-        const deleteForMe = user1.page.locator('text="Delete for me"');
-        const deleteForAll = user1.page.locator('text="Delete for all"');
+        const deleteForMe = user1.page.locator('#messageContextMenu').locator('text="Delete for me"');
+        const deleteForAll = user1.page.locator('#messageContextMenu').locator('text="Delete for all"');
         await expect(deleteForMe).toBeVisible({ timeout: 10_000 });
         await expect(deleteForAll).toBeVisible({ timeout: 10_000 });
 
@@ -97,8 +97,8 @@ test.describe('Delete Message Tests', () => {
         await receivedMsg.click();
 
         // Only Delete for me should be visible
-        const deleteForMe = user1.page.locator('text="Delete for me"');
-        const deleteForAll = user1.page.locator('text="Delete for all"');
+        const deleteForMe = user1.page.locator('#messageContextMenu').locator('text="Delete for me"');
+        const deleteForAll = user1.page.locator('#messageContextMenu').locator('text="Delete for all"');
         await expect(deleteForMe).toBeVisible({ timeout: 10_000 });
         await expect(deleteForAll).not.toBeVisible();
 
@@ -116,6 +116,10 @@ test.describe('Delete Message Tests', () => {
         const { users: { user1, user2 } } = messageUsers;
         const message = `Erase me ${Date.now()}`;
 
+        // Send message from user2 to user1 to ensure no toll for user1
+        await sendMessageTo(user2.page, user1.username, message);
+        await checkReceivedMessage(user1.page, user2.username, message);
+
         // Send message from user1 to user2
         await sendMessageTo(user1.page, user2.username, message);
         await checkReceivedMessage(user2.page, user1.username, message);
@@ -132,7 +136,7 @@ test.describe('Delete Message Tests', () => {
         await sentMsg.click();
 
         // Click Delete for all
-        const deleteForAll = user1.page.locator('text="Delete for all"');
+        const deleteForAll = user1.page.locator('#messageContextMenu').locator('text="Delete for all"');
         await expect(deleteForAll).toBeVisible({ timeout: 10_000 });
 
         user1.page.on('dialog', dialog => dialog.accept())

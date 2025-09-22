@@ -105,7 +105,7 @@ test('QR Code: Receive from A, scan and send from B', async ({ users }, testInfo
 
         // expect balances to have changed by the amount sent using bignumber comparison at fixed 6 precision
         const expectedABalance = parseFloat(userABalanceBefore) + parseFloat(qrAmount);
-        const expectedBBalance = parseFloat(userBBalanceBefore) - parseFloat(qrAmount) - networkParams.networkFee;
+        const expectedBBalance = parseFloat(userBBalanceBefore) - parseFloat(qrAmount) - networkParams.networkFeeLib;
         await expectLiberdusBalanceToEqual(a.page, expectedABalance.toFixed(6));
         await expectLiberdusBalanceToEqual(b.page, expectedBBalance.toFixed(6));
     } finally {

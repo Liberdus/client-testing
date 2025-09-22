@@ -60,7 +60,7 @@ test.describe('Transfer Tests', () => {
     const amount = 5.25; // Transfer amount
     
     // Track expected balances
-    let expectedBalanceA = a.balance - amount - networkParams.networkFee;
+    let expectedBalanceA = a.balance - amount - networkParams.networkFeeLib;
     let expectedBalanceB = b.balance + amount;
 
     // User A opens wallet and prepares send form
@@ -123,11 +123,11 @@ test.describe('Transfer Tests', () => {
 
   test('should send transfer with memo and verify receipt', async ({ users }) => {
     const { a, b } = users;
-    const amount = 3.75; // Transfer amount
+    const amount = 1 + networkParams.defaultTollLib; // Transfer amount
     const memo = "Payment for lunch";
     
     // Track expected balances
-    let expectedBalanceA = a.balance - amount - networkParams.networkFee;
+    let expectedBalanceA = a.balance - amount - networkParams.networkFeeLib;
     let expectedBalanceB = b.balance + amount;
 
     // User A opens wallet and prepares send form
