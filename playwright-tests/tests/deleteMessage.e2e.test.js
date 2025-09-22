@@ -116,6 +116,10 @@ test.describe('Delete Message Tests', () => {
         const { users: { user1, user2 } } = messageUsers;
         const message = `Erase me ${Date.now()}`;
 
+        // Send message from user2 to user1 to ensure no toll for user1
+        await sendMessageTo(user2.page, user1.username, message);
+        await checkReceivedMessage(user1.page, user2.username, message);
+
         // Send message from user1 to user2
         await sendMessageTo(user1.page, user2.username, message);
         await checkReceivedMessage(user2.page, user1.username, message);

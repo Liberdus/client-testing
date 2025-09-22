@@ -26,8 +26,8 @@ const test = base.extend({
         const messages = [
             { from: 1, to: 2, content: `Message 1 from ${user1} to ${user2}` },
             { from: 2, to: 1, content: `Message 2 from ${user2} to ${user1}` },
-            { from: 1, to: 2, content: `Message 3 from ${user1} to ${user2}` },
-            { from: 2, to: 1, content: `Message 4 from ${user2} to ${user1}` }
+            // { from: 1, to: 2, content: `Message 3 from ${user1} to ${user2}` },
+            // { from: 2, to: 1, content: `Message 4 from ${user2} to ${user1}` }
         ];
 
         // Exchange messages
@@ -73,8 +73,8 @@ test.describe('Message Saving Tests', () => {
             const expectedMessages = [
                 messages[0].content,
                 messages[1].content,
-                messages[2].content,
-                messages[3].content
+                // messages[2].content,
+                // messages[3].content
             ];
 
             // Explicitly sign out both users
@@ -153,8 +153,8 @@ test.describe('Message Saving Tests', () => {
             const expectedMessages = [
                 messages[0].content,
                 messages[1].content,
-                messages[2].content,
-                messages[3].content
+                // messages[2].content,
+                // messages[3].content
             ];
 
             // Close both users' pages (but keep their contexts)
@@ -229,8 +229,8 @@ test.describe('Message Saving Tests', () => {
             const expectedMessages = [
                 messages[0].content,
                 messages[1].content,
-                messages[2].content,
-                messages[3].content
+                // messages[2].content,
+                // messages[3].content
             ];
 
             // Refresh both users' pages

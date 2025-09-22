@@ -5,9 +5,9 @@ const { sendMessageTo } = require('../helpers/messageHelpers');
 const networkParams = require('../helpers/networkParams');
 
 // Constants
-const NETWORK_FEE = networkParams.networkFee;
-const TOLL = 10;
-const DEFAULT_TOLL = networkParams.defaultToll;
+const NETWORK_FEE = networkParams.networkFeeLib;
+const TOLL = networkParams.defaultTollUsd + 0.01;
+const DEFAULT_TOLL = networkParams.defaultTollLib;
 
 // enum for friend status
 const FriendStatus = {
@@ -305,6 +305,7 @@ test.describe('Friend Status E2E', () => {
         const { a, b } = users;
         const sendAmount = '1';
         const memo = 'test memo 123';
+        const tollInLib = TOLL / networkParams.stabilityFactor;
 
         // User A opens wallet and prepares send form
         await a.page.click('#switchToWallet');
@@ -322,7 +323,7 @@ test.describe('Friend Status E2E', () => {
 
         // Before A submits, B changes A's status to OTHER
         await setFriendStatus(b.page, a.username, FriendStatus.OTHER);
-        await setToll(b.page, 5);
+        await setToll(b.page, TOLL);
 
         // A submits the send form
         const sendButton = a.page.locator('#sendAssetFormModal button[type="submit"]');
@@ -334,7 +335,7 @@ test.describe('Friend Status E2E', () => {
         await a.page.click('#confirmSendButton');
 
         // Should get error toast
-        await expect(a.page.locator('.toast.error.show', { hasText: /5 LIB/i })).toBeVisible({ timeout: 10_000 });
+        await expect(a.page.locator('.toast.error.show', { hasText: new RegExp(`${tollInLib}\\s*LIB`, 'i') })).toBeVisible({ timeout: 10_000 });
 
         // Close confirmation modal if still open
         if (await a.page.locator('#sendAssetConfirmModal').isVisible()) {
@@ -346,6 +347,6 @@ test.describe('Friend Status E2E', () => {
         await expect(a.page.locator('#sendToAddress')).toHaveValue(b.username);
         await expect(a.page.locator('#sendAmount')).toHaveValue(sendAmount);
         await expect(a.page.locator('#sendMemo')).toHaveValue(memo);
-        await expect(a.page.locator('#tollMemo')).toHaveText(/^toll: 5/i);
+        await expect(a.page.locator('#tollMemo')).toHaveText(new RegExp(`${tollInLib.toFixed(6)}\\s*LIB`, 'i'));
     });
 });

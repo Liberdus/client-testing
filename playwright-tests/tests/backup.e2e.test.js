@@ -131,11 +131,12 @@ test.describe('Backup and Restore Scenarios', () => {
             await expect(page.locator('#backupModal')).toBeVisible();
             const submitButton = page.locator('#backupForm button[type="submit"]');
             await expect(submitButton).toBeEnabled();
-            await page.fill('#backupPassword', 'password123');
+            await page.locator('#backupPassword').pressSequentially('password123');
             await expect(submitButton).toBeDisabled();
-            await page.fill('#backupPasswordConfirm', 'differentPassword');
+            await page.locator('#backupPasswordConfirm').pressSequentially('differentPassword');
             await expect(submitButton).toBeDisabled();
-            await page.fill('#backupPasswordConfirm', 'password123');
+            await page.fill('#backupPasswordConfirm', '');
+            await page.locator('#backupPasswordConfirm').pressSequentially('password123');
             await expect(submitButton).toBeEnabled();
             await page.fill('#backupPassword', '');
             await page.fill('#backupPasswordConfirm', '');
