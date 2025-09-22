@@ -12,3 +12,4 @@ xvfb.log
 xvfb.pid
 fluxbox.log
 fluxbox.pid
+playwright-tests/.cache/network-params.json
