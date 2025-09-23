@@ -1,8 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const dotenv = require('dotenv');
-
-dotenv.config();
 
 function toNumber(val, def = 0) {
   const n = typeof val === 'string' ? parseFloat(val) : Number(val);
@@ -22,12 +19,14 @@ function loadNetworkParams() {
     const defaultTollLib = toNumber(cached.defaultTollLib, NaN);
     const defaultTollUsd = toNumber(cached.defaultTollUsd, NaN);
     const networkTollTax = toNumber(cached.networkTollTax, NaN);
+    const gateway = cached.gatewayWeb;
 
     if (!(stabilityFactor > 0) || !Number.isFinite(networkFeeLib) || !Number.isFinite(defaultTollLib) || !Number.isFinite(networkTollTax)) {
       throw new Error('Network parameters cache missing or invalid');
     }
 
     return {
+      gateway,
       networkFeeLib,
       networkFeeUsd,
       networkTollTax,

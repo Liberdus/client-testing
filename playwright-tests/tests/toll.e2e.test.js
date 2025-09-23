@@ -2,6 +2,7 @@ const { test: base, expect } = require('@playwright/test');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 const { getLiberdusBalance, expectLiberdusBalanceToEqual } = require('../helpers/walletHelpers');
 const networkParams = require('../helpers/networkParams');
+const { fundUserFromPage } = require('../helpers/send-create');
 const { sendMessageTo } = require('../helpers/messageHelpers');
 
 // Constants
@@ -63,6 +64,9 @@ const test = base.extend({
                 createAndSignInUser(pageB, userB)
             ]);
 
+            // Fund User A with 35 LIB
+            await fundUserFromPage(pageA, userA, 35);
+
             // Get initial balances
             const balanceA = parseFloat(await getLiberdusBalance(pageA));
             const balanceB = parseFloat(await getLiberdusBalance(pageB));
@@ -87,7 +91,7 @@ const test = base.extend({
 
         // User B sets toll in USD in the UI
         await setToll(b.page, TOLL_USD);
-        const tollInLib = networkParams.defaultTollLib;
+        const tollInLib = TOLL_USD / networkParams.stabilityFactor;
         await a.page.click('#switchToChats');
 
         let tollText = '';
@@ -172,7 +176,7 @@ test('Toll is charged when sender has blocked recipient', async ({ users }) => {
 
     // User B sets toll in USD
     await setToll(b.page, TOLL_USD);
-    const tollInLib = networkParams.defaultTollLib;
+    const tollInLib = TOLL_USD / networkParams.stabilityFactor;
 
     await sendMessageTo(a.page, b.username, 'Hello B!');
     let expectedBalance = a.balance - tollInLib - networkParams.networkFeeLib * 2;
