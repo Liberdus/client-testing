@@ -125,6 +125,121 @@ test.describe('Video Call Tests', () => {
         }
     });
 
+    test('schedule call: scheduled message appears and call listed for both users', async ({ users }) => {
+        const { a, b } = users;
+        const callLabel = 'Join Video Call';
+
+        // Ensure B has A as a friend contact before the call is scheduled.
+        await addContact(b.page, a.username);
+        await setFriendStatusInChat(b.page, FriendStatus.FRIEND);
+        await b.page.click('#closeChatModal');
+
+        // Open chat between A and B from A's side.
+        await a.page.click('#switchToChats');
+        await expect(a.page.locator('#newChatButton')).toBeVisible();
+        await a.page.click('#newChatButton');
+        await expect(a.page.locator('#newChatModal')).toBeVisible();
+        await a.page.locator('#chatRecipient').pressSequentially(b.username);
+        await expect(a.page.locator('#chatRecipientError')).toHaveText('found', { timeout: 10_000 });
+        await a.page.locator('#newChatForm button[type="submit"]').click();
+        await expect(a.page.locator('#chatModal')).toBeVisible();
+
+        // Open the schedule modal instead of starting an immediate call.
+        await a.page.click('#chatCallButton');
+        await expect(a.page.locator('#callScheduleChoiceModal.active')).toBeVisible();
+        await a.page.click('#openCallScheduleDateBtn');
+
+        const scheduleModal = a.page.locator('#callScheduleDateModal.active');
+        await expect(scheduleModal).toBeVisible();
+
+        // Choose a schedule time two hours in the future, rounded to the hour for available options.
+        const scheduleDate = new Date(Date.now() + 2 * 60 * 60 * 1000);
+        scheduleDate.setMinutes(0, 0, 0);
+        const pad = (val) => val.toString().padStart(2, '0');
+        const dateInputValue = `${scheduleDate.getFullYear()}-${pad(scheduleDate.getMonth() + 1)}-${pad(scheduleDate.getDate())}`;
+        const month = scheduleDate.getMonth() + 1;
+        const day = scheduleDate.getDate();
+        const year = scheduleDate.getFullYear();
+        const hour24 = scheduleDate.getHours();
+        const amPm = hour24 >= 12 ? 'PM' : 'AM';
+        const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+        const hourSelectValue = hour12.toString().padStart(2, '0');
+        const minuteSelectValue = scheduleDate.getMinutes().toString().padStart(2, '0');
+        const datePart = `${month}/${day}/${year}`;
+        // Toast time part is like 2:00:00 PM (with seconds)
+        const timePart = `${hour12}:${minuteSelectValue} ${amPm}`;
+
+        await scheduleModal.locator('#callScheduleDate').fill(dateInputValue);
+        await scheduleModal.locator('#callScheduleHour').selectOption(hourSelectValue);
+        await scheduleModal.locator('#callScheduleMinute').selectOption(minuteSelectValue);
+        await scheduleModal.locator('#callScheduleAmPm').selectOption(amPm);
+
+        await scheduleModal.locator('#confirmCallSchedule').click();
+
+        const successToast = a.page.locator('.toast.success.show');
+        await expect(successToast).toContainText('Call scheduled for', { timeout: 20_000 });
+        await expect(successToast).toContainText(datePart);
+        const toastTimePart = `${hour12}:${minuteSelectValue}:00 ${amPm}`;
+        await expect(successToast).toContainText(toastTimePart);
+        await a.page.waitForSelector('.toast.success.show', { state: 'hidden' });
+
+        // Verify the scheduled call message on the sender side.
+        const sentCallMessage = a.page.locator('#chatModal .messages-list .message.sent .call-message');
+        await expect(sentCallMessage).toBeVisible({ timeout: 30_000 });
+        await expect(sentCallMessage.locator('.call-message-text')).toHaveText(callLabel);
+        const sentSchedule = sentCallMessage.locator('.call-message-schedule');
+        await expect(sentSchedule).toContainText('Scheduled');
+        await expect(sentSchedule).toContainText(datePart);
+        await expect(sentSchedule).toContainText(timePart);
+
+        // Recipient should receive the scheduled call message.
+        await b.page.click('#switchToChats');
+        const chatItem = b.page.locator('#chatList .chat-name', { hasText: a.username });
+        await expect(chatItem).toBeVisible({ timeout: 30_000 });
+        await chatItem.click();
+        await expect(b.page.locator('#chatModal')).toBeVisible();
+
+        const receivedCallMessage = b.page.locator('#chatModal .messages-list .message.received .call-message');
+        await expect(receivedCallMessage).toBeVisible({ timeout: 30_000 });
+        await expect(receivedCallMessage.locator('.call-message-text')).toHaveText(callLabel);
+        const receivedSchedule = receivedCallMessage.locator('.call-message-schedule');
+        await expect(receivedSchedule).toContainText(datePart);
+        await expect(receivedSchedule).toContainText(timePart);
+        await b.page.click('#closeChatModal');
+
+        // Verify the scheduled call appears in A's calls list.
+        await a.page.click('#closeChatModal');
+        await a.page.click('#toggleSettings');
+        await expect(a.page.locator('#openCallsModal')).toBeVisible();
+        await a.page.click('#openCallsModal');
+        const callsModalA = a.page.locator('#callsModal');
+        await expect(callsModalA).toBeVisible();
+
+        const hostCallItem = a.page.locator('#callList .chat-item').filter({
+            has: a.page.locator('.chat-name', { hasText: b.username })
+        }).first();
+        await expect(hostCallItem).toBeVisible({ timeout: 30_000 });
+        const hostCallTime = hostCallItem.locator('.call-time');
+        await expect(hostCallTime).toContainText(datePart);
+        await expect(hostCallTime).toContainText(timePart);
+        await a.page.click('#closeCallsModal');
+
+        // Verify the scheduled call appears in B's calls list as well.
+        await b.page.click('#toggleSettings');
+        await expect(b.page.locator('#openCallsModal')).toBeVisible();
+        await b.page.click('#openCallsModal');
+        const callsModalB = b.page.locator('#callsModal');
+        await expect(callsModalB).toBeVisible();
+
+        const recipientCallItem = b.page.locator('#callList .chat-item').filter({
+            has: b.page.locator('.chat-name', { hasText: a.username })
+        }).first();
+        await expect(recipientCallItem).toBeVisible({ timeout: 30_000 });
+        const recipientCallTime = recipientCallItem.locator('.call-time');
+        await expect(recipientCallTime).toContainText(datePart);
+        await expect(recipientCallTime).toContainText(timePart);
+    });
+
     test('invite flow: sender calls recipient, recipient invites two others', async ({ browserName, browser }) => {
         // Create four users: host, inviter, invitee1, invitee2
         const host = generateUsername(browserName);
