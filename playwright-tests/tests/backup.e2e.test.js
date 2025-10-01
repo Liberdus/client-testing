@@ -280,6 +280,49 @@ test.describe('Backup and Restore Scenarios', () => {
             } finally { await restoreCtx.close(); }
         });
 
+        test('locked backup does not require password when it matches the current password', async ({ page, browser, browserName }, testInfo) => {
+            const username1 = generateUsername(browserName);
+            const lockPassword = 'deviceLockPw1!';
+            const backupFilePath = testInfo.outputPath(path.join('backups', `${username1}-locked-backup.json`));
+            await createAndSignInUser(page, username1);
+            await setLock(page, lockPassword);
+            await page.click('#openBackupForm');
+            await expect(page.locator('#backupModal')).toBeVisible();
+            await page.click('#backupAllAccounts');
+            const downloadPromise = page.waitForEvent('download');
+            await page.click('#backupForm button[type="submit"]');
+            const download = await downloadPromise; await download.saveAs(backupFilePath);
+            await page.context().close();
+            const restoreCtx = await browser.newContext();
+            try {
+                const restorePage = await restoreCtx.newPage();
+                const username2 = generateUsername(browserName);
+                await createAndSignInUser(restorePage, username2);
+                await setLock(restorePage, lockPassword);
+                await restorePage.goto('');
+                await expect(restorePage.locator('#welcomeScreen')).toBeVisible();
+                await restorePage.click('#openWelcomeMenu');
+                await restorePage.fill('#password', lockPassword);
+                await restorePage.click('#unlockForm button[type="submit"]');
+                await restorePage.click('#welcomeOpenRestore');
+                await expect(restorePage.locator('#importModal')).toBeVisible();
+                await restorePage.setInputFiles('#importFile', backupFilePath);
+                restorePage.on('dialog', dialog => dialog.accept());
+                await restorePage.click('#importForm button[type="submit"]');
+                await expect(restorePage.locator('#welcomeScreen')).toBeVisible();
+                await restorePage.click('#signInButton');
+                await restorePage.fill('#password', lockPassword);
+                await restorePage.click('#unlockForm button[type="submit"]');
+                const restoreUserDropdown = restorePage.locator('#username');
+                await expect(restoreUserDropdown).toContainText(username1);
+                await expect(restoreUserDropdown).toContainText(username2);
+                await restoreUserDropdown.selectOption(username1);
+                await restorePage.click('#signInForm button[type="submit"]');
+                await expect(restorePage.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
+                await expect(restorePage.locator('.app-name')).toHaveText(username1);
+            } finally { await restoreCtx.close(); }
+        });
+
         ;[
             { name: 'without backup password', backupPassword: '' },
             { name: 'with backup password', backupPassword: 'SingleAcctBackupPw123!' }
