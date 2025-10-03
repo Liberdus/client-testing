@@ -258,8 +258,8 @@ test.describe('Offline Tests', () => {
         await expectButtonDisabledOffline(page.locator('#saveNewTollButton'));
     });
 
-    // disable profile updating from toggle menu
-    test('should disable profile updating when offline', async ({ user }) => {
+    // enabled profile updating from toggle menu
+    test('should enable profile updating when offline', async ({ user }) => {
         const { page, context } = user;
 
         // Set user offline
@@ -274,10 +274,17 @@ test.describe('Offline Tests', () => {
         await expect(page.locator('#accountModal.active')).toBeVisible();
 
         // Try to change profile name
-        await page.locator('#name').fill('New Name');
+        const newName = 'New Name';
+        await page.locator('#name').fill(newName);
 
-        // Verify save button is disabled
-        await expectButtonDisabledOffline(page.locator('#accountForm button[type="submit"]'));
+        // Verify save button is enabled
+        const submitButton = page.locator('#accountForm button[type="submit"]');
+        await expect(submitButton).toBeEnabled();
+        await submitButton.click();
+
+        // Verify the profile was updated
+        await page.getByText('Profile', { exact: true }).click();
+        await expect(page.locator('#accountForm #name')).toHaveValue(newName);
     });
 
     test('should disable validator staking when offline', async ({ user }) => {
