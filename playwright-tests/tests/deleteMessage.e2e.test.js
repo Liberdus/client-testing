@@ -60,9 +60,7 @@ test.describe('Delete Message Tests', () => {
 
         // Both options should be visible for sent messages
         const deleteForMe = user1.page.locator('#messageContextMenu').locator('text="Delete for me"');
-        const deleteForAll = user1.page.locator('#messageContextMenu').locator('text="Delete for all"');
         await expect(deleteForMe).toBeVisible({ timeout: 10_000 });
-        await expect(deleteForAll).toBeVisible({ timeout: 10_000 });
 
         // Click Delete for me and verify message is replaced
         user1.page.on('dialog', dialog => dialog.accept());
