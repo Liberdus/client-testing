@@ -44,8 +44,14 @@ test.describe('Multi User Tests', () => {
     const user1 = generateUsername(browserName);
     const user2 = generateUsername(browserName);
     const msg2 = 'Hello with toll!';
-    const toll = networkParams.defaultTollUsd + .01;
-    const tollInLib = toll / networkParams.stabilityFactor;
+    // Add 1 wei (1e-18) to default toll using BigInt for full 18 decimal precision
+    const defaultTollWei = BigInt(Math.round(networkParams.defaultTollUsd * 1e18));
+    const tollWei = defaultTollWei + 1n;
+    const tollStr = tollWei.toString().padStart(19, '0');
+    const toll = (tollStr.slice(0, -18) || '0') + '.' + tollStr.slice(-18);
+    // For balance calculations (UI shows 6 decimals), use the numeric value
+    const tollNum = Number(tollWei) / 1e18;
+    const tollInLib = tollNum / networkParams.stabilityFactor;
 
     // Create two isolated contexts
     const ctx1 = await browser.newContext();
@@ -70,11 +76,11 @@ test.describe('Multi User Tests', () => {
       await pg1.waitForSelector('#settingsModal', { timeout: 5_000 });
       await pg1.click('#openToll');
       await pg1.waitForSelector('#tollModal', { timeout: 5_000 });
-      await pg1.fill('#newTollAmountInput', toll.toString());
+      await pg1.fill('#newTollAmountInput', toll);
       await pg1.click('#saveNewTollButton');
       await pg1.waitForTimeout(1_000);
       const tollText = await pg1.locator('#tollAmountUSD').textContent();
-      expect(tollText.trim().startsWith(toll.toFixed(6))).toBeTruthy();
+      expect(tollText.trim().startsWith(tollNum.toFixed(6))).toBeTruthy();
       // close out of toggle menu
       await pg1.click('#closeTollModal');
       await pg1.click('#closeSettings');
