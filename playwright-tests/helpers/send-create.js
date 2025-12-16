@@ -1,13 +1,40 @@
 // Minimal funding helper for tests
 const networkParams = require('./networkParams');
 const { getUserData } = require('./localStorageHelpers');
+const { ethers } = require('ethers');
+const { Utils } = require('@shardus/types');
+const crypto = require('@shardus/crypto-utils');
 
-// Minimal bigint-safe stringify mirroring @shardus/types Utils.safeStringify
-function safeStringify(obj) {
-  return JSON.stringify(
-    obj,
-    (_, v) => (typeof v === 'bigint' ? { dataType: 'bi', value: v.toString(16) } : v)
-  );
+// Initialize crypto with the same key used in client.js
+crypto.init('69fa4195670576c0160d660c3be36556ff8d504725be8a59b5a96509e0c994bc');
+crypto.setCustomStringifier(Utils.safeStringify, 'shardus_safeStringify');
+
+// Convert ethereum address to shardus address format (40 hex chars + 24 zeros)
+function toShardusAddress(addressStr) {
+  return addressStr.slice(2).toLowerCase() + '0'.repeat(24);
+}
+
+// Sign a transaction object and add signature (matches client.js signEthereumTx)
+function signTransaction(tx, privateKey) {
+  // Create a copy without any existing sign field
+  const dataToSign = Object.assign({}, tx);
+  delete dataToSign.sign;
+
+  // Hash the object (matches crypto.hashObj)
+  const message = crypto.hashObj(dataToSign);
+
+  // Create wallet and sign the message
+  // ethers.signMessageSync handles the Ethereum prefix internally
+  const wallet = new ethers.Wallet(privateKey);
+  const signature = wallet.signMessageSync(message);
+
+  // Add signature to transaction
+  tx.sign = {
+    owner: toShardusAddress(wallet.address),
+    sig: signature,
+  };
+
+  return message; // return the hash as txid
 }
 
 // Convert LIB amount to wei (18 decimals)
@@ -35,8 +62,8 @@ async function postJson(url, json) {
   return obj;
 }
 
-// POST an unsigned "create" tx to the gateway's /inject endpoint
-async function sendCreate(gatewayWebUrl, accountId, amountWei, networkId) {
+// POST a signed "create" tx to the gateway's /inject endpoint
+async function sendCreate(gatewayWebUrl, accountId, amountWei, networkId, privateKey) {
   const amt = typeof amountWei === 'bigint' ? amountWei : BigInt(String(amountWei));
   const addr = accountId + '0'.repeat(24); // expand short address
   const tx = {
@@ -47,7 +74,12 @@ async function sendCreate(gatewayWebUrl, accountId, amountWei, networkId) {
     networkId,
   };
 
-  const payload = { tx: safeStringify(tx) };
+  // Sign the transaction if privateKey is provided
+  if (privateKey) {
+    signTransaction(tx, privateKey);
+  }
+
+  const payload = { tx: Utils.safeStringify(tx) };
   const url = `${gatewayWebUrl.replace(/\/+$/, '')}/inject`;
   try {
     return await postJson(url, payload);
@@ -62,10 +94,18 @@ function getUserAddressFromLocalStorage(localStorageObj, username) {
   return user?.account?.keys?.address;
 }
 
+// Helper: extract private key from localStorage
+function getUserPrivateKeyFromLocalStorage(localStorageObj, username) {
+  const user = getUserData(localStorageObj, username);
+  const secret = user?.account?.keys?.secret;
+  // Ensure it has 0x prefix for ethers
+  return secret ? (secret.startsWith('0x') ? secret : '0x' + secret) : null;
+}
+
 // Fund a given address with the specified LIB amount using gateway from cached params
-async function fundAddressLib(address, amountLib, networkId, pollOpts) {
+async function fundAddressLib(address, amountLib, networkId, privateKey, pollOpts) {
   const gatewayWeb = networkParams.gateway;
-  const resp = await sendCreate(gatewayWeb, address, libToWei(amountLib), networkId);
+  const resp = await sendCreate(gatewayWeb, address, libToWei(amountLib), networkId, privateKey);
   const txid = extractTxId(resp);
   return txid ? await waitForTransaction(gatewayWeb, txid, pollOpts) : resp;
 }
@@ -75,7 +115,8 @@ async function fundUserFromPage(page, username, amountLib, pollOpts) {
   const localStorageObj = await page.evaluate(() => ({ ...window.localStorage }));
   const address = getUserAddressFromLocalStorage(localStorageObj, username);
   const networkId = getUserNetworkIdFromLocalStorage(localStorageObj, username);
-  return await fundAddressLib(address, amountLib, networkId, pollOpts);
+  const privateKey = getUserPrivateKeyFromLocalStorage(localStorageObj, username);
+  return await fundAddressLib(address, amountLib, networkId, privateKey, pollOpts);
 }
 
 function getUserNetworkIdFromLocalStorage(localStorageObj, username) {
