@@ -230,8 +230,12 @@ test.describe('Offline Tests', () => {
         await page.locator('#addFriendButtonContactInfo').click();
         await expect(page.locator('#friendModal.active')).toBeVisible();
 
-        // change to friend from connection
-        await page.check(`#friendForm input[type=radio][value="3"]`);
+        // Verify friend status options remain read-only while offline
+        const friendOptions = page.locator('#friendForm input[type=radio]');
+        const optionCount = await friendOptions.count();
+        for (let i = 0; i < optionCount; i++) {
+            await expect(friendOptions.nth(i)).toBeDisabled();
+        }
 
         // Verify save button is disabled
         await expectButtonDisabledOffline(page.locator('#friendForm button[type="submit"]'));
