@@ -147,6 +147,23 @@ test('private -> public transfer shows PreCrack error', async ({ browser, browse
 
     await expect(pagePrivate.locator('text=Error injecting transaction: PreCrack has failed. Both accounts must have the same private value.')).toBeVisible({ timeout: 30_000 });
 
+    // Now verify the same error appears when the public account tries to send to the private account
+    await pagePublic.click('#switchToWallet');
+    await pagePublic.click('#openSendAssetFormModal');
+    await expect(pagePublic.locator('#sendAssetFormModal')).toBeVisible();
+    await pagePublic.fill('#sendToAddress', privateUser);
+    await pagePublic.fill('#sendAmount', '1');
+    await expect(pagePublic.locator('#sendToAddressError')).toHaveText('found', { timeout: 10_000 });
+
+    const sendButtonPub = pagePublic.locator('#sendAssetFormModal button[type="submit"]');
+    await expect(sendButtonPub).toBeEnabled();
+    await sendButtonPub.click();
+
+    await expect(pagePublic.locator('#sendAssetConfirmModal')).toBeVisible();
+    await pagePublic.click('#confirmSendButton');
+
+    await expect(pagePublic.locator('text=Error injecting transaction: PreCrack has failed. Both accounts must have the same private value.')).toBeVisible({ timeout: 30_000 });
+
   } finally {
     await ctxPrivate.close();
     await ctxPublic.close();
