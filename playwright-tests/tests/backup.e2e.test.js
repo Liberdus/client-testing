@@ -1,5 +1,6 @@
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../fixtures/base');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
+const { newContext: createContext } = require('../helpers/toastHelpers');
 const path = require('path');
 
 async function backupAccount(page, backupFilePath, password = '') {
@@ -89,7 +90,7 @@ test.describe('Backup and Restore Scenarios', () => {
             await createAndSignInUser(page, username);
             await backupAccount(page, backupFilePath);
             await page.context().close();
-            const newContext = await browser.newContext();
+            const newContext = await createContext(browser);
             try {
                 const newPage = await newContext.newPage();
                 await newPage.goto('');
@@ -109,7 +110,7 @@ test.describe('Backup and Restore Scenarios', () => {
             await createAndSignInUser(page, username);
             await backupAccount(page, backupFilePath, password);
             await page.context().close();
-            const newContext = await browser.newContext();
+            const newContext = await createContext(browser);
             try {
                 const newPage = await newContext.newPage();
                 await newPage.goto('');
@@ -171,11 +172,10 @@ test.describe('Backup and Restore Scenarios', () => {
                 await page.click('#backupForm button[type="submit"]');
                 const download = await downloadPromise; await download.saveAs(backupFilePath);
                 await page.context().close();
-                const newContext = await browser.newContext();
+                const newContext = await createContext(browser);
                 try {
                     const newPage = await newContext.newPage();
                     await restoreAccount(newPage, backupFilePath, password);
-                    await expect(newPage.locator('#welcomeScreen')).toBeVisible();
                     await expect(newPage.locator('#signInButton')).toBeVisible();
                     await newPage.click('#signInButton');
                     const userDropdown = newPage.locator('#username');
@@ -219,7 +219,7 @@ test.describe('Backup and Restore Scenarios', () => {
                 await page.click('#backupForm button[type="submit"]');
                 const download = await downloadPromise; await download.saveAs(backupFilePath);
                 await page.context().close();
-                const newContext = await browser.newContext();
+                const newContext = await createContext(browser);
                 try {
                     const newPage = await newContext.newPage();
                     await restoreAccount(newPage, backupFilePath, password);
@@ -261,7 +261,7 @@ test.describe('Backup and Restore Scenarios', () => {
             await page.click('#backupForm button[type="submit"]');
             const download = await downloadPromise; await download.saveAs(backupFilePath);
             await page.context().close();
-            const restoreCtx = await browser.newContext();
+            const restoreCtx = await createContext(browser);
             try {
                 const restorePage = await restoreCtx.newPage();
                 await restorePage.goto('');
@@ -293,7 +293,7 @@ test.describe('Backup and Restore Scenarios', () => {
             await page.click('#backupForm button[type="submit"]');
             const download = await downloadPromise; await download.saveAs(backupFilePath);
             await page.context().close();
-            const restoreCtx = await browser.newContext();
+            const restoreCtx = await createContext(browser);
             try {
                 const restorePage = await restoreCtx.newPage();
                 const username2 = generateUsername(browserName);
@@ -331,10 +331,10 @@ test.describe('Backup and Restore Scenarios', () => {
                 const username = generateUsername(browserName);
                 const originalLock = 'OriginalLockPw1!';
                 const newLock = 'ChangedLockPw2!';
-                const backupFilePath = testInfo.outputPath(path.join('backups', `single-acct-overwrite-${name.replace(/\s+/g, '-')}.json`));
+                const backupFilePath = testInfo.outputPath(path.join('backups', `single-acct-overwrite-${name.replace(/\\s+/g, '-')}.json`));
 
                 // Create context and sign into the new account
-                const ctx = await browser.newContext();
+                const ctx = await createContext(browser);
                 const page = await ctx.newPage();
                 try {
                     await createAndSignInUser(page, username);
@@ -403,7 +403,7 @@ test.describe('Backup and Restore Scenarios', () => {
         });
 
         test('re-encrypt imported accounts with new device lock', async ({ browser, browserName }, testInfo) => {
-            const ctxA = await browser.newContext();
+            const ctxA = await createContext(browser);
             const pageA = await ctxA.newPage();
             const usernameA = generateUsername(browserName);
             const lockA = 'LockAPass!';
@@ -418,7 +418,7 @@ test.describe('Backup and Restore Scenarios', () => {
                 await pageA.click('#backupForm button[type="submit"]');
                 const download = await downloadPromise; await download.saveAs(backupFilePath);
             } finally { await ctxA.close(); }
-            const ctxB = await browser.newContext();
+            const ctxB = await createContext(browser);
             const pageB = await ctxB.newPage();
             const existingUsername = generateUsername(browserName);
             const lockB = 'LockBPass!';
@@ -458,7 +458,7 @@ test.describe('Backup and Restore Scenarios', () => {
             const originalName = 'Original Name';
             const modifiedName = 'Modified Name';
             const backupFilePath = testInfo.outputPath(path.join('backups', 'no-overwrite-profile.json'));
-            const ctx = await browser.newContext();
+            const ctx = await createContext(browser);
             const page = await ctx.newPage();
             try {
                 await createAndSignInUser(page, username);
@@ -494,7 +494,7 @@ test.describe('Backup and Restore Scenarios', () => {
             const originalName = 'Original Namerevert';
             const modifiedName = 'Locally Changedname';
             const backupFilePath = testInfo.outputPath(path.join('backups', 'with-overwrite-profile.json'));
-            const ctx = await browser.newContext();
+            const ctx = await createContext(browser);
             const page = await ctx.newPage();
             try {
                 await createAndSignInUser(page, username);

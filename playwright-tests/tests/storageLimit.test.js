@@ -1,4 +1,4 @@
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../fixtures/base');
 
 test.describe('Storage Limit Tests', () => {
     test('should show Storage Warning toast when localStorage is full', async ({ page }) => {

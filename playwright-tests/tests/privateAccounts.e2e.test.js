@@ -1,6 +1,7 @@
 const { test, expect } = require('../fixtures/newUserFixture');
-const base = require('@playwright/test').test;
+const { test: base } = require('../fixtures/base');
 const { generateUsername } = require('../helpers/userHelpers');
+const { newContext } = require('../helpers/toastHelpers');
 
 base('private account can be created successfully', async ({ page, browserName }) => {
   const username = generateUsername(browserName);
@@ -34,8 +35,8 @@ base('private account can be created successfully', async ({ page, browserName }
 });
 
 test('private/public chat restrictions enforced', async ({ browser, browserName }) => {
-  const ctxPrivate = await browser.newContext();
-  const ctxPublic = await browser.newContext();
+  const ctxPrivate = await newContext(browser);
+  const ctxPublic = await newContext(browser);
   const pagePrivate = await ctxPrivate.newPage();
   const pagePublic = await ctxPublic.newPage();
 
@@ -96,9 +97,9 @@ test('private/public chat restrictions enforced', async ({ browser, browserName 
   }
 });
 
-test('private -> public transfer shows PreCrack error', async ({ browser, browserName }) => {
-  const ctxPrivate = await browser.newContext();
-  const ctxPublic = await browser.newContext();
+test('private/public transfer shows error toast', async ({ browser, browserName }) => {
+  const ctxPrivate = await newContext(browser);
+  const ctxPublic = await newContext(browser);
   const pagePrivate = await ctxPrivate.newPage();
   const pagePublic = await ctxPublic.newPage();
 
@@ -141,11 +142,8 @@ test('private -> public transfer shows PreCrack error', async ({ browser, browse
     await expect(sendButton).toBeEnabled();
     await sendButton.click();
 
-    // Confirm modal appears, confirm and expect the PreCrack error
-    await expect(pagePrivate.locator('#sendAssetConfirmModal')).toBeVisible();
-    await pagePrivate.click('#confirmSendButton');
-
-    await expect(pagePrivate.locator('text=Error injecting transaction: PreCrack has failed. Both accounts must have the same private value.')).toBeVisible({ timeout: 30_000 });
+    // Error toast should appear on form submission
+    await expect(pagePrivate.locator('text=Private accounts can only send to other private accounts.')).toBeVisible({ timeout: 10_000 });
 
     // Now verify the same error appears when the public account tries to send to the private account
     await pagePublic.click('#switchToWallet');
@@ -159,10 +157,8 @@ test('private -> public transfer shows PreCrack error', async ({ browser, browse
     await expect(sendButtonPub).toBeEnabled();
     await sendButtonPub.click();
 
-    await expect(pagePublic.locator('#sendAssetConfirmModal')).toBeVisible();
-    await pagePublic.click('#confirmSendButton');
-
-    await expect(pagePublic.locator('text=Error injecting transaction: PreCrack has failed. Both accounts must have the same private value.')).toBeVisible({ timeout: 30_000 });
+    // Error toast should appear on form submission
+    await expect(pagePublic.locator('text=Public accounts can only send to other public accounts.')).toBeVisible({ timeout: 10_000 });
 
   } finally {
     await ctxPrivate.close();

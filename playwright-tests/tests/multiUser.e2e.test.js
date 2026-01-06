@@ -1,11 +1,12 @@
 // liberdus.e2e.spec.js
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../fixtures/base');
 const { createAndSignInUser } = require('../helpers/userHelpers');
 const { getLiberdusBalance } = require('../helpers/walletHelpers');
 const { sendMessageTo, checkReceivedMessage } = require('../helpers/messageHelpers');
 const { generateUsername } = require('../helpers/userHelpers');
 const networkParams = require('../helpers/networkParams');
+const { newContext } = require('../helpers/toastHelpers');
 
 test.describe('Multi User Tests', () => {
 
@@ -16,8 +17,8 @@ test.describe('Multi User Tests', () => {
     const msg2 = 'Hello from user2!';
 
     // Create two isolated contexts
-    const ctx1 = await browser.newContext();
-    const ctx2 = await browser.newContext();
+    const ctx1 = await newContext(browser);
+    const ctx2 = await newContext(browser);
     const pg1  = await ctx1.newPage();
     const pg2  = await ctx2.newPage();
     try {
@@ -54,8 +55,8 @@ test.describe('Multi User Tests', () => {
     const tollInLib = tollNum / networkParams.stabilityFactor;
 
     // Create two isolated contexts
-    const ctx1 = await browser.newContext();
-    const ctx2 = await browser.newContext();
+    const ctx1 = await newContext(browser);
+    const ctx2 = await newContext(browser);
     const pg1  = await ctx1.newPage();
     const pg2  = await ctx2.newPage();
 

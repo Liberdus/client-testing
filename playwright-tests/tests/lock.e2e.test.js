@@ -1,5 +1,6 @@
-const { test: base, expect } = require('@playwright/test');
+const { test: base, expect } = require('../fixtures/base');
 const { generateUsername, createAndSignInUser } = require('../helpers/userHelpers');
+const { newContext } = require('../helpers/toastHelpers');
 
 async function lockAccount(page, password) {
     await page.click('#toggleSettings');
@@ -21,7 +22,7 @@ async function signOut(page) {
 const test = base.extend({
     lockedUser: async ({ browser, browserName }, use) => {
         // Create browser context
-        const ctx = await browser.newContext();
+        const ctx = await newContext(browser);
         const page = await ctx.newPage();
         const username = generateUsername(browserName);
         const password = 'password';
@@ -44,7 +45,7 @@ const test = base.extend({
 test('Lock and Unlock Account', async ({ browser, browserName}) => {
     // 1 create a user
     const username = generateUsername(browserName);
-    const ctx = await browser.newContext();
+    const ctx = await newContext(browser);
     const page = await ctx.newPage();
     const password = 'password';
     

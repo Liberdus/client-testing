@@ -1,5 +1,6 @@
 const { test, expect } = require('../fixtures/newUserFixture');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
+const { newContext } = require('../helpers/toastHelpers');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -108,7 +109,7 @@ test.describe('File Attachment Tests', () => {
 
     // Create a unique recipient user for this test run
     // Note: The sender user is automatically created and signed in by the newUserFixture for each test
-    testRecipient.context = await browser.newContext();
+    testRecipient.context = await newContext(browser);
     const recipientPage = await testRecipient.context.newPage();
     const recipientName = generateUsername(browserName);
 
@@ -295,6 +296,8 @@ test.describe('File Attachment Tests', () => {
 
     // Click the attachment link - should trigger download
     await attachmentLink.click();
+    await expect(page.locator('#imageAttachmentContextMenu .context-menu-option[data-action="save"]')).toBeVisible();
+    await page.click('#imageAttachmentContextMenu .context-menu-option[data-action="save"]');
 
     // Wait for the download to start
     const download = await downloadPromise;
@@ -390,8 +393,10 @@ test.describe('File Attachment Tests', () => {
       const recipientAttachmentLink = recipientPage.locator('.message.received .attachment-label', { hasText: fileName });
       await expect(recipientAttachmentLink).toBeVisible({ timeout: 15000 });
       
-      // Click on the attachment link to download it
+      // Click on the attachment link to open context menu and download it
       await recipientAttachmentLink.click();
+      await expect(recipientPage.locator('#imageAttachmentContextMenu .context-menu-option[data-action="save"]')).toBeVisible();
+      await recipientPage.click('#imageAttachmentContextMenu .context-menu-option[data-action="save"]');
       
       // Wait for the download to start
       const download = await downloadPromise;
@@ -527,6 +532,8 @@ test.describe('File Attachment Tests', () => {
         
         // Click to download
         await attachmentLink.click();
+        await expect(recipientPage.locator('#imageAttachmentContextMenu .context-menu-option[data-action="save"]')).toBeVisible();
+        await recipientPage.click('#imageAttachmentContextMenu .context-menu-option[data-action="save"]');
         
         // Wait for download to start
         const download = await downloadPromise;

@@ -1,6 +1,7 @@
-const { test: base, expect } = require('@playwright/test');
+const { test: base, expect } = require('../fixtures/base');
 const { sendMessageTo, checkReceivedMessage } = require('../helpers/messageHelpers');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
+const { newContext } = require('../helpers/toastHelpers');
 
 // Friend status enum aligned with app values
 const FriendStatus = {
@@ -44,8 +45,8 @@ const test = base.extend({
         const userA = generateUsername(browserName);
         const userB = generateUsername(browserName);
 
-        const ctxA = await browser.newContext();
-        const ctxB = await browser.newContext();
+        const ctxA = await newContext(browser);
+        const ctxB = await newContext(browser);
         const pageA = await ctxA.newPage();
         const pageB = await ctxB.newPage();
 
@@ -82,7 +83,10 @@ test.describe('Video Call Tests', () => {
         await a.page.locator('#newChatForm button[type="submit"]').click();
         await expect(a.page.locator('#chatModal')).toBeVisible();
 
-        await a.page.click('#chatCallButton');
+        await expect(a.page.locator('#chatHeaderMenuButton')).toBeVisible();
+        await a.page.click('#chatHeaderMenuButton');
+        await expect(a.page.locator('.context-menu-option[data-action="call"]')).toBeVisible();
+        await a.page.click('.context-menu-option[data-action="call"]');
         await expect(a.page.locator('#callScheduleChoiceModal.active')).toBeVisible();
 
 
@@ -144,8 +148,11 @@ test.describe('Video Call Tests', () => {
         await a.page.locator('#newChatForm button[type="submit"]').click();
         await expect(a.page.locator('#chatModal')).toBeVisible();
 
-        // Open the schedule modal instead of starting an immediate call.
-        await a.page.click('#chatCallButton');
+        // Open the schedule modal
+        await expect(a.page.locator('#chatHeaderMenuButton')).toBeVisible();
+        await a.page.click('#chatHeaderMenuButton');
+        await expect(a.page.locator('.context-menu-option[data-action="call"]')).toBeVisible();
+        await a.page.click('.context-menu-option[data-action="call"]');
         await expect(a.page.locator('#callScheduleChoiceModal.active')).toBeVisible();
         await a.page.click('#openCallScheduleDateBtn');
 
@@ -247,10 +254,10 @@ test.describe('Video Call Tests', () => {
         const invitee1 = generateUsername(browserName);
         const invitee2 = generateUsername(browserName);
 
-        const ctxHost = await browser.newContext();
-        const ctxInv = await browser.newContext();
-        const ctx1 = await browser.newContext();
-        const ctx2 = await browser.newContext();
+        const ctxHost = await newContext(browser);
+        const ctxInv = await newContext(browser);
+        const ctx1 = await newContext(browser);
+        const ctx2 = await newContext(browser);
 
         const pageHost = await ctxHost.newPage();
         const pageInv = await ctxInv.newPage();
@@ -295,9 +302,10 @@ test.describe('Video Call Tests', () => {
 
             // Inviter opens chat with host and starts a call (sends call message to host)
             await addContact(pageInv, host);
-            await expect(pageInv.locator('#chatCallButton')).toBeVisible({ timeout: 10_000 });
-            // click the call button to create the call and send message
-            await pageInv.click('#chatCallButton');
+            await expect(pageInv.locator('#chatHeaderMenuButton')).toBeVisible();
+            await pageInv.click('#chatHeaderMenuButton');
+            await expect(pageInv.locator('.context-menu-option[data-action="call"]')).toBeVisible();
+            await pageInv.click('.context-menu-option[data-action="call"]');
             await expect(pageInv.locator('#callScheduleChoiceModal.active')).toBeVisible();
             await pageInv.click('#callScheduleNowBtn');
             await pageInv.waitForTimeout(1500);

@@ -1,6 +1,7 @@
-const { test: base, expect } = require('@playwright/test');
+const { test: base, expect } = require('../fixtures/base');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 const { sendMessageTo } = require('../helpers/messageHelpers');
+const { newContext } = require('../helpers/toastHelpers');
 
 
 /**
@@ -31,7 +32,7 @@ async function expectButtonDisabledOffline(buttonLocator) {
 // Base test fixture with single user
 const test = base.extend({
     user: async ({ browser, browserName }, use) => {
-        const context = await browser.newContext();
+        const context = await newContext(browser);
         const page = await context.newPage();
         const username = generateUsername(browserName);
 
@@ -46,12 +47,12 @@ const test = base.extend({
     // fixture for two users with separate contexts
     twoUsers: async ({ browser, browserName }, use) => {
         // Create first user and context
-        const context1 = await browser.newContext();
+        const context1 = await newContext(browser);
         const page1 = await context1.newPage();
         const username1 = generateUsername(browserName);
 
         // Create second user and context
-        const context2 = await browser.newContext();
+        const context2 = await newContext(browser);
         const page2 = await context2.newPage();
         const username2 = generateUsername(browserName);
 
@@ -199,11 +200,8 @@ test.describe('Offline Tests', () => {
         // Click on send assets button
         await page.locator('#openSendAssetFormModal').click();
 
-        // Fill in recipient info
-        await page.locator('#sendToAddress').fill(user2.username);
-
-        // Enter amount
-        await page.locator('#sendAmount').fill('1');
+        // Verify sendToAddress field is disabled
+        await expectButtonDisabledOffline(page.locator('#sendToAddress'));
 
         // Verify submit button is disabled
         await expectButtonDisabledOffline(page.locator('#sendForm button[type="submit"]'));
