@@ -1,8 +1,9 @@
-const { test: base, expect } = require('@playwright/test');
+const { test: base, expect } = require('../fixtures/base');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 const { getLiberdusBalance } = require('../helpers/walletHelpers');
 const { sendMessageTo } = require('../helpers/messageHelpers');
 const networkParams = require('../helpers/networkParams');
+const { newContext } = require('../helpers/toastHelpers');
 
 // Constants
 const NETWORK_FEE = networkParams.networkFeeLib;
@@ -78,8 +79,8 @@ async function getCurrentFriendStatus(page, username) {
 
 const test = base.extend({
     users: async ({ browser, browserName }, use, testInfo) => {
-        const ctxA = await browser.newContext();
-        const ctxB = await browser.newContext();
+        const ctxA = await newContext(browser);
+        const ctxB = await newContext(browser);
         const pageA = await ctxA.newPage();
         const pageB = await ctxB.newPage();
         const userA = generateUsername(browserName);
@@ -314,7 +315,8 @@ test.describe('Friend Status E2E', () => {
         // Calculate toll in LIB with full precision using BigInt
         const tollInLibWei = tollWei * BigInt(1e18) / BigInt(Math.round(networkParams.stabilityFactor * 1e18));
         const tollInLibStr = tollInLibWei.toString().padStart(19, '0');
-        const tollInLib = (tollInLibStr.slice(0, -18) || '0') + '.' + tollInLibStr.slice(-18);
+        const tollInLibFull = (tollInLibStr.slice(0, -18) || '0') + '.' + tollInLibStr.slice(-18);
+        const tollInLib6 = Number(tollInLibFull).toFixed(6); // 6 decimals for tollMemo display
 
         // User A opens wallet and prepares send form
         await a.page.click('#switchToWallet');
@@ -343,8 +345,8 @@ test.describe('Friend Status E2E', () => {
         await expect(a.page.locator('#sendAssetConfirmModal')).toBeVisible();
         await a.page.click('#confirmSendButton');
 
-        // Should get error toast - expect full 18 decimal precision
-        await expect(a.page.locator('.toast.error.show', { hasText: new RegExp(`${tollInLib.replace('.', '\\.')}\\s*LIB`, 'i') })).toBeVisible({ timeout: 10_000 });
+        // Should get error toast - full 18 decimal precision
+        await expect(a.page.locator('.toast.error.show', { hasText: new RegExp(`${tollInLibFull.replace('.', '\\.')}\\s*LIB`, 'i') })).toBeVisible({ timeout: 10_000 });
 
         // Close confirmation modal if still open
         if (await a.page.locator('#sendAssetConfirmModal').isVisible()) {
@@ -356,6 +358,6 @@ test.describe('Friend Status E2E', () => {
         await expect(a.page.locator('#sendToAddress')).toHaveValue(b.username);
         await expect(a.page.locator('#sendAmount')).toHaveValue(sendAmount);
         await expect(a.page.locator('#sendMemo')).toHaveValue(memo);
-        await expect(a.page.locator('#tollMemo')).toHaveText(new RegExp(`${tollInLib.replace('.', '\\.')}\\s*LIB`, 'i'));
+        await expect(a.page.locator('#tollMemo')).toHaveText(new RegExp(`${tollInLib6.replace('.', '\\.')}\\s*LIB`, 'i'));
     });
 });

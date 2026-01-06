@@ -1,5 +1,5 @@
 // create-account-privatekey.e2e.test.js
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../fixtures/base');
 const { generateUsername } = require('../helpers/userHelpers');
 const { ethers } = require('ethers');
 

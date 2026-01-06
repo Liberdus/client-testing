@@ -67,7 +67,10 @@ test.describe('Tests requiring recipient user', () => {
 
     // Open Send Modal
     await expect(page.locator('#contactInfoModal')).toBeVisible();
-    await page.click('#chatSendMoneyButton');
+    await expect(page.locator('#chatHeaderMenuButton')).toBeVisible();
+    await page.click('#chatHeaderMenuButton');
+    await expect(page.locator('.context-menu-option[data-action="pay"]')).toBeVisible();
+    await page.click('.context-menu-option[data-action="pay"]');
     await expect(page.locator('#sendAssetFormModal')).toBeVisible();
 
     const usernameStatus = page.locator('#sendToAddressError');

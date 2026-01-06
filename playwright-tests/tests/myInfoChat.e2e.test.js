@@ -1,12 +1,13 @@
-const { test: base, expect } = require('@playwright/test');
+const { test: base, expect } = require('../fixtures/base');
 const fs = require('fs');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 const { checkReceivedMessage } = require('../helpers/messageHelpers');
+const { newContext } = require('../helpers/toastHelpers');
 
 const test = base.extend({
     users: async ({ browser, browserName }, use, testInfo) => {
-        const ctxA = await browser.newContext();
-        const ctxB = await browser.newContext();
+        const ctxA = await newContext(browser);
+        const ctxB = await newContext(browser);
         const pageA = await ctxA.newPage();
         const pageB = await ctxB.newPage();
         const userA = generateUsername(browserName);

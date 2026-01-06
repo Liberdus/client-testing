@@ -1,4 +1,4 @@
-const { test: base, expect } = require('@playwright/test');
+const { test: base, expect } = require('./base');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 
 exports.test = base.extend({
@@ -6,14 +6,13 @@ exports.test = base.extend({
     const username = generateUsername(browserName);
     await use(username);
   },
-  page: async ({ browser, username }, use, testInfo) => {
+  page: async ({ context, username }, use, testInfo) => {
     // Attach the username to the test report for easy access
     await testInfo.attach('username.txt', {
         body: username,
         contentType: 'text/plain',
     });
 
-    const context = await browser.newContext();
     const page = await context.newPage();
     page.on('dialog', async dialog => {
       if (dialog.type() === 'beforeunload') {

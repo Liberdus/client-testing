@@ -1,5 +1,6 @@
-const { test: base, expect } = require('@playwright/test');
+const { test: base, expect } = require('../fixtures/base');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
+const { newContext } = require('../helpers/toastHelpers');
 
 
 
@@ -135,8 +136,8 @@ function instrumentWebAudio() {
 const test = base.extend({
     messageUsers: async ({ browser, browserName }, use) => {
         // Create two contexts first
-        const ctx1 = await browser.newContext(); // sender (will have fake mic)
-        const ctx2 = await browser.newContext(); // receiver
+        const ctx1 = await newContext(browser); // sender (will have fake mic)
+        const ctx2 = await newContext(browser); // receiver
 
         // Grant mic permission (harmless even with our override; keeps UI flows happy)
         await ctx1.grantPermissions(['microphone']);

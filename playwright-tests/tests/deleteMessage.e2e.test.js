@@ -1,6 +1,7 @@
-const { test: base, expect } = require('@playwright/test');
+const { test: base, expect } = require('../fixtures/base');
 const { sendMessageTo, checkReceivedMessage } = require('../helpers/messageHelpers');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
+const { newContext } = require('../helpers/toastHelpers');
 
 
 const test = base.extend({
@@ -10,8 +11,8 @@ const test = base.extend({
         const user2 = generateUsername(browserName);
 
         // Create contexts and pages
-        const ctx1 = await browser.newContext();
-        const ctx2 = await browser.newContext();
+        const ctx1 = await newContext(browser);
+        const ctx2 = await newContext(browser);
         const pg1 = await ctx1.newPage();
         const pg2 = await ctx2.newPage();
 

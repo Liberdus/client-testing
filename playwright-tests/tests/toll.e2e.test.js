@@ -1,9 +1,10 @@
-const { test: base, expect } = require('@playwright/test');
+const { test: base, expect } = require('../fixtures/base');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 const { getLiberdusBalance, expectLiberdusBalanceToEqual } = require('../helpers/walletHelpers');
 const networkParams = require('../helpers/networkParams');
 const { fundUserFromPage } = require('../helpers/send-create');
 const { sendMessageTo } = require('../helpers/messageHelpers');
+const { newContext } = require('../helpers/toastHelpers');
 
 // Constants
 const TOLL_USD = networkParams.defaultTollUsd + 0.01;
@@ -51,8 +52,8 @@ async function setFriendStatus(page, username, status) {
 
 const test = base.extend({
     users: async ({ browser, browserName }, use) => {
-        const ctxA = await browser.newContext();
-        const ctxB = await browser.newContext();
+        const ctxA = await newContext(browser);
+        const ctxB = await newContext(browser);
         const pageA = await ctxA.newPage();
         const pageB = await ctxB.newPage();
         const userA = generateUsername(browserName);
