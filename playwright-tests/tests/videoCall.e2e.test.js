@@ -7,7 +7,7 @@ const { newContext } = require('../helpers/toastHelpers');
 const FriendStatus = {
     BLOCKED: 0,
     OTHER: 1,
-    ACQUAINTANCE: 2,
+    CONNECTION: 2,
     FRIEND: 3
 };
 
@@ -69,9 +69,9 @@ test.describe('Video Call Tests', () => {
         const { a, b } = users;
         const callLabel = 'Join Video Call';
 
-        // Make B set A's status to FRIEND before A starts the call.
+        // Make B set A's status to CONNECTION before A starts the call.
         await addContact(b.page, a.username);
-        await setFriendStatusInChat(b.page, FriendStatus.FRIEND);
+        await setFriendStatusInChat(b.page, FriendStatus.CONNECTION);
 
         // Open chat between A and B (use new chat flow to ensure chat exists)
         await a.page.click('#switchToChats');
@@ -135,7 +135,7 @@ test.describe('Video Call Tests', () => {
 
         // Ensure B has A as a friend contact before the call is scheduled.
         await addContact(b.page, a.username);
-        await setFriendStatusInChat(b.page, FriendStatus.FRIEND);
+        await setFriendStatusInChat(b.page, FriendStatus.CONNECTION);
         await b.page.click('#closeChatModal');
 
         // Open chat between A and B from A's side.
@@ -276,26 +276,26 @@ test.describe('Video Call Tests', () => {
             // In parallel per page, prepare contacts and friend statuses
             await Promise.all([
                 (async () => {
-                    // Host: add invitees and add inviter as FRIEND
+                    // Host: add invitees and add inviter as CONNECTION
                     await addContact(pageHost, invitee1);
                     await pageHost.click('#closeChatModal');
                     await addContact(pageHost, invitee2);
                     await pageHost.click('#closeChatModal');
 
                     await addContact(pageHost, inviter);
-                    await setFriendStatusInChat(pageHost, FriendStatus.FRIEND);
+                    await setFriendStatusInChat(pageHost, FriendStatus.CONNECTION);
                     await pageHost.click('#closeChatModal');
                 })(),
                 (async () => {
-                    // Invitee1: add HOST as FRIEND
+                    // Invitee1: add HOST as CONNECTION
                     await addContact(page1, host);
-                    await setFriendStatusInChat(page1, FriendStatus.FRIEND);
+                    await setFriendStatusInChat(page1, FriendStatus.CONNECTION);
                     await page1.click('#closeChatModal');
                 })(),
                 (async () => {
-                    // Invitee2: add HOST as FRIEND
+                    // Invitee2: add HOST as CONNECTION
                     await addContact(page2, host);
-                    await setFriendStatusInChat(page2, FriendStatus.FRIEND);
+                    await setFriendStatusInChat(page2, FriendStatus.CONNECTION);
                     await page2.click('#closeChatModal');
                 })()
             ]);
