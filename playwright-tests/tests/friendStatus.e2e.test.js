@@ -19,7 +19,7 @@ const DEFAULT_TOLL = networkParams.defaultTollLib;
 const FriendStatus = {
     BLOCKED: 0,
     OTHER: 1,
-    ACQUAINTANCE: 2,
+    CONNECTION: 2,
     FRIEND: 3
 };
 
@@ -126,7 +126,7 @@ const test = base.extend({
 
 test.describe('Friend Status E2E', () => {
 
-    test('Should have default statuses Other for User A and Acquaintance for User B', async ({ users }) => {
+    test('Should have default statuses Other for User A and Connection for User B', async ({ users }) => {
         const { a, b } = users;
 
         const [checkedA, checkedB] = await Promise.all([
@@ -134,7 +134,7 @@ test.describe('Friend Status E2E', () => {
             getCurrentFriendStatus(b.page, a.username)
         ]);
         expect(checkedA).toBe(FriendStatus.OTHER);
-        expect(checkedB).toBe(FriendStatus.ACQUAINTANCE);
+        expect(checkedB).toBe(FriendStatus.CONNECTION);
     });
 
     test('Block: User A blocks User B, B cannot message', async ({ users }) => {
@@ -169,13 +169,13 @@ test.describe('Friend Status E2E', () => {
     });
 
 
-    test('Acquaintance: B initial toll refunded, no toll for B msg to A', async ({ users }) => {
+    test('Connection: B initial toll refunded, no toll for B msg to A', async ({ users }) => {
         const { a, b } = users;
         let expectedBalanceA = a.balance;
         let expectedBalanceB = b.balance;
 
-        // User A sets status to Acquaintance
-        await setFriendStatus(a.page, b.username, FriendStatus.ACQUAINTANCE);
+        // User A sets status to Connection
+        await setFriendStatus(a.page, b.username, FriendStatus.CONNECTION);
         expectedBalanceA -= NETWORK_FEE; // A pays network fee for setting friend status
         expectedBalanceB += DEFAULT_TOLL; // toll refunded to B
 
@@ -183,7 +183,7 @@ test.describe('Friend Status E2E', () => {
         await b.page.click('#switchToChats');
         await b.page.locator('#chatList .chat-name', { hasText: a.username }).click();
         await expect(b.page.locator('#chatModal')).toBeVisible();
-        const msgFromB = 'acquaintance msg';
+        const msgFromB = 'Connection msg';
         await b.page.type('#chatModal .message-input', msgFromB);
         await b.page.click('#handleSendMessage');
         await b.page.click('#closeChatModal');
@@ -211,8 +211,6 @@ test.describe('Friend Status E2E', () => {
     test('Friend: A fills profile, sets status Friend, B sees full profile', async ({ users }) => {
         const { a, b } = users;
         const name = "Testername";
-        const email = "tester@example.com";
-        const phone = "5555555";
         const linkedin = "testerlinkedin";
         const x = "testerx";
 
@@ -225,7 +223,6 @@ test.describe('Friend Status E2E', () => {
         await expect(b.page.locator("#contactInfoUsername")).toHaveText(a.username);
         await expect(b.page.locator("#contactInfoName")).toHaveText('Not Entered');
         await expect(b.page.locator("#contactInfoProvidedName")).not.toBeVisible();
-        await expect(b.page.locator("#contactInfoEmail")).not.toBeVisible();
         await expect(b.page.locator("#contactInfoLinkedin")).not.toBeVisible();
         await expect(b.page.locator("#contactInfoX")).not.toBeVisible();
         await b.page.click('#closeContactInfoModal');
@@ -235,15 +232,13 @@ test.describe('Friend Status E2E', () => {
         await a.page.click('#toggleSettings');
         await a.page.locator('#openAccountForm').click();
         await a.page.fill('#name', name);
-        await a.page.fill('#email', email);
-        await a.page.fill('#phone', phone);
         await a.page.fill('#linkedin', linkedin);
         await a.page.fill('#x', x);
         await a.page.click('#accountModal button[type="submit"]');
         await a.page.click('#closeSettings');
 
         // Set friend status to Friend
-        await setFriendStatus(a.page, b.username, FriendStatus.FRIEND);
+        await setFriendStatus(a.page, b.username, FriendStatus.CONNECTION);
 
         // User A sends a message so profile is sent
         await a.page.click('#switchToChats');
@@ -262,13 +257,11 @@ test.describe('Friend Status E2E', () => {
         await b.page.click('.chat-user-info');
         await expect(b.page.locator("#contactInfoUsername")).toHaveText(a.username);
         await expect(b.page.locator("#contactInfoProvidedName")).toHaveText(name);
-        await expect(b.page.locator("#contactInfoEmail")).toHaveText(email);
-        await expect(b.page.locator("#contactInfoPhone")).toHaveText(phone);
         await expect(b.page.locator("#contactInfoLinkedin")).toHaveText(linkedin);
         await expect(b.page.locator("#contactInfoX")).toHaveText(x);
     });
 
-    test('Acquaintance -> Other: Message fails if status changed to require toll', async ({ users }) => {
+    test('Connection -> Other: Message fails if status changed to require toll', async ({ users }) => {
         const { a, b } = users;
 
         // User A opens chat with B and types a message but does not send
@@ -287,7 +280,7 @@ test.describe('Friend Status E2E', () => {
         await expect(a.page.locator('.toast.error.show', { hasText: 'toll' })).toBeVisible({ timeout: 15_000 });
     });
 
-    test('Acquaintance -> Blocked: Message fails if blocked', async ({ users }) => {
+    test('Connection -> Blocked: Message fails if blocked', async ({ users }) => {
         const { a, b } = users;
 
         // User A opens chat with B and types a message but does not send

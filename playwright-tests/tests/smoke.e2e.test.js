@@ -133,15 +133,11 @@ test('Should set toll', async ({ page }) => {
 
 test('Should update profile', async ({ page, username }) => {
   const name = "Testername";
-  const email = "tester@example.com";
-  const phone = "5555555";
   const linkedin = "testerlinkedin";
   const x = "testerx";
   await page.locator('#toggleSettings').click();
   await page.locator('#openAccountForm').click();
   await page.locator('#name').fill(name);
-  await page.locator('#email').fill(email);
-  await page.locator('#phone').fill(phone);
   await page.locator('#linkedin').fill(linkedin);
   await page.locator('#x').fill(x);
   await page.locator('#accountModal button[type="submit"]').click();
@@ -152,8 +148,6 @@ test('Should update profile', async ({ page, username }) => {
   await page.getByText('Profile', { exact: true }).click();
   await expect(page.locator('#accountForm')).toMatchAriaSnapshot(`
     - textbox "Name": ${name}
-    - textbox "Email": ${email}
-    - textbox "Phone": ${phone}
     - textbox "LinkedIn": ${linkedin}
     - textbox "X-Twitter": ${x}
     `);

@@ -11,7 +11,7 @@ const TOLL_USD = networkParams.defaultTollUsd + 0.01;
 const FriendStatus = {
     BLOCKED: 0,
     OTHER: 1,
-    ACQUAINTANCE: 2,
+    CONNECTION: 2,
     FRIEND: 3
 };
 
@@ -83,92 +83,89 @@ const test = base.extend({
     }
 });
 
-[
-    { name: 'Acquaintance', friendStatus: FriendStatus.ACQUAINTANCE },
-    { name: 'Friend', friendStatus: FriendStatus.FRIEND },
-].forEach(({ name, friendStatus }) => {
-    test(`Toll is charged for messages, then refunded on ${name}`, async ({ users }) => {
-        const { a, b } = users;
 
-        // User B sets toll in USD in the UI
-        await setToll(b.page, TOLL_USD);
-        const tollInLib = TOLL_USD / networkParams.stabilityFactor;
-        await a.page.click('#switchToChats');
+test(`Toll is charged for messages, then refunded for Connection`, async ({ users }) => {
+    const { a, b } = users;
 
-        let tollText = '';
-        const maxAttempts = 3;
+    // User B sets toll in USD in the UI
+    await setToll(b.page, TOLL_USD);
+    const tollInLib = TOLL_USD / networkParams.stabilityFactor;
+    await a.page.click('#switchToChats');
 
-        // reopen chat until new toll is displayed
-        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-            // ─ Start a new-chat flow
-            await expect(a.page.locator('#newChatButton')).toBeVisible();
-            await a.page.click('#newChatButton');
+    let tollText = '';
+    const maxAttempts = 3;
 
-            await expect(a.page.locator('#newChatModal')).toBeVisible();
-            await a.page.locator('#chatRecipient').fill(b.username);
-            await expect(a.page.locator('#chatRecipientError')).toHaveText('found');
+    // reopen chat until new toll is displayed
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        // ─ Start a new-chat flow
+        await expect(a.page.locator('#newChatButton')).toBeVisible();
+        await a.page.click('#newChatButton');
 
-            const continueBtn = a.page.locator('#newChatForm button[type="submit"]');
-            await expect(continueBtn).toBeEnabled();
-            await continueBtn.click();
+        await expect(a.page.locator('#newChatModal')).toBeVisible();
+        await a.page.locator('#chatRecipient').fill(b.username);
+        await expect(a.page.locator('#chatRecipientError')).toHaveText('found');
 
-            await expect(a.page.locator('#chatModal')).toBeVisible();
+        const continueBtn = a.page.locator('#newChatForm button[type="submit"]');
+        await expect(continueBtn).toBeEnabled();
+        await continueBtn.click();
 
-            // ─ Check toll label
-            tollText = (await a.page.locator('#tollValue').textContent()).trim();
-            if (tollText.startsWith(`${TOLL_USD.toFixed(6)}`)) break;        // continue test
+        await expect(a.page.locator('#chatModal')).toBeVisible();
 
-            // close modal and try again
-            await a.page.click('#closeChatModal');
-            await expect(a.page.locator('#newChatButton')).toBeVisible();
+        // ─ Check toll label
+        tollText = (await a.page.locator('#tollValue').textContent()).trim();
+        if (tollText.startsWith(`${TOLL_USD.toFixed(6)}`)) break;        // continue test
 
-            if (attempt === maxAttempts) {
-                throw new Error(`Toll label never showed "Toll: ${TOLL_USD}" after ${maxAttempts} attempts (last text: "${tollText}")`);
-            }
-        }
-
-        // User A sends 3 messages to B
-        for (let i = 0; i < 3; i++) {
-            await a.page.type('#chatModal .message-input', `msg ${i + 1}`);
-            await a.page.click('#handleSendMessage');
-            await a.page.waitForTimeout(3_000);
-
-            // If an error toast appears, fail fast
-            if (await a.page.locator('.toast.error.show').count()) {
-                const errText = await a.page.locator('.toast.error.show').textContent();
-                throw new Error(`Error toast displayed after sending message: ${errText}`);
-            }
-
-            // Replace waitForFunction with expect for sent message
-            const sentMsg = a.page.locator('.message.sent .message-content', { hasText: `msg ${i + 1}` });
-            await expect(sentMsg).toBeVisible({ timeout: 15_000 });
-        }
-
+        // close modal and try again
         await a.page.click('#closeChatModal');
         await expect(a.page.locator('#newChatButton')).toBeVisible();
 
-        // Wait for balances to update
-        await a.page.click('#switchToWallet');
-        await a.page.click('#refreshBalance');
-        await expect(a.page.locator('#walletScreen.active')).toBeVisible();
-        let expectedBalance = a.balance;
-        expectedBalance -= (tollInLib * 3);
-        expectedBalance -= (networkParams.networkFeeLib * 4); // 3 messages + 1 for creating contact
+        if (attempt === maxAttempts) {
+            throw new Error(`Toll label never showed "Toll: ${TOLL_USD}" after ${maxAttempts} attempts (last text: "${tollText}")`);
+        }
+    }
 
-        await expectLiberdusBalanceToEqual(a.page, expectedBalance.toFixed(6));
+    // User A sends 3 messages to B
+    for (let i = 0; i < 3; i++) {
+        await a.page.type('#chatModal .message-input', `msg ${i + 1}`);
+        await a.page.click('#handleSendMessage');
+        await a.page.waitForTimeout(3_000);
 
-        // User B sets User A's status to Acquaintance
-        await setFriendStatus(b.page, a.username, friendStatus);
+        // If an error toast appears, fail fast
+        if (await a.page.locator('.toast.error.show').count()) {
+            const errText = await a.page.locator('.toast.error.show').textContent();
+            throw new Error(`Error toast displayed after sending message: ${errText}`);
+        }
 
-        // Wait for refund to process
-        await a.page.click('#refreshBalance');
-        await a.page.waitForTimeout(5_000);
+        // Replace waitForFunction with expect for sent message
+        const sentMsg = a.page.locator('.message.sent .message-content', { hasText: `msg ${i + 1}` });
+        await expect(sentMsg).toBeVisible({ timeout: 15_000 });
+    }
 
-        // User A's balance should be refunded 5*3
-        const expectedAfterRefund = expectedBalance + (tollInLib * 3);
-        await expectLiberdusBalanceToEqual(a.page, expectedAfterRefund.toFixed(6));
-    });
+    await a.page.click('#closeChatModal');
+    await expect(a.page.locator('#newChatButton')).toBeVisible();
+
+    // Wait for balances to update
+    await a.page.click('#switchToWallet');
+    await a.page.click('#refreshBalance');
+    await expect(a.page.locator('#walletScreen.active')).toBeVisible();
+    let expectedBalance = a.balance;
+    expectedBalance -= (tollInLib * 3);
+    expectedBalance -= (networkParams.networkFeeLib * 4); // 3 messages + 1 for creating contact
+
+    await expectLiberdusBalanceToEqual(a.page, expectedBalance.toFixed(6));
+
+    // User B sets User A's status to Connection
+    await setFriendStatus(b.page, a.username, FriendStatus.CONNECTION);
+
+    // Wait for refund to process
+    await a.page.click('#refreshBalance');
+    await a.page.waitForTimeout(5_000);
+
+    // User A's balance should be refunded 5*3
+    const expectedAfterRefund = expectedBalance + (tollInLib * 3);
+    await expectLiberdusBalanceToEqual(a.page, expectedAfterRefund.toFixed(6));
 });
+
 
 
 

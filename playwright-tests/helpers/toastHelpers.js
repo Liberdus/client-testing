@@ -8,7 +8,8 @@ const toastCloserScript = () => {
   // Only close toasts whose text matches one of these substrings.
   const whitelist = [
     'The LIB in this Testnet is not of any value and will not be transferred to the Mainnet',
-    'This user has deposited a toll to message you'
+    'This user has deposited a toll to message you',
+    'Add more LIB before you run out. On the Wallet page click the Faucet button.'
   ];
 
   function tryCloseToast(el) {

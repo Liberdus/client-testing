@@ -92,7 +92,7 @@ test.describe('File Attachment Tests', () => {
     // Create test files with unique names for this test run
     const imageResult = await createTestFile('test-image.png', 0.5, 'image/png', testRunUniqueId);
     const pdfResult = await createTestFile('test-pdf.pdf', 0.5, 'application/pdf', testRunUniqueId);
-    const largeResult = await createTestFile('test-large.png', 11, 'image/png', testRunUniqueId); // Over the 10MB limit
+    const largeResult = await createTestFile('test-large.png', 101, 'image/png', testRunUniqueId); // Over the 100MB limit
     const invalidResult = await createTestFile('test-invalid.xyz', 0.1, 'application/octet-stream', testRunUniqueId);
     
     // Store file info for this test run

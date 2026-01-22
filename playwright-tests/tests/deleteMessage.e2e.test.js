@@ -142,7 +142,7 @@ test.describe('Delete Message Tests', () => {
         await deleteForAll.click();
 
         // Expect a toast indicating the delete request was sent
-        const deleteToast = user1.page.locator('.toast.success.show', { hasText: 'Delete request sent' });
+        const deleteToast = user1.page.locator('.toast.loading.show', { hasText: 'Delete request sent' });
         await expect(deleteToast).toBeVisible({ timeout: 30_000 });
 
         // Wait for the transaction to be processed and for the message to be replaced on sender side
