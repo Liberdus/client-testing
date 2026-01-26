@@ -565,4 +565,135 @@ test.describe('File Attachment Tests', () => {
       // Clean up is handled in afterAll
     }
   });
+
+  test('should share attachment with another contact', async ({ page, username, browser }) => {
+    const sender = username;
+    const recipient = testRecipient.username;
+    const fileInfo = testFiles.image;
+    const fileName = fileInfo.fileName;
+    const testFilePath = fileInfo.filePath;
+
+    // Create a third user to share the attachment with
+    const thirdUserContext = await newContext(browser);
+    const thirdUserPage = await thirdUserContext.newPage();
+    const thirdUsername = generateUsername('thirdUser');
+    await createAndSignInUser(thirdUserPage, thirdUsername);
+
+    // Sender adds third user as a contact
+    await page.bringToFront();
+    await page.click('#newChatButton');
+    await expect(page.locator('#newChatModal')).toBeVisible();
+    await page.fill('#chatRecipient', thirdUsername);
+    await page.waitForTimeout(3_000);
+    await expect(page.locator('#chatRecipientError')).toHaveText('found', { timeout: 10_000 });
+    const continueBtn = page.locator('#newChatForm button[type="submit"]');
+    await expect(continueBtn).toBeEnabled();
+    await continueBtn.click();
+    await expect(page.locator('#chatModal')).toBeVisible();
+    await page.click('#closeChatModal');
+
+    // Send attachment to recipient
+    await page.click('#newChatButton');
+    await expect(page.locator('#newChatModal')).toBeVisible();
+    await page.fill('#chatRecipient', recipient);
+    await page.waitForTimeout(3_000);
+    await expect(page.locator('#chatRecipientError')).toHaveText('found', { timeout: 10_000 });
+    const continueBtn2 = page.locator('#newChatForm button[type="submit"]');
+    await expect(continueBtn2).toBeEnabled();
+    await continueBtn2.click();
+    await expect(page.locator('#chatModal')).toBeVisible();
+
+    // Upload and send attachment
+    const fileInput = page.locator('#chatFileInput');
+    await fileInput.setInputFiles(testFilePath);
+    await page.click('#handleSendMessage');
+
+    // Verify attachment was sent
+    const attachmentLink = page.locator('.message.sent .attachment-label');
+    await expect(attachmentLink).toBeVisible({ timeout: 15000 });
+    await expect(attachmentLink).toHaveText(fileName);
+
+    // Right-click on the attachment to open context menu
+    await attachmentLink.click();
+    await expect(page.locator('#imageAttachmentContextMenu')).toBeVisible();
+
+    // Click Share option
+    await page.click('#imageAttachmentContextMenu .context-menu-option[data-action="share"]');
+    
+    // Verify Share Attachment modal opens
+    await expect(page.locator('#shareAttachmentModal')).toHaveClass(/active/);
+
+    // Find and select the third user in the contact list by username text
+    const contactRow = page.locator('.call-invite-contact-row').filter({ has: page.locator('.call-invite-contact-name', { hasText: thirdUsername }) });
+    await expect(contactRow).toBeVisible({ timeout: 5000 });
+    const thirdUserCheckbox = contactRow.locator('input[type="checkbox"]');
+    await thirdUserCheckbox.check();
+
+    // Verify counter updates
+    await expect(page.locator('#shareAttachmentCounter')).toHaveText('1 selected (max 10)');
+
+    // Click Send button
+    await page.click('#shareAttachmentSendBtn');
+
+    // Wait for either success or error toast to appear
+    const toastLocator = page.locator('.toast.show').first();
+    await expect(toastLocator).toBeVisible({ timeout: 15_000 });
+    
+    // Check if it's a success toast
+    const isSuccess = await page.locator('.toast.success.show').count() > 0;
+    const isError = await page.locator('.toast.error.show').count() > 0;
+    
+    if (isError) {
+      const errorMsg = await page.locator('.toast.error.show').textContent();
+      throw new Error(`Share failed with error: ${errorMsg}`);
+    }
+    
+    expect(isSuccess).toBeTruthy();
+    const successMsg = await page.locator('.toast.success.show').textContent();
+    expect(successMsg).toContain('shared');
+
+    // Verify modal closes
+    await expect(page.locator('#shareAttachmentModal')).not.toHaveClass(/active/);
+
+    // Switch to third user and verify they received the shared attachment
+    await thirdUserPage.bringToFront();
+    // await thirdUserPage.reload();
+    await thirdUserPage.waitForTimeout(2_000);
+
+    // Look for notification or chat from sender
+    const chatItem = thirdUserPage.locator('#chatList .chat-item').first();
+    await expect(chatItem).toBeVisible({ timeout: 15_000 });
+    await chatItem.click();
+
+    // Verify attachment is visible in chat
+    await expect(thirdUserPage.locator('#chatModal')).toBeVisible();
+    const receivedAttachment = thirdUserPage.locator('.message.received .attachment-label').last();
+    await expect(receivedAttachment).toBeVisible({ timeout: 10_000 });
+    await expect(receivedAttachment).toHaveText(fileName);
+
+    // Test download on third user's side
+    const downloadPromise = thirdUserPage.waitForEvent('download');
+    await receivedAttachment.click();
+    await expect(thirdUserPage.locator('#imageAttachmentContextMenu .context-menu-option[data-action="save"]')).toBeVisible();
+    await thirdUserPage.click('#imageAttachmentContextMenu .context-menu-option[data-action="save"]');
+
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe(fileName);
+
+    const downloadPath = path.join(__dirname, '..', 'test-results', 'downloads', testRunUniqueId, `shared-${download.suggestedFilename()}`);
+
+    try {
+      await download.saveAs(downloadPath);
+      expect(fs.existsSync(downloadPath)).toBeTruthy();
+      const stats = fs.statSync(downloadPath);
+      expect(stats.size).toBeGreaterThan(0);
+    } finally {
+      if (fs.existsSync(downloadPath)) {
+        fs.unlinkSync(downloadPath);
+      }
+    }
+
+    // Clean up
+    await thirdUserContext.close();
+  });
 });
