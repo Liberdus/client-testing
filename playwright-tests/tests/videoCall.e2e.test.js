@@ -328,15 +328,15 @@ test.describe('Video Call Tests', () => {
 
             // Invite modal should appear and list both invitee1 and invitee2
             await expect(pageHost.locator('#callInviteModal')).toBeVisible({ timeout: 10_000 });
-            // contact rows have class .call-invite-contact-row and the name is in .call-invite-contact-name
-            const user1Row = pageHost.locator('#callInviteContactsList .call-invite-contact-row', { hasText: invitee1 });
-            const user2Row = pageHost.locator('#callInviteContactsList .call-invite-contact-row', { hasText: invitee2 });
+            // contact rows have class .share-contact-row and the name is in .share-contact-name
+            const user1Row = pageHost.locator('#callInviteContactsList .share-contact-row', { hasText: invitee1 });
+            const user2Row = pageHost.locator('#callInviteContactsList .share-contact-row', { hasText: invitee2 });
             await expect(user1Row).toBeVisible();
             await expect(user2Row).toBeVisible();
 
-            // Select both users via the checkbox with class .call-invite-contact-checkbox
-            await user1Row.locator('input.call-invite-contact-checkbox').check();
-            await user2Row.locator('input.call-invite-contact-checkbox').check();
+            // Select both users via the checkbox with class .share-contact-checkbox
+            await user1Row.locator('input.share-contact-checkbox').check();
+            await user2Row.locator('input.share-contact-checkbox').check();
 
             const inviteBtn = pageHost.locator('#callInviteSendBtn');
             await expect(inviteBtn).toBeEnabled({ timeout: 5000 });

@@ -624,7 +624,7 @@ test.describe('File Attachment Tests', () => {
     await expect(page.locator('#shareAttachmentModal')).toHaveClass(/active/);
 
     // Find and select the third user in the contact list by username text
-    const contactRow = page.locator('.call-invite-contact-row').filter({ has: page.locator('.call-invite-contact-name', { hasText: thirdUsername }) });
+    const contactRow = page.locator('#shareAttachmentModal .share-contact-row').filter({ has: page.locator('.share-contact-name', { hasText: thirdUsername }) });
     await expect(contactRow).toBeVisible({ timeout: 5000 });
     const thirdUserCheckbox = contactRow.locator('input[type="checkbox"]');
     await thirdUserCheckbox.check();
