@@ -165,7 +165,7 @@ test.describe('Friend Status E2E', () => {
         await expect(b.page.locator('#sendAssetFormModal')).toBeVisible();
         await b.page.fill('#sendToAddress', a.username);
         await b.page.fill('#sendAmount', '10');
-        expect(b.page.locator('#sendAssetFormModal button[type="submit"]')).toBeDisabled();
+        await expect(b.page.locator('#sendAssetFormModal button[type="submit"]')).toBeDisabled();
     });
 
 
