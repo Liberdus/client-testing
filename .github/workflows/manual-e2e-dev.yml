@@ -157,12 +157,30 @@ jobs:
             cd "$HISTORY_DIR"
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            # Normalize local branch to pages-history.
+            if git show-ref --verify --quiet refs/remotes/origin/pages-history; then
+              git checkout -B pages-history origin/pages-history
+            else
+              git checkout -B pages-history
+            fi
             git add -A
             if git diff --staged --quiet; then
               echo "No history changes to commit."
             else
               git commit -m "Update Playwright report history for run $RUN_ID"
-              git push origin HEAD:pages-history
+              pushed=0
+              for attempt in 1 2 3; do
+                if git push origin HEAD:pages-history; then
+                  pushed=1
+                  break
+                fi
+                echo "Push conflict on pages-history (attempt $attempt). Rebasing and retrying..."
+                git fetch origin pages-history
+                git rebase origin/pages-history || true
+              done
+              if [ "$pushed" -ne 1 ]; then
+                echo "::warning::Could not update pages-history after retries; skipping history update for this run."
+              fi
             fi
           )
 
