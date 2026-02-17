@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
-      contents: read
+      contents: write
     defaults:
       run:
         shell: bash
@@ -55,10 +55,7 @@ jobs:
           grep -n "baseURL:" playwright.config.ts
 
       - name: Run Playwright tests
-        env:
-          PLAYWRIGHT_JUNIT_OUTPUT_DIR: test-results/junit
-          PLAYWRIGHT_JUNIT_OUTPUT_NAME: junit.xml
-        run: npx playwright test --project=${{ inputs.browser }} ${{ inputs.test_path }} --reporter=github,html,junit
+        run: npx playwright test --project=${{ inputs.browser }} ${{ inputs.test_path }} --reporter=github,html
 
       - name: Upload Playwright HTML report
         if: always()
@@ -78,20 +75,41 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload JUnit XML
+      - name: Build Pages report history (keep last 50)
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-junit-${{ github.run_id }}
-          path: playwright-tests/test-results/junit/junit.xml
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: Ensure report directory exists for Pages
-        if: always()
+        working-directory: .
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          if [ ! -d playwright-report ]; then
-            mkdir -p playwright-report
+          set -euo pipefail
+          SITE_DIR=".pages-site"
+          HISTORY_DIR="pages-history"
+          REPORT_DIR="playwright-tests/playwright-report"
+          RUN_ID="${GITHUB_RUN_ID}"
+
+          rm -rf "$SITE_DIR"
+          mkdir -p "$SITE_DIR/reports"
+
+          if git ls-remote --exit-code --heads "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" pages-history >/dev/null 2>&1; then
+            git clone --depth 1 --branch pages-history "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$HISTORY_DIR"
+          else
+            mkdir -p "$HISTORY_DIR"
+            (
+              cd "$HISTORY_DIR"
+              git init
+              git checkout -b pages-history
+              git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+            )
+          fi
+
+          if [ -d "$HISTORY_DIR/reports" ]; then
+            cp -a "$HISTORY_DIR/reports/." "$SITE_DIR/reports/" || true
+          fi
+
+          if [ -d "$REPORT_DIR" ]; then
+            cp -a "$REPORT_DIR" "$SITE_DIR/reports/$RUN_ID"
+          else
+            mkdir -p "$SITE_DIR/reports/$RUN_ID"
             printf '%s\n' \
               '<!doctype html>' \
               '<html>' \
@@ -100,14 +118,59 @@ jobs:
               '<h1>Playwright report unavailable</h1>' \
               '<p>No HTML report was generated for this run.</p>' \
               '</body>' \
-              '</html>' > playwright-report/index.html
+              '</html>' > "$SITE_DIR/reports/$RUN_ID/index.html"
           fi
+
+          mapfile -t report_dirs < <(find "$SITE_DIR/reports" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -nr)
+          if [ "${#report_dirs[@]}" -gt 50 ]; then
+            for old in "${report_dirs[@]:50}"; do
+              rm -rf "$SITE_DIR/reports/$old"
+            done
+          fi
+
+          latest=""
+          if [ "${#report_dirs[@]}" -gt 0 ]; then
+            latest="${report_dirs[0]}"
+          fi
+
+          {
+            echo '<!doctype html>'
+            echo '<html>'
+            echo '<head><meta charset="utf-8"><title>Playwright E2E Report History</title></head>'
+            echo '<body>'
+            echo '<h1>Playwright E2E Report History</h1>'
+            if [ -n "$latest" ]; then
+              echo "<p><a href=\"reports/$latest/\">Open latest report ($latest)</a></p>"
+            fi
+            echo '<h2>Recent Reports (latest 50)</h2>'
+            echo '<ul>'
+            for d in "${report_dirs[@]}"; do
+              echo "<li><a href=\"reports/$d/\">Run $d</a></li>"
+            done
+            echo '</ul>'
+            echo '</body>'
+            echo '</html>'
+          } > "$SITE_DIR/index.html"
+
+          rsync -a --delete "$SITE_DIR"/ "$HISTORY_DIR"/
+          (
+            cd "$HISTORY_DIR"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            if git diff --staged --quiet; then
+              echo "No history changes to commit."
+            else
+              git commit -m "Update Playwright report history for run $RUN_ID"
+              git push origin HEAD:pages-history
+            fi
+          )
 
       - name: Upload report artifact for GitHub Pages
         if: always()
         uses: actions/upload-pages-artifact@v3
         with:
-          path: playwright-tests/playwright-report
+          path: .pages-site
 
       - name: Job summary
         if: always()
@@ -118,8 +181,8 @@ jobs:
             echo "- Browser: \`${{ inputs.browser }}\`"
             echo "- Test path: \`${{ inputs.test_path }}\`"
             echo "- Target site: \`https://liberdus.com/dev/\` (from Playwright config)"
-            echo "- Artifacts uploaded: HTML report zip, raw test results, JUnit XML."
-            echo "- A GitHub Pages deployment job will publish the HTML report for browser viewing."
+            echo "- Artifacts uploaded: HTML report zip and raw test results."
+            echo "- GitHub Pages now hosts report history with a rolling limit of the latest 50 runs."
           } >> "$GITHUB_STEP_SUMMARY"
 
   deploy-report:
@@ -135,5 +198,4 @@ jobs:
     steps:
       - name: Deploy report to GitHub Pages
         id: deployment
-        continue-on-error: true
         uses: actions/deploy-pages@v4
