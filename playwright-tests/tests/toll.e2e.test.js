@@ -11,8 +11,7 @@ const TOLL_USD = networkParams.defaultTollUsd + 0.01;
 const FriendStatus = {
     BLOCKED: 0,
     OTHER: 1,
-    CONNECTION: 2,
-    FRIEND: 3
+    CONNECTION: 2
 };
 
 async function setToll(page, amount) {
