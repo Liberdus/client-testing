@@ -13,9 +13,9 @@ on:
           - firefox
           - webkit
       test_path:
-        description: Test file/glob to run (for example tests/smoke.e2e.test.js)
+        description: Test file/glob to run (for example tests or tests/smoke.e2e.test.js)
         required: true
-        default: tests/smoke.e2e.test.js
+        default: tests
         type: string
 
 jobs:
@@ -55,7 +55,10 @@ jobs:
           grep -n "baseURL:" playwright.config.ts
 
       - name: Run Playwright tests
-        run: npx playwright test --project=${{ inputs.browser }} ${{ inputs.test_path }} --reporter=github,html
+        env:
+          PLAYWRIGHT_JUNIT_OUTPUT_DIR: test-results/junit
+          PLAYWRIGHT_JUNIT_OUTPUT_NAME: junit.xml
+        run: npx playwright test --project=${{ inputs.browser }} ${{ inputs.test_path }} --reporter=github,html,junit
 
       - name: Upload Playwright HTML report
         if: always()
@@ -75,6 +78,38 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Upload JUnit XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-junit-${{ github.run_id }}
+          path: playwright-tests/test-results/junit/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Ensure report directory exists for Pages
+        if: always()
+        run: |
+          if [ ! -d playwright-report ]; then
+            mkdir -p playwright-report
+            cat > playwright-report/index.html <<'EOF'
+            <!doctype html>
+            <html>
+            <head><meta charset="utf-8"><title>Playwright report unavailable</title></head>
+            <body>
+              <h1>Playwright report unavailable</h1>
+              <p>No HTML report was generated for this run.</p>
+            </body>
+            </html>
+            EOF
+          fi
+
+      - name: Upload report artifact for GitHub Pages
+        if: always()
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: playwright-tests/playwright-report
+
       - name: Job summary
         if: always()
         run: |
@@ -84,5 +119,21 @@ jobs:
             echo "- Browser: \`${{ inputs.browser }}\`"
             echo "- Test path: \`${{ inputs.test_path }}\`"
             echo "- Target site: \`https://liberdus.com/dev/\` (from Playwright config)"
-            echo "- Download artifacts from this run to view the HTML report and raw test results."
+            echo "- Artifacts uploaded: HTML report zip, raw test results, JUnit XML."
+            echo "- A GitHub Pages deployment job will publish the HTML report for browser viewing."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-report:
+    if: always()
+    needs: e2e
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy report to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
