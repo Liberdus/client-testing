@@ -70,6 +70,8 @@ async function cleanUpTestFiles(uniqueId) {
 }
 
 test.describe('File Attachment Tests', () => {
+  test.describe.configure({ mode: 'serial' });
+
   // Create a unique ID for this test run to avoid conflicts in parallel execution
   const testRunUniqueId = crypto.randomUUID().substring(0, 8);
   
