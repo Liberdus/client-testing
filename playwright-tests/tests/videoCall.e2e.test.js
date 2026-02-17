@@ -7,8 +7,7 @@ const { newContext } = require('../helpers/toastHelpers');
 const FriendStatus = {
     BLOCKED: 0,
     OTHER: 1,
-    CONNECTION: 2,
-    FRIEND: 3
+    CONNECTION: 2
 };
 
 // Helper to set friend status for a user from within chat modal

@@ -19,8 +19,7 @@ const DEFAULT_TOLL = networkParams.defaultTollLib;
 const FriendStatus = {
     BLOCKED: 0,
     OTHER: 1,
-    CONNECTION: 2,
-    FRIEND: 3
+    CONNECTION: 2
 };
 
 async function setFriendStatus(page, username, status) {
@@ -208,7 +207,7 @@ test.describe('Friend Status E2E', () => {
         }).toPass({ timeout: 30000 });
     });
 
-    test('Friend: A fills profile, sets status Friend, B sees full profile', async ({ users }) => {
+    test('Connection: A fills profile, sets status Connection, B sees full profile', async ({ users }) => {
         const { a, b } = users;
         const name = "Testername";
         const linkedin = "testerlinkedin";
@@ -237,7 +236,7 @@ test.describe('Friend Status E2E', () => {
         await a.page.click('#accountModal button[type="submit"]');
         await a.page.click('#closeSettings');
 
-        // Set friend status to Friend
+        // Set friend status to Connection
         await setFriendStatus(a.page, b.username, FriendStatus.CONNECTION);
 
         // User A sends a message so profile is sent
