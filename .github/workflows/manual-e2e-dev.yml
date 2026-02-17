@@ -92,16 +92,15 @@ jobs:
         run: |
           if [ ! -d playwright-report ]; then
             mkdir -p playwright-report
-            cat > playwright-report/index.html <<'EOF'
-            <!doctype html>
-            <html>
-            <head><meta charset="utf-8"><title>Playwright report unavailable</title></head>
-            <body>
-              <h1>Playwright report unavailable</h1>
-              <p>No HTML report was generated for this run.</p>
-            </body>
-            </html>
-            EOF
+            printf '%s\n' \
+              '<!doctype html>' \
+              '<html>' \
+              '<head><meta charset="utf-8"><title>Playwright report unavailable</title></head>' \
+              '<body>' \
+              '<h1>Playwright report unavailable</h1>' \
+              '<p>No HTML report was generated for this run.</p>' \
+              '</body>' \
+              '</html>' > playwright-report/index.html
           fi
 
       - name: Upload report artifact for GitHub Pages
@@ -136,4 +135,5 @@ jobs:
     steps:
       - name: Deploy report to GitHub Pages
         id: deployment
+        continue-on-error: true
         uses: actions/deploy-pages@v4
