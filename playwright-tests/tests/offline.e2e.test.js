@@ -146,17 +146,24 @@ test.describe('Offline Tests', () => {
         // First, have user1 start a chat with user2 while online
         await sendMessageTo(user1.page, user2.username, 'Hello user2!');
 
-        // Now set user1 offline
-        await setUserOfflineAndWaitForIndicator(user1.context, user1.page);
-
         await user1.page.locator('.chat-name', { hasText: user2.username }).click();
 
-        // Attempt to send a message
         const messageInput = user1.page.locator('#chatModal .message-input');
-        await messageInput.fill('This message should not be sendable');
+        const sendButton = user1.page.locator('#handleSendMessage');
 
-        // Send button should be disabled
-        await expectButtonDisabledOffline(user1.page.locator('#handleSendMessage'));
+        // Typing draft text should keep send enabled while online
+        await messageInput.fill('This message should not be sendable');
+        await expect(sendButton).toBeEnabled();
+
+        // Going offline should re-disable send
+        await setUserOfflineAndWaitForIndicator(user1.context, user1.page);
+        await expectButtonDisabledOffline(sendButton);
+
+        // Going back online should re-enable send for the draft text
+        await user1.context.setOffline(false);
+        const onlineToast = user1.page.locator('.toast.online');
+        await expect(onlineToast).toBeVisible({ timeout: 15_000 });
+        await expect(sendButton).toBeEnabled({ timeout: 10_000 });
 
         // close chat to trigger draft save
         await user1.page.locator('#closeChatModal').click();

@@ -192,6 +192,7 @@ test.describe('File Attachment Tests', () => {
     const recipient = testRecipient.username;
     const fileInfo = testFiles.large;
     const testFilePath = fileInfo.filePath;
+    const messageText = `text still sendable after file-size error ${testRunUniqueId}`;
 
     // Open New Chat
     await page.click('#newChatButton');
@@ -206,6 +207,12 @@ test.describe('File Attachment Tests', () => {
 
     // Ensure we're in the chat modal
     await expect(page.locator('#chatModal')).toBeVisible();
+    const messageInput = page.locator('#chatModal .message-input');
+    const sendButton = page.locator('#handleSendMessage');
+
+    // Typing text should keep send enabled
+    await messageInput.fill(messageText);
+    await expect(sendButton).toBeEnabled();
 
     // Set the file input for upload
     const fileInput = page.locator('#chatFileInput');
@@ -218,6 +225,17 @@ test.describe('File Attachment Tests', () => {
 
     // Verify attachment preview does not appear
     await expect(page.locator('#attachmentPreview')).toHaveAttribute('style', 'display: none;');
+
+    // Send should stay enabled after attachment validation error when text is present
+    await expect(sendButton).toBeEnabled();
+    await sendButton.click();
+
+    // Verify text message still sends successfully
+    const sentTextMessage = page.locator(
+      '#chatModal .messages-list .message.sent .message-content',
+      { hasText: messageText }
+    );
+    await expect(sentTextMessage).toBeVisible({ timeout: 15_000 });
   });
 
   test('should allow removing an attachment', async ({ page, username }) => {
