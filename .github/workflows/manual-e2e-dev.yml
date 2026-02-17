@@ -27,8 +27,6 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    permissions:
-      contents: write
     defaults:
       run:
         shell: bash
@@ -89,41 +87,21 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Build Pages report history (keep last 50)
+      - name: Prepare latest report for GitHub Pages
         if: always()
         working-directory: .
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           SITE_DIR=".pages-site"
-          HISTORY_DIR="pages-history"
           REPORT_DIR="playwright-tests/playwright-report"
-          RUN_ID="${GITHUB_RUN_ID}"
 
           rm -rf "$SITE_DIR"
-          mkdir -p "$SITE_DIR/reports"
-
-          if git ls-remote --exit-code --heads "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" pages-history >/dev/null 2>&1; then
-            git clone --depth 1 --branch pages-history "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$HISTORY_DIR"
-          else
-            mkdir -p "$HISTORY_DIR"
-            (
-              cd "$HISTORY_DIR"
-              git init
-              git checkout -b pages-history
-              git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-            )
-          fi
-
-          if [ -d "$HISTORY_DIR/reports" ]; then
-            cp -a "$HISTORY_DIR/reports/." "$SITE_DIR/reports/" || true
-          fi
+          mkdir -p "$SITE_DIR"
 
           if [ -d "$REPORT_DIR" ]; then
-            cp -a "$REPORT_DIR" "$SITE_DIR/reports/$RUN_ID"
+            cp -a "$REPORT_DIR/." "$SITE_DIR/"
           else
-            mkdir -p "$SITE_DIR/reports/$RUN_ID"
+            mkdir -p "$SITE_DIR"
             printf '%s\n' \
               '<!doctype html>' \
               '<html>' \
@@ -132,90 +110,8 @@ jobs:
               '<h1>Playwright report unavailable</h1>' \
               '<p>No HTML report was generated for this run.</p>' \
               '</body>' \
-              '</html>' > "$SITE_DIR/reports/$RUN_ID/index.html"
+              '</html>' > "$SITE_DIR/index.html"
           fi
-
-          mapfile -t report_dirs < <(find "$SITE_DIR/reports" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -nr)
-          if [ "${#report_dirs[@]}" -gt 50 ]; then
-            for old in "${report_dirs[@]:50}"; do
-              rm -rf "$SITE_DIR/reports/$old"
-            done
-          fi
-
-          latest=""
-          if [ "${#report_dirs[@]}" -gt 0 ]; then
-            latest="${report_dirs[0]}"
-          fi
-
-          {
-            echo '<!doctype html>'
-            echo '<html>'
-            echo '<head><meta charset="utf-8"><title>Playwright E2E Report History</title></head>'
-            echo '<body>'
-            echo '<h1>Playwright E2E Report History</h1>'
-            if [ -n "$latest" ]; then
-              echo "<p><a href=\"reports/$latest/\">Open latest report ($latest)</a></p>"
-            fi
-            echo '<h2>Recent Reports (latest 50)</h2>'
-            echo '<ul>'
-            for d in "${report_dirs[@]}"; do
-              echo "<li><a href=\"reports/$d/\">Run $d</a></li>"
-            done
-            echo '</ul>'
-            echo '</body>'
-            echo '</html>'
-          } > "$SITE_DIR/index.html"
-
-          (
-            cd "$HISTORY_DIR"
-            # Normalize local branch to pages-history.
-            if git show-ref --verify --quiet refs/remotes/origin/pages-history; then
-              git checkout -B pages-history origin/pages-history
-            else
-              git checkout -B pages-history
-            fi
-            git reset --hard
-            git clean -fdx
-            rsync -a --delete --exclude '.git/' "../$SITE_DIR"/ ./
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -A
-            if git diff --staged --quiet; then
-              echo "No history changes to commit."
-            else
-              commit_msg="Update Playwright report history for run $RUN_ID"
-              git commit -m "$commit_msg"
-              pushed=0
-              for attempt in 1 2 3; do
-                if git push origin HEAD:pages-history; then
-                  pushed=1
-                  break
-                fi
-                echo "Push conflict on pages-history (attempt $attempt). Refreshing from remote and retrying..."
-                git fetch origin pages-history
-                if git show-ref --verify --quiet refs/remotes/origin/pages-history; then
-                  git checkout -B pages-history origin/pages-history
-                else
-                  git checkout -B pages-history
-                fi
-                git reset --hard
-                git clean -fdx
-                rsync -a --delete --exclude '.git/' "../$SITE_DIR"/ ./
-                git config user.name "github-actions[bot]"
-                git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-                git add -A
-                if git diff --staged --quiet; then
-                  echo "No changes remain after refresh; assuming another run already updated history."
-                  pushed=1
-                  break
-                fi
-                git commit -m "$commit_msg (retry $attempt)"
-              done
-              if [ "$pushed" -ne 1 ]; then
-                echo "::warning::Could not update pages-history after retries; skipping history update for this run."
-              fi
-            fi
-          )
 
       - name: Upload report artifact for GitHub Pages
         if: always()
@@ -234,7 +130,7 @@ jobs:
             echo "- Workers: \`${{ inputs.workers }}\`"
             echo "- Target site: \`https://liberdus.com/dev/\` (from Playwright config)"
             echo "- Artifacts uploaded: HTML report zip and raw test results."
-            echo "- GitHub Pages now hosts report history with a rolling limit of the latest 50 runs."
+            echo "- GitHub Pages hosts only the latest HTML report."
           } >> "$GITHUB_STEP_SUMMARY"
 
   deploy-report:
