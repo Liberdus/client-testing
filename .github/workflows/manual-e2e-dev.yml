@@ -17,6 +17,11 @@ on:
         required: true
         default: tests
         type: string
+      workers:
+        description: Number of Playwright workers (use 1 for serial)
+        required: true
+        default: "4"
+        type: string
 
 jobs:
   e2e:
@@ -45,8 +50,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright browser and OS deps
-        run: npx playwright install --with-deps ${{ inputs.browser }}
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ inputs.browser }}-${{ hashFiles('playwright-tests/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-${{ inputs.browser }}-
+            ${{ runner.os }}-playwright-
+
+      - name: Install Playwright browser
+        run: npx playwright install ${{ inputs.browser }}
 
       - name: Show configured target
         run: |
@@ -55,7 +69,7 @@ jobs:
           grep -n "baseURL:" playwright.config.ts
 
       - name: Run Playwright tests
-        run: npx playwright test --project=${{ inputs.browser }} ${{ inputs.test_path }} --reporter=github,html
+        run: npx playwright test --project=${{ inputs.browser }} ${{ inputs.test_path }} --workers=${{ inputs.workers }} --reporter=github,html
 
       - name: Upload Playwright HTML report
         if: always()
@@ -215,6 +229,7 @@ jobs:
             echo ""
             echo "- Browser: \`${{ inputs.browser }}\`"
             echo "- Test path: \`${{ inputs.test_path }}\`"
+            echo "- Workers: \`${{ inputs.workers }}\`"
             echo "- Target site: \`https://liberdus.com/dev/\` (from Playwright config)"
             echo "- Artifacts uploaded: HTML report zip and raw test results."
             echo "- GitHub Pages now hosts report history with a rolling limit of the latest 50 runs."
