@@ -1,0 +1,88 @@
+name: Manual E2E (dev site)
+
+on:
+  workflow_dispatch:
+    inputs:
+      browser:
+        description: Playwright project/browser
+        required: true
+        default: chromium
+        type: choice
+        options:
+          - chromium
+          - firefox
+          - webkit
+      test_path:
+        description: Test file/glob to run (for example tests/smoke.e2e.test.js)
+        required: true
+        default: tests/smoke.e2e.test.js
+        type: string
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+        working-directory: playwright-tests
+    env:
+      CI: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: playwright-tests/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser and OS deps
+        run: npx playwright install --with-deps ${{ inputs.browser }}
+
+      - name: Show configured target
+        run: |
+          echo "Playwright baseURL is configured in playwright.config.ts"
+          echo "Current baseURL line:"
+          grep -n "baseURL:" playwright.config.ts
+
+      - name: Run Playwright tests
+        run: npx playwright test --project=${{ inputs.browser }} ${{ inputs.test_path }} --reporter=github,html
+
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: playwright-tests/playwright-report/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload Playwright raw results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results-${{ github.run_id }}
+          path: playwright-tests/test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Manual E2E run complete"
+            echo ""
+            echo "- Browser: \`${{ inputs.browser }}\`"
+            echo "- Test path: \`${{ inputs.test_path }}\`"
+            echo "- Target site: \`https://liberdus.com/dev/\` (from Playwright config)"
+            echo "- Download artifacts from this run to view the HTML report and raw test results."
+          } >> "$GITHUB_STEP_SUMMARY"
