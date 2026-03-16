@@ -185,9 +185,8 @@ test.describe('Delete Message Tests', () => {
         const deleteForMe = user1.page.locator('#messageContextMenu').locator('text="Delete for me"');
         await expect(deleteForMe).toBeVisible({ timeout: 10_000 });
 
-        const deleteForMeDialog = user1.page.waitForEvent('dialog');
+        user1.page.once('dialog', dialog => dialog.accept());
         await deleteForMe.click();
-        (await deleteForMeDialog).accept();
 
         const deletedLocal = user1.page.locator('#chatModal .messages-list .message.sent .message-content.deleted-content', { hasText: 'Deleted on this device' });
         await expect(deletedLocal).toBeVisible({ timeout: 15_000 });
@@ -199,9 +198,8 @@ test.describe('Delete Message Tests', () => {
         await expect(deleteForAll).toBeVisible({ timeout: 10_000 });
         await expect(deleteForMe).not.toBeVisible();
 
-        const deleteForAllDialog = user1.page.waitForEvent('dialog');
+        user1.page.once('dialog', dialog => dialog.accept());
         await deleteForAll.click();
-        (await deleteForAllDialog).accept();
 
         const deleteToast = user1.page.locator('.toast.loading.show', { hasText: 'Delete request sent' });
         await expect(deleteToast).toBeVisible({ timeout: 30_000 });
