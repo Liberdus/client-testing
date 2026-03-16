@@ -160,4 +160,61 @@ test.describe('Delete Message Tests', () => {
         await expect(deletedOnRecipient).toBeVisible({ timeout: 60_000 });
     });
 
+    test('Should delete a locally deleted sent message for all', async ({ messageUsers }) => {
+        const { users: { user1, user2 } } = messageUsers;
+        const message = `Delete twice ${Date.now()}`;
+
+        // Send message from user2 first so user1 has a zero-toll path for delete-for-all
+        await sendMessageTo(user2.page, user1.username, message);
+        await checkReceivedMessage(user1.page, user2.username, message);
+
+        // Send the message user1 will delete locally first, then for all
+        await sendMessageTo(user1.page, user2.username, message);
+        await checkReceivedMessage(user2.page, user1.username, message);
+
+        await user1.page.click('#switchToChats');
+        const chatItem = user1.page.locator('.chat-name', { hasText: user2.username });
+        await expect(chatItem).toBeVisible({ timeout: 15_000 });
+        await chatItem.click();
+        await expect(user1.page.locator('#chatModal')).toBeVisible();
+
+        const sentMsg = user1.page.locator('#chatModal .messages-list .message.sent .message-content', { hasText: message });
+        await expect(sentMsg).toBeVisible({ timeout: 15_000 });
+        await sentMsg.click();
+
+        const deleteForMe = user1.page.locator('#messageContextMenu').locator('text="Delete for me"');
+        await expect(deleteForMe).toBeVisible({ timeout: 10_000 });
+
+        user1.page.once('dialog', dialog => dialog.accept());
+        await deleteForMe.click();
+
+        const deletedLocal = user1.page.locator('#chatModal .messages-list .message.sent .message-content.deleted-content', { hasText: 'Deleted on this device' });
+        await expect(deletedLocal).toBeVisible({ timeout: 15_000 });
+
+        // The same locally deleted message should still reopen the menu with Delete for all.
+        await deletedLocal.click();
+
+        const deleteForAll = user1.page.locator('#messageContextMenu').locator('text="Delete for all"');
+        await expect(deleteForAll).toBeVisible({ timeout: 10_000 });
+        await expect(deleteForMe).not.toBeVisible();
+
+        user1.page.once('dialog', dialog => dialog.accept());
+        await deleteForAll.click();
+
+        const deleteToast = user1.page.locator('.toast.loading.show', { hasText: 'Delete request sent' });
+        await expect(deleteToast).toBeVisible({ timeout: 30_000 });
+
+        const deletedOnSender = user1.page.locator('#chatModal .messages-list .message.sent .message-content.deleted-content', { hasText: 'Deleted for all' });
+        await expect(deletedOnSender).toBeVisible({ timeout: 60_000 });
+
+        await user2.page.click('#switchToChats');
+        const recipientChat = user2.page.locator('.chat-name', { hasText: user1.username });
+        await expect(recipientChat).toBeVisible({ timeout: 15_000 });
+        await recipientChat.click();
+        await expect(user2.page.locator('#chatModal')).toBeVisible();
+
+        const deletedOnRecipient = user2.page.locator('#chatModal .messages-list .message.received .message-content', { hasText: 'Deleted by sender' });
+        await expect(deletedOnRecipient).toBeVisible({ timeout: 60_000 });
+    });
+
 });
