@@ -1,5 +1,6 @@
 const { test: base, expect } = require('../fixtures/base');
 const { FriendStatus, setFriendStatus } = require('../helpers/friendStatusHelpers');
+const { failedInjectResponse, holdNextInject } = require('../helpers/injectHelpers');
 const { sendMessageTo } = require('../helpers/messageHelpers');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 const { newContext } = require('../helpers/toastHelpers');
@@ -187,6 +188,53 @@ test.describe('Message reactions', () => {
     // Assert: the sender receives the custom reaction through sync.
     await openChat(a.page, b.username);
     await expectReactionChip(a.page, 'sent', message, Reaction.CUSTOM, { timeout: 60_000 });
+  });
+
+  test('rolls back an optimistic reaction change when inject fails', async ({ users }) => {
+    const { a, b } = users;
+    const message = `reaction rollback path ${Date.now()}`;
+
+    // Arrange: start with a successfully synced reaction so a failed replacement
+    // has a previous visible state to roll back to.
+    await prepareReactableMessage({ a, b, message });
+    await chooseQuickReaction(b.page, 'received', message, 'React with thumbs up');
+    await expectReactionChip(b.page, 'received', message, Reaction.THUMBS_UP);
+
+    await openChat(a.page, b.username);
+    await expectReactionChip(a.page, 'sent', message, Reaction.THUMBS_UP, { timeout: 60_000 });
+
+    // Act: hold the next inject call so the UI can show the optimistic
+    // replacement before the network failure is returned.
+    const inject = await holdNextInject(b.page, failedInjectResponse('forced_reaction_failure'));
+    try {
+      await chooseQuickReaction(b.page, 'received', message, 'React with heart');
+      await inject.intercepted;
+
+      await expectReactionChip(b.page, 'received', message, Reaction.HEART);
+
+      await inject.fulfill();
+
+      // Assert: the failed reaction set rolls back to the previous emoji and
+      // the picker active state follows the effective reaction.
+      await expect(b.page.locator('.toast.error.show', {
+        hasText: 'Reaction failed to send and was reverted',
+      })).toBeVisible({ timeout: 15_000 });
+      await expectReactionChip(b.page, 'received', message, Reaction.THUMBS_UP);
+      await expectNoReactionChip(b.page, 'received', message, Reaction.HEART);
+
+      const contextMenu = await openMessageContextMenu(b.page, 'received', message);
+      await expect(contextMenu.getByRole('button', { name: 'React with thumbs up' })).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      );
+      await expect(contextMenu.getByRole('button', { name: 'React with heart' })).toHaveAttribute(
+        'aria-pressed',
+        'false'
+      );
+    } finally {
+      inject.release();
+      await inject.dispose();
+    }
   });
 
   test('reaction sends are blocked until the message author allows free reactions', async ({ users }) => {
