@@ -1,27 +1,8 @@
 const { test: base, expect } = require('../fixtures/base');
 const { sendMessageTo, checkReceivedMessage } = require('../helpers/messageHelpers');
+const { FriendStatus, setFriendStatusInChat } = require('../helpers/friendStatusHelpers');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 const { newContext } = require('../helpers/toastHelpers');
-
-// Friend status enum aligned with app values
-const FriendStatus = {
-    BLOCKED: 0,
-    OTHER: 1,
-    CONNECTION: 2
-};
-
-// Helper to set friend status for a user from within chat modal
-async function setFriendStatusInChat(page, status) {
-    await page.click('#addFriendButtonChat');
-    await expect(page.locator('#friendModal.active')).toBeVisible();
-    await page.check(`#friendForm input[type=radio][value="${status.toString()}"]`);
-    await page.click('#friendForm button[type="submit"]');
-    await page.waitForEvent('console', {
-        timeout: 60_000,
-        predicate: msg =>
-            /update_toll_required transaction successfully processed/i.test(msg.text())
-    });
-}
 
 // opens a new chat with a new user to create the contact
 async function addContact(page, username) {

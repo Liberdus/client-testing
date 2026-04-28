@@ -1,6 +1,7 @@
 const { test: base, expect } = require('../fixtures/base');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 const { getLiberdusBalance } = require('../helpers/walletHelpers');
+const { FriendStatus, getCurrentFriendStatus, setFriendStatus } = require('../helpers/friendStatusHelpers');
 const { sendMessageTo } = require('../helpers/messageHelpers');
 const networkParams = require('../helpers/networkParams');
 const { newContext } = require('../helpers/toastHelpers');
@@ -14,30 +15,6 @@ const tollStr = tollWei.toString().padStart(19, '0');
 const TOLL = (tollStr.slice(0, -18) || '0') + '.' + tollStr.slice(-18);
 const TOLL_NUM = Number(tollWei) / 1e18;
 const DEFAULT_TOLL = networkParams.defaultTollLib;
-
-// enum for friend status
-const FriendStatus = {
-    BLOCKED: 0,
-    OTHER: 1,
-    CONNECTION: 2
-};
-
-async function setFriendStatus(page, username, status) {
-    await page.click('#switchToContacts');
-    await expect(page.locator('#contactsScreen.active')).toBeVisible();
-    await page.locator('#contactsList .chat-name', { hasText: username }).click();
-    await expect(page.locator('#contactInfoModal.active')).toBeVisible();
-    await page.click('#addFriendButtonContactInfo');
-    await expect(page.locator('#friendModal.active')).toBeVisible();
-    await page.check(`#friendForm input[type=radio][value="${status.toString()}"]`);
-    await page.click('#friendForm button[type="submit"]');
-    await page.waitForEvent('console', {
-        timeout: 60_000,
-        predicate: msg =>
-            /update_toll_required transaction successfully processed/i.test(msg.text())
-    });
-    await page.click('#closeContactInfoModal');
-}
 
 async function setToll(page, amount) {
     await page.click('#toggleSettings');
@@ -54,26 +31,6 @@ async function setToll(page, amount) {
     });
     await page.click('#closeTollModal');
     await page.click('#closeSettings');
-}
-
-/**
- * Opens the friend modal for the given username and returns the current friend status value.
- * Closes the modals after retrieving the value.
- * @param {import('@playwright/test').Page} page
- * @param {string} username
- * @returns {Promise<number>} The current friend status value
- */
-async function getCurrentFriendStatus(page, username) {
-    await page.click('#switchToContacts');
-    await expect(page.locator('#contactsScreen.active')).toBeVisible();
-    await page.locator('#contactsList .chat-name', { hasText: username }).click();
-    await expect(page.locator('#contactInfoModal.active')).toBeVisible();
-    await page.click('#addFriendButtonContactInfo');
-    await expect(page.locator('#friendModal.active')).toBeVisible();
-    const checked = await page.locator('#friendForm input[type=radio]:checked').getAttribute('value');
-    await page.click('#closeFriendModal');
-    await page.click('#closeContactInfoModal');
-    return Number(checked);
 }
 
 const test = base.extend({

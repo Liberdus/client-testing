@@ -1,6 +1,7 @@
 const { test: base, expect } = require('../fixtures/base');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 const { getLiberdusBalance, expectLiberdusBalanceToEqual } = require('../helpers/walletHelpers');
+const { FriendStatus, setFriendStatus } = require('../helpers/friendStatusHelpers');
 const networkParams = require('../helpers/networkParams');
 const { fundUserFromPage } = require('../helpers/send-create');
 const { sendMessageTo } = require('../helpers/messageHelpers');
@@ -8,11 +9,6 @@ const { newContext } = require('../helpers/toastHelpers');
 
 // Constants
 const TOLL_USD = networkParams.defaultTollUsd + 0.01;
-const FriendStatus = {
-    BLOCKED: 0,
-    OTHER: 1,
-    CONNECTION: 2
-};
 
 async function setToll(page, amount) {
     await page.click('#toggleSettings');
@@ -30,23 +26,6 @@ async function setToll(page, amount) {
     });
     await page.click('#closeTollModal');
     await page.click('#closeSettings');
-}
-
-async function setFriendStatus(page, username, status) {
-    await page.click('#switchToContacts');
-    await expect(page.locator('#contactsScreen.active')).toBeVisible();
-    await page.locator('#contactsList .chat-name', { hasText: username }).click();
-    await expect(page.locator('#contactInfoModal.active')).toBeVisible();
-    await page.click('#addFriendButtonContactInfo');
-    await expect(page.locator('#friendModal.active')).toBeVisible();
-    await page.check(`#friendForm input[type=radio][value="${status.toString()}"]`);
-    await page.click('#friendForm button[type="submit"]');
-    await page.waitForEvent('console', {
-        timeout: 60_000,
-        predicate: msg =>
-            /update_toll_required transaction successfully processed/i.test(msg.text())
-    });
-    await page.click('#closeContactInfoModal');
 }
 
 const test = base.extend({
