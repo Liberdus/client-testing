@@ -1,0 +1,14 @@
+.git
+.github
+.devcontainer
+playwright-tests/node_modules
+playwright-tests/playwright-report
+playwright-tests/test-results
+playwright-tests/.cache
+local-network.env
+server
+liberdus-proxy
+tools-cli-shardus-network
+web-client-v2
+*.log
+*.pid
