@@ -30,6 +30,52 @@ https://drive.google.com/file/d/19oWRpK_AJUo3G3hHYYGN_ZryAT-CSjyd/view?usp=shari
 
 12. Run `./vnc-stop.sh` in the workspace root directory to stop the VNC server in the container.
 
+## Local Network with Docker Compose
+
+The Playwright tests default to `https://liberdus.com/dev/`, but can be pointed at a local network with `PLAYWRIGHT_BASE_URL` or `playwright-tests/.env`.
+
+1. Copy the local network env template and adjust paths or ports if needed:
+
+   ```powershell
+   Copy-Item local-network.env.example local-network.env
+   ```
+
+2. Start the local network stack:
+
+   ```powershell
+   docker compose --env-file local-network.env -f docker-compose.local.yml up --build
+   ```
+
+   This starts a 10-node Shardus network, the Liberdus proxy, and a static `web-client-v2` server. The source repos are mounted read-only and copied into a Docker volume before generated local config is written. The image uses Node.js 20.19.3, Rust 1.82.0 for server dependencies, and stable Rust for proxy dependencies. The web client is served only after the network reports `processing` mode.
+
+3. In a second shell, configure Playwright for the local web client:
+
+   ```powershell
+   Copy-Item playwright-tests\.env.example playwright-tests\.env
+   ```
+
+4. Run tests:
+
+   ```powershell
+   cd playwright-tests
+   npm install
+   npm test
+   ```
+
+5. Stop and remove the local network stack:
+
+   ```powershell
+   docker compose --env-file local-network.env -f docker-compose.local.yml down
+   ```
+
+Default local URLs:
+
+- Web client: `http://127.0.0.1:8080/`
+- Liberdus proxy: `http://127.0.0.1:3030/`
+- Shardus monitor: `http://127.0.0.1:3000/`
+
+If you change `LIBERDUS_NODE_COUNT`, also update `LIBERDUS_VALIDATOR_CONTAINER_PORT_END` and `LIBERDUS_VALIDATOR_HOST_PORT_END` so each range has one port per node.
+
 ## Manually Setting up a Local Liberdus Network with web-client-v2
 
 1. Setup an environment with the following software:
