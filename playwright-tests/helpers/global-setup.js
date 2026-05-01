@@ -69,6 +69,28 @@ function fetchText(url, timeoutMs = 15000, maxRedirects = 5) {
   });
 }
 
+function parseNumber(value, fallback = 0) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseLiberdusAmount(value, fallback = 0) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
+  if (typeof value === 'string') return parseNumber(value, fallback);
+  if (!value || typeof value !== 'object') return fallback;
+
+  if (value.dataType === 'bi' && typeof value.value === 'string') {
+    try {
+      return Number(BigInt('0x' + value.value)) / 1e18;
+    } catch {
+      return fallback;
+    }
+  }
+
+  if ('value' in value) return parseNumber(value.value, fallback);
+  return fallback;
+}
+
 async function globalSetup(config) {
   const outDir = path.resolve(__dirname, '..', '.cache');
   // Clear any previous cache to ensure fresh fetch each run
@@ -107,9 +129,15 @@ async function globalSetup(config) {
   const account = JSON.parse(acctText);
   const current = account && account.account && account.account.current ? account.account.current : {};
 
-  const stabilityFactor = parseFloat(current.stabilityFactorStr || '0');
-  const feeUsd = parseFloat(current.transactionFeeUsdStr || '0');
-  const minTollUsd = parseFloat(current.minTollUsdStr || '0');
+  const stabilityFactor = current.stabilityFactorStr
+    ? parseNumber(current.stabilityFactorStr)
+    : parseLiberdusAmount(current.stabilityScaleMul) / parseLiberdusAmount(current.stabilityScaleDiv, 1);
+  const feeUsd = current.transactionFeeUsdStr
+    ? parseNumber(current.transactionFeeUsdStr)
+    : parseLiberdusAmount(current.transactionFee);
+  const minTollUsd = current.minTollUsdStr
+    ? parseNumber(current.minTollUsdStr)
+    : parseLiberdusAmount(current.defaultToll);
   const networkTollTaxPercent = Number(current.tollNetworkTaxPercent || 0);
 
   // USD → LIB conversions using: LIB = USD / stabilityFactor
