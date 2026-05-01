@@ -46,7 +46,7 @@ The Playwright tests default to `https://liberdus.com/dev/`, but can be pointed 
    docker compose --env-file local-network.env -f docker-compose.local.yml up --build
    ```
 
-   This starts a 10-node Shardus network, the Liberdus proxy, and a static `web-client-v2` server. The source repos are mounted read-only and copied into a Docker volume before generated local config is written. The image uses Node.js 20.19.3, Rust 1.82.0 for server dependencies, and stable Rust for proxy dependencies. The web client is served only after the network reports `processing` mode.
+   This starts a 5-node Shardus network, the Liberdus proxy, and a static `web-client-v2` server. The source repos are mounted read-only and copied into a Docker volume before generated local config is written. The image uses Node.js 18.19.1, Rust 1.79.0 for server dependencies, and Rust 1.82.0 for proxy dependencies. The web client is served only after the network reports `processing` mode. Warm runs reuse cached server dependencies, server build output, and proxy build output from the Docker volume unless the source, lockfiles, toolchains, or volume change.
 
 3. In a second shell, configure Playwright for the local web client:
 
@@ -76,6 +76,8 @@ Default local URLs:
 
 If you change `LIBERDUS_NODE_COUNT`, also update `LIBERDUS_VALIDATOR_CONTAINER_PORT_END` and `LIBERDUS_VALIDATOR_HOST_PORT_END` so each range has one port per node.
 
+The 5-node default is intended to speed up local startup. If e2e account-creation tests hang on `Creating account...`, use a 10-node env while the 5-node transaction path is being investigated.
+
 ## Manually Setting up a Local Liberdus Network with web-client-v2
 
 1. Setup an environment with the following software:
@@ -88,9 +90,9 @@ If you change `LIBERDUS_NODE_COUNT`, also update `LIBERDUS_VALIDATOR_CONTAINER_P
 
    * pkg-config 1.8.0
 
-   * Node.js 18.16.1
+   * Node.js 18.19.1
    
-   * Rust 1.74
+   * Rust 1.79.0 for the server, plus Rust 1.82.0 for `liberdus-proxy`
    
    * Python 3.x
 
@@ -99,12 +101,6 @@ If you change `LIBERDUS_NODE_COUNT`, also update `LIBERDUS_VALIDATOR_CONTAINER_P
    * https://github.com/Liberdus/server.git
      
      * Navigate to the repo's root directory and run `npm install`.
-   
-   * https://github.com/shardus/tools-cli-shardus-network.git
-     
-     - Navigate to the repo's root directory and run `npm install`.
-     
-     - Run `npm link` in the root directory of this repo after installing dependencies to put the `shardus-network` command into the path.
    
    * https://github.com/Liberdus/web-client-v2.git
      
@@ -116,13 +112,13 @@ If you change `LIBERDUS_NODE_COUNT`, also update `LIBERDUS_VALIDATOR_CONTAINER_P
 
 3. Start a local network of Liberdus nodes.
    
-   * Navigate to the `Liberdus/server` repo and run `shardus-network start 10` to start a local network of 10 nodes.
+   * Navigate to the `Liberdus/server` repo and run `shardus start 5` to start a local network of 5 nodes.
      
      * The minimum number of nodes needed to process transactions is defined by the `minNodes` property in `server/src/config/index.ts`:
        
        ```js
        ...
-       minNodes: process.env.minNodes ? parseInt(process.env.minNodes) : 10,
+       minNodes: process.env.minNodes ? parseInt(process.env.minNodes) : 5,
        ...
        ```
 
