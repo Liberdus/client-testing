@@ -90,12 +90,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Streaming local-network container logs while waiting for Docker health."
-          docker compose -f docker-compose.local.yml logs --no-color --timestamps -f local-network &
-          logs_pid="$!"
-          trap 'kill "$logs_pid" >/dev/null 2>&1 || true' EXIT
-
           previous_health=""
+          previous_phase=""
+          previous_healthcheck=""
           for attempt in {1..240}; do
             cid="$(docker compose -f docker-compose.local.yml ps -q local-network || true)"
             if [ -z "$cid" ]; then
@@ -107,10 +104,29 @@ jobs:
 
             status="$(docker inspect --format='{{.State.Status}}' "$cid")"
             health="$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$cid")"
+            phase="$(
+              docker compose -f docker-compose.local.yml logs --no-color --tail=200 local-network 2>/dev/null \
+                | awk '/\[liberdus-local\]/ { line=$0 } END { print line }' \
+                | sed -E 's/^.*\[liberdus-local\] //'
+            )"
+            healthcheck="$(
+              docker inspect "$cid" \
+                | jq -r '.[0].State.Health.Log[-1].Output // ""' \
+                | tr '\n' ' ' \
+                | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//'
+            )"
 
             if [ "$health" != "$previous_health" ] || [ $((attempt % 4)) -eq 1 ]; then
               echo "container status=${status} health=${health}"
               previous_health="$health"
+            fi
+            if [ -n "$phase" ] && [ "$phase" != "$previous_phase" ]; then
+              echo "startup phase: ${phase}"
+              previous_phase="$phase"
+            fi
+            if [ -n "$healthcheck" ] && [ "$healthcheck" != "$previous_healthcheck" ]; then
+              echo "${healthcheck}"
+              previous_healthcheck="$healthcheck"
             fi
 
             if [ "$health" = "healthy" ]; then
