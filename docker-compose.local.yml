@@ -42,8 +42,8 @@ services:
       test: ["CMD", "/usr/local/bin/liberdus-local-network/healthcheck.sh"]
       interval: 15s
       timeout: 10s
-      retries: 40
-      start_period: 2m
+      retries: 3
+      start_period: 30m
 
 volumes:
   local-network-runtime:
