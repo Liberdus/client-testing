@@ -5,7 +5,7 @@ ARG TARGETARCH
 # The server's native dependency tree currently pulls time 0.3.31, which fails
 # with rustc >= 1.80. Keep this pin until the server dependencies move forward.
 ARG SERVER_RUST_VERSION=1.79.0
-ARG PROXY_RUST_VERSION=1.82.0
+ARG PROXY_RUST_VERSION=1.86.0
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH="/opt/node/bin:/root/.cargo/bin:${PATH}"
@@ -53,4 +53,4 @@ WORKDIR /workspace/client-testing
 COPY scripts/local-network /usr/local/bin/liberdus-local-network
 RUN chmod +x /usr/local/bin/liberdus-local-network/*.sh
 
-CMD ["/usr/local/bin/liberdus-local-network/start.sh"]
+CMD ["node", "/usr/local/bin/liberdus-local-network/start.js"]

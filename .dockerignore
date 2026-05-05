@@ -6,6 +6,8 @@ playwright-tests/playwright-report
 playwright-tests/test-results
 playwright-tests/.cache
 local-network.env
+.deps
+.artifacts
 server
 liberdus-proxy
 tools-cli-shardus-network

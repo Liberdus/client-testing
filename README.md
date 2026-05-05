@@ -4,7 +4,9 @@
 
 https://drive.google.com/file/d/19oWRpK_AJUo3G3hHYYGN_ZryAT-CSjyd/view?usp=sharing
 
-## Usage
+## Legacy Dev Container Usage
+
+This older flow uses the root `liberdus-*.sh` scripts inside the dev container. It is separate from the Docker Compose local-network stack used for CI smoke testing.
 
 1. Make sure you have the dev containers extension for vscode.
 
@@ -32,51 +34,9 @@ https://drive.google.com/file/d/19oWRpK_AJUo3G3hHYYGN_ZryAT-CSjyd/view?usp=shari
 
 ## Local Network with Docker Compose
 
-The Playwright tests default to `https://liberdus.com/dev/`, but can be pointed at a local network with `PLAYWRIGHT_BASE_URL` or `playwright-tests/.env`.
+The Playwright tests default to `https://liberdus.com/dev/`, but the Docker Compose stack can run the smoke test against a local network. This is the CI-focused local-network path.
 
-1. Copy the local network env template and adjust paths or ports if needed:
-
-   ```powershell
-   Copy-Item local-network.env.example local-network.env
-   ```
-
-2. Start the local network stack:
-
-   ```powershell
-   docker compose --env-file local-network.env -f docker-compose.local.yml up --build
-   ```
-
-   This starts a 5-node Shardus network, the Liberdus proxy, and a static `web-client-v2` server. The source repos are mounted read-only and copied into a Docker volume before generated local config is written. The image uses Node.js 18.19.1, Rust 1.79.0 for server dependencies, and Rust 1.82.0 for proxy dependencies. The web client is served only after the network reports `processing` mode. Warm runs reuse cached server dependencies, server build output, and proxy build output from the Docker volume unless the source, lockfiles, toolchains, or volume change.
-
-3. In a second shell, configure Playwright for the local web client:
-
-   ```powershell
-   Copy-Item playwright-tests\.env.example playwright-tests\.env
-   ```
-
-4. Run tests:
-
-   ```powershell
-   cd playwright-tests
-   npm install
-   npm test
-   ```
-
-5. Stop and remove the local network stack:
-
-   ```powershell
-   docker compose --env-file local-network.env -f docker-compose.local.yml down
-   ```
-
-Default local URLs:
-
-- Web client: `http://127.0.0.1:8080/`
-- Liberdus proxy: `http://127.0.0.1:3030/`
-- Shardus monitor: `http://127.0.0.1:3000/`
-
-If you change `LIBERDUS_NODE_COUNT`, also update `LIBERDUS_VALIDATOR_CONTAINER_PORT_END` and `LIBERDUS_VALIDATOR_HOST_PORT_END` so each range has one port per node.
-
-The 5-node default is intended to speed up local startup. If e2e account-creation tests hang on `Creating account...`, use a 10-node env while the 5-node transaction path is being investigated.
+See [docs/local-network.md](docs/local-network.md) for the short version of what runs and how to run it locally.
 
 ## Manually Setting up a Local Liberdus Network with web-client-v2
 
@@ -92,7 +52,7 @@ The 5-node default is intended to speed up local startup. If e2e account-creatio
 
    * Node.js 18.19.1
    
-   * Rust 1.79.0 for the server, plus Rust 1.82.0 for `liberdus-proxy`
+   * Rust 1.79.0 for the server, plus Rust 1.86.0 for `liberdus-proxy`
    
    * Python 3.x
 
