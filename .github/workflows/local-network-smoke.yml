@@ -153,7 +153,7 @@ jobs:
 
       - name: Run Playwright smoke
         working-directory: playwright-tests
-        run: npx playwright test tests/smoke.e2e.test.js --project=chromium --grep 'should navigate to Contacts and Wallet views' --workers=1 --retries=0 --reporter=github,line
+        run: npx playwright test --project=chromium --grep '@smoke' --workers=1 --retries=0 --reporter=github,line
 
       - name: Upload Playwright HTML report
         if: always()

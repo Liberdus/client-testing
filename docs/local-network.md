@@ -43,7 +43,7 @@ Run the smoke test in another shell:
 cd playwright-tests
 npm ci
 $env:PLAYWRIGHT_BASE_URL='http://127.0.0.1:8080/'
-npx playwright test tests/smoke.e2e.test.js --project=chromium --grep 'should navigate to Contacts and Wallet views' --workers=1 --retries=0
+npm run test:smoke -- --workers=1 --retries=0
 ```
 
 Stop the stack:
