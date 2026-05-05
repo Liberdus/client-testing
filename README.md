@@ -36,6 +36,13 @@ This older flow uses the root `liberdus-*.sh` scripts inside the dev container. 
 
 The Playwright tests default to `https://liberdus.com/dev/`, but the Docker Compose stack can run the smoke test against a local network. This is the CI-focused local-network path.
 
+To run the tagged smoke test against the default dev network, leave `PLAYWRIGHT_BASE_URL` unset and run:
+
+```bash
+cd playwright-tests
+npm run test:smoke
+```
+
 See [docs/local-network.md](docs/local-network.md) for the short version of what runs and how to run it locally.
 
 ## Manually Setting up a Local Liberdus Network with web-client-v2

@@ -106,7 +106,7 @@ test.describe('Tests requiring recipient user', () => {
   });
 });
 
-test('should navigate to Contacts and Wallet views', async ({ page }) => {
+test('should navigate to Contacts and Wallet views @smoke', async ({ page }) => {
   await page.click('#switchToContacts');
   await expect(page.locator('#contactsScreen.active')).toBeVisible();
   await page.click('#switchToWallet');
