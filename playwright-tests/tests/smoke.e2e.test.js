@@ -5,7 +5,7 @@ const { createAndSignInUser, generateUsername } = require('../helpers/userHelper
 
 let RECIPIENT;
 
-test.describe('Tests requiring recipient user', () => {
+test.describe('Tests requiring recipient user @smoke', () => {
   // Create the recipient user once before all tests
   test.beforeAll(async ({ browser, browserName }) => {
     const page = await browser.newPage();
@@ -109,7 +109,7 @@ test('should navigate to Contacts and Wallet views @smoke', async ({ page }) => 
   await expect(page.locator('#chatsScreen.active')).toBeVisible();
 });
 
-test('should sign out successfully', async ({ page }) => {
+test('should sign out successfully @smoke', async ({ page }) => {
   // wait for UI animation
   await page.waitForTimeout(1000);
   await page.click('#toggleMenu');
@@ -118,7 +118,7 @@ test('should sign out successfully', async ({ page }) => {
   await expect(page.locator('#welcomeScreen')).toBeVisible({ timeout: 30_000 });
 });
 
-test('Should set toll', async ({ page }) => {
+test('Should set toll @smoke', async ({ page }) => {
   const toll = 5;
   await page.click('#toggleSettings');
   await page.waitForSelector('#settingsModal', { timeout: 5_000 });
@@ -131,7 +131,7 @@ test('Should set toll', async ({ page }) => {
   expect(tollText.trim().startsWith(toll.toString())).toBeTruthy();
 });
 
-test('Should update profile', async ({ page, username }) => {
+test('Should update profile @smoke', async ({ page, username }) => {
   const name = "Testername";
   const linkedin = "testerlinkedin";
   const x = "testerx";
