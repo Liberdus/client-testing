@@ -51,6 +51,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 WORKDIR /workspace/client-testing
 
 COPY scripts/local-network /usr/local/bin/liberdus-local-network
-RUN chmod +x /usr/local/bin/liberdus-local-network/*.sh
+RUN chmod +x /usr/local/bin/liberdus-local-network/healthcheck.sh
 
 CMD ["node", "/usr/local/bin/liberdus-local-network/start.js"]
