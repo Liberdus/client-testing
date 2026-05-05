@@ -6,7 +6,7 @@ This starts a local Liberdus network, serves `web-client-v2`, and points Playwri
 
 ### GitHub Workflow
 
-`.github/workflows/local-network-smoke.yml` checks out the needed repos into `.deps/`, installs Playwright, starts Docker Compose, waits for Docker health, runs one smoke test, uploads logs, and stops the stack.
+`.github/workflows/local-network-smoke.yml` is manual-only in this repo. It checks out the needed repos into `.deps/`, installs Playwright, starts Docker Compose, waits for Docker health, runs one smoke test, uploads logs, and stops the stack.
 
 ### Docker Compose
 
