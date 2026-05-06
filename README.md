@@ -4,7 +4,9 @@
 
 https://drive.google.com/file/d/19oWRpK_AJUo3G3hHYYGN_ZryAT-CSjyd/view?usp=sharing
 
-## Usage
+## Legacy Dev Container Usage
+
+This older flow uses the root `liberdus-*.sh` scripts inside the dev container. It is separate from the Docker Compose local-network stack used for CI smoke testing.
 
 1. Make sure you have the dev containers extension for vscode.
 
@@ -30,6 +32,19 @@ https://drive.google.com/file/d/19oWRpK_AJUo3G3hHYYGN_ZryAT-CSjyd/view?usp=shari
 
 12. Run `./vnc-stop.sh` in the workspace root directory to stop the VNC server in the container.
 
+## Local Network with Docker Compose
+
+The Playwright tests default to `https://liberdus.com/dev/`, but the Docker Compose stack can run the smoke test against a local network. This is the CI-focused local-network path.
+
+To run the tagged smoke test against the default dev network, leave `PLAYWRIGHT_BASE_URL` unset and run:
+
+```bash
+cd playwright-tests
+npm run test:smoke
+```
+
+See [docs/local-network.md](docs/local-network.md) for the short version of what runs and how to run it locally.
+
 ## Manually Setting up a Local Liberdus Network with web-client-v2
 
 1. Setup an environment with the following software:
@@ -42,9 +57,9 @@ https://drive.google.com/file/d/19oWRpK_AJUo3G3hHYYGN_ZryAT-CSjyd/view?usp=shari
 
    * pkg-config 1.8.0
 
-   * Node.js 18.16.1
+   * Node.js 18.19.1
    
-   * Rust 1.74
+   * Rust 1.79.0 for the server, plus Rust 1.86.0 for `liberdus-proxy`
    
    * Python 3.x
 
@@ -53,12 +68,6 @@ https://drive.google.com/file/d/19oWRpK_AJUo3G3hHYYGN_ZryAT-CSjyd/view?usp=shari
    * https://github.com/Liberdus/server.git
      
      * Navigate to the repo's root directory and run `npm install`.
-   
-   * https://github.com/shardus/tools-cli-shardus-network.git
-     
-     - Navigate to the repo's root directory and run `npm install`.
-     
-     - Run `npm link` in the root directory of this repo after installing dependencies to put the `shardus-network` command into the path.
    
    * https://github.com/Liberdus/web-client-v2.git
      
@@ -70,13 +79,13 @@ https://drive.google.com/file/d/19oWRpK_AJUo3G3hHYYGN_ZryAT-CSjyd/view?usp=shari
 
 3. Start a local network of Liberdus nodes.
    
-   * Navigate to the `Liberdus/server` repo and run `shardus-network start 10` to start a local network of 10 nodes.
+   * Navigate to the `Liberdus/server` repo and run `shardus start 5` to start a local network of 5 nodes.
      
      * The minimum number of nodes needed to process transactions is defined by the `minNodes` property in `server/src/config/index.ts`:
        
        ```js
        ...
-       minNodes: process.env.minNodes ? parseInt(process.env.minNodes) : 10,
+       minNodes: process.env.minNodes ? parseInt(process.env.minNodes) : 5,
        ...
        ```
 

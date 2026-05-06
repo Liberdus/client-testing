@@ -2,7 +2,7 @@
  * Playwright global setup
  *
  * Purpose:
- *  - Read `baseURL` from Playwright config
+ *  - Read `baseURL` from Playwright's resolved config
  *  - Fetch `${baseURL}/network.js` and extract the first gateway web URL
  *  - Fetch the zero-account from the gateway and read network parameters
  *  - Convert USD values to LIB using stabilityFactor
@@ -10,7 +10,7 @@
  *
  * Strictness:
  *  - If any step fails, throw to abort the test run
- *  - No env or hardcoded fallbacks for baseURL or network params
+ *  - No hardcoded fallbacks for network params
  */
 
 const fs = require('fs');
@@ -18,33 +18,19 @@ const path = require('path');
 const http = require('http');
 const https = require('https');
 
-/**
- * Extract the active baseURL from `playwright.config.ts`.
- * - Ignores commented lines
- * - Uses the last valid occurrence if multiple
- * - Throws if not found (no fallback)
- */
-function readBaseURLFromPlaywrightConfig() {
-  try {
-    const cfgPath = path.resolve(__dirname, '..', 'playwright.config.ts');
-    const text = fs.readFileSync(cfgPath, 'utf8');
-    const lines = text.split(/\r?\n/);
-    let candidate;
-    for (const line of lines) {
-      const idx = line.indexOf('baseURL:');
-      if (idx === -1) continue;
-      const trimmed = line.trim();
-      if (/^\/\//.test(trimmed)) continue;
-      const cmt = line.indexOf('//');
-      if (cmt !== -1 && cmt < idx) continue;
-      const m = line.match(/baseURL:\s*['\"]([^'\"]+)['\"]/);
-      if (m && m[1]) candidate = m[1];
-    }
-    if (candidate) return candidate;
-    throw new Error('baseURL not found in playwright.config.ts');
-  } catch (e) {
-    throw new Error(`Failed to read baseURL from config: ${e && e.message ? e.message : e}`);
-  }
+function resolveBaseURL(config) {
+  const envBaseURL = process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL;
+  if (envBaseURL) return envBaseURL;
+
+  const projectBaseURL = config && config.projects && config.projects[0] && config.projects[0].use
+    ? config.projects[0].use.baseURL
+    : undefined;
+  if (projectBaseURL) return projectBaseURL;
+
+  const sharedBaseURL = config && config.use ? config.use.baseURL : undefined;
+  if (sharedBaseURL) return sharedBaseURL;
+
+  throw new Error('baseURL not found in Playwright config');
 }
 
 /**
@@ -83,7 +69,20 @@ function fetchText(url, timeoutMs = 15000, maxRedirects = 5) {
   });
 }
 
-async function globalSetup() {
+function parseNumber(value) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function requirePositiveNetworkNumber(current, fieldName) {
+  const value = parseNumber(current[fieldName]);
+  if (!(value > 0)) {
+    throw new Error(`Missing or invalid positive network parameter: ${fieldName}`);
+  }
+  return value;
+}
+
+async function globalSetup(config) {
   const outDir = path.resolve(__dirname, '..', '.cache');
   // Clear any previous cache to ensure fresh fetch each run
   try {
@@ -91,8 +90,8 @@ async function globalSetup() {
   } catch {}
   fs.mkdirSync(outDir, { recursive: true });
 
-  // 1) Discover base URL from Playwright config
-  const baseURL = readBaseURLFromPlaywrightConfig();
+  // 1) Discover base URL from Playwright's resolved config
+  const baseURL = resolveBaseURL(config);
   const networkJsUrl = baseURL.replace(/\/+$/, '') + '/network.js';
 
   // 2) Fetch and evaluate network.js to extract gateway web URL
@@ -121,9 +120,9 @@ async function globalSetup() {
   const account = JSON.parse(acctText);
   const current = account && account.account && account.account.current ? account.account.current : {};
 
-  const stabilityFactor = parseFloat(current.stabilityFactorStr || '0');
-  const feeUsd = parseFloat(current.transactionFeeUsdStr || '0');
-  const minTollUsd = parseFloat(current.minTollUsdStr || '0');
+  const stabilityFactor = requirePositiveNetworkNumber(current, 'stabilityFactorStr');
+  const feeUsd = requirePositiveNetworkNumber(current, 'transactionFeeUsdStr');
+  const minTollUsd = requirePositiveNetworkNumber(current, 'minTollUsdStr');
   const networkTollTaxPercent = Number(current.tollNetworkTaxPercent || 0);
 
   // USD → LIB conversions using: LIB = USD / stabilityFactor
