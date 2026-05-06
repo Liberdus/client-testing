@@ -42,7 +42,7 @@ const test = base.extend({
     }
 });
 
-test('Lock and Unlock Account', async ({ browser, browserName}) => {
+test('Lock and Unlock Account @smoke', async ({ browser, browserName}) => {
     // 1 create a user
     const username = generateUsername(browserName);
     const ctx = await newContext(browser);
