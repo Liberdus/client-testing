@@ -69,26 +69,17 @@ function fetchText(url, timeoutMs = 15000, maxRedirects = 5) {
   });
 }
 
-function parseNumber(value, fallback = 0) {
+function parseNumber(value) {
   const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  return Number.isFinite(parsed) ? parsed : NaN;
 }
 
-function parseLiberdusAmount(value, fallback = 0) {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
-  if (typeof value === 'string') return parseNumber(value, fallback);
-  if (!value || typeof value !== 'object') return fallback;
-
-  if (value.dataType === 'bi' && typeof value.value === 'string') {
-    try {
-      return Number(BigInt('0x' + value.value)) / 1e18;
-    } catch {
-      return fallback;
-    }
+function requirePositiveNetworkNumber(current, fieldName) {
+  const value = parseNumber(current[fieldName]);
+  if (!(value > 0)) {
+    throw new Error(`Missing or invalid positive network parameter: ${fieldName}`);
   }
-
-  if ('value' in value) return parseNumber(value.value, fallback);
-  return fallback;
+  return value;
 }
 
 async function globalSetup(config) {
@@ -129,15 +120,9 @@ async function globalSetup(config) {
   const account = JSON.parse(acctText);
   const current = account && account.account && account.account.current ? account.account.current : {};
 
-  const stabilityFactor = current.stabilityFactorStr
-    ? parseNumber(current.stabilityFactorStr)
-    : parseLiberdusAmount(current.stabilityScaleMul) / parseLiberdusAmount(current.stabilityScaleDiv, 1);
-  const feeUsd = current.transactionFeeUsdStr
-    ? parseNumber(current.transactionFeeUsdStr)
-    : parseLiberdusAmount(current.transactionFee);
-  const minTollUsd = current.minTollUsdStr
-    ? parseNumber(current.minTollUsdStr)
-    : parseLiberdusAmount(current.defaultToll);
+  const stabilityFactor = requirePositiveNetworkNumber(current, 'stabilityFactorStr');
+  const feeUsd = requirePositiveNetworkNumber(current, 'transactionFeeUsdStr');
+  const minTollUsd = requirePositiveNetworkNumber(current, 'minTollUsdStr');
   const networkTollTaxPercent = Number(current.tollNetworkTaxPercent || 0);
 
   // USD → LIB conversions using: LIB = USD / stabilityFactor
