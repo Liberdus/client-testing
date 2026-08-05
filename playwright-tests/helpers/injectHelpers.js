@@ -1,3 +1,16 @@
+function getInjectedTransaction(request) {
+  if (request.method() !== 'POST' || !request.url().endsWith('/inject')) {
+    return null;
+  }
+
+  try {
+    const body = request.postDataJSON();
+    return typeof body.tx === 'string' ? JSON.parse(body.tx) : body.tx;
+  } catch {
+    return null;
+  }
+}
+
 async function holdNextInject(page, responseBody) {
   await page.evaluate((mockResponseBody) => {
     if (!window.__injectMockOriginalFetch) {
@@ -84,5 +97,6 @@ function failedInjectResponse(reason = 'forced_inject_failure') {
 
 module.exports = {
   failedInjectResponse,
+  getInjectedTransaction,
   holdNextInject,
 };
