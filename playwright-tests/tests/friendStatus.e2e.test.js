@@ -15,6 +15,8 @@ const tollStr = tollWei.toString().padStart(19, '0');
 const TOLL = (tollStr.slice(0, -18) || '0') + '.' + tollStr.slice(-18);
 const TOLL_NUM = Number(tollWei) / 1e18;
 const DEFAULT_TOLL = networkParams.defaultTollLib;
+const CHAT_HISTORY_SYNC_URL = /\/account\/[^/]+\/chats\/\d+(?:\?|$)/;
+const RECIPIENT_TOLL_STATE_URL = /\/messages\/[^/]+\/toll(?:\?|$)/;
 
 async function setToll(page, amount) {
     await page.click('#toggleSettings');
@@ -31,6 +33,28 @@ async function setToll(page, amount) {
     });
     await page.click('#closeTollModal');
     await page.click('#closeSettings');
+}
+
+async function openChatAndWaitForRecipientState(page, username) {
+    await page.click('#switchToChats');
+
+    const tollStateResponsePromise = page.waitForResponse(response =>
+        response.ok() && RECIPIENT_TOLL_STATE_URL.test(response.url())
+    );
+
+    await page.locator('#chatList .chat-name', { hasText: username }).click();
+    await expect(page.locator('#chatModal')).toBeVisible();
+
+    const tollStateResponse = await tollStateResponsePromise;
+    await tollStateResponse.finished();
+}
+
+async function pauseChatHistorySync(page) {
+    await page.route(CHAT_HISTORY_SYNC_URL, route => route.abort());
+}
+
+async function resumeChatHistorySync(page) {
+    await page.unroute(CHAT_HISTORY_SYNC_URL);
 }
 
 const test = base.extend({
@@ -93,22 +117,21 @@ test.describe('Friend Status E2E', () => {
         expect(checkedB).toBe(FriendStatus.CONNECTION);
     });
 
-    test('Block: User A blocks User B, B cannot message', async ({ users }) => {
+    test('Block: known blocked state rejects without creating a message', async ({ users }) => {
         const { a, b } = users;
+        const message = 'known blocked message';
 
         // User A blocks User B
         await setFriendStatus(a.page, b.username, FriendStatus.BLOCKED);
 
-        // User B should not be able to send a message
-        // go to contacts tab and back to refresh chat list
-        await b.page.click('#switchToChats');
-        await b.page.locator('#chatList .chat-name', { hasText: a.username }).click();
-        await expect(b.page.locator('#chatModal')).toBeVisible();
+        // Open the chat and wait until User B has refreshed User A's blocked state.
+        await openChatAndWaitForRecipientState(b.page, a.username);
         await expect(b.page.locator('#tollValue')).toHaveText('blocked');
-        await b.page.locator('#chatModal .message-input').fill('blocked msg');
+        await b.page.locator('#chatModal .message-input').fill(message);
         await b.page.click('#handleSendMessage');
-        // expect an error toast to appear ignore inner text
+
         await expect(b.page.locator('.toast.error.show', { hasText: /You are blocked by this user/i })).toBeVisible({ timeout: 10_000 });
+        await expect(b.page.locator('.message.sent', { hasText: message })).toHaveCount(0);
     });
 
     test('Block: User A blocks User B, B cannot send money', async ({ users }) => {
@@ -217,44 +240,67 @@ test.describe('Friend Status E2E', () => {
         await expect(b.page.locator("#contactInfoX")).toHaveText(x);
     });
 
-    test('Connection -> Other: Message fails if status changed to require toll', async ({ users }) => {
+    test('Stale Connection -> Other: rejected send refreshes toll for retry', async ({ users }) => {
         const { a, b } = users;
+        const staleMessage = 'stale toll message';
+        const retryMessage = 'message with refreshed toll';
 
-        // User A opens chat with B and types a message but does not send
-        await a.page.click('#switchToChats');
-        await a.page.locator('#chatList .chat-name', { hasText: b.username }).click();
-        await expect(a.page.locator('#chatModal')).toBeVisible();
-        await a.page.fill('#chatModal .message-input', 'pending message');
+        // User A opens the chat while the cached recipient state is toll-free.
+        await openChatAndWaitForRecipientState(a.page, b.username);
+        await expect(a.page.locator('#tollLabel')).toHaveText('Toll free:');
+        await a.page.fill('#chatModal .message-input', staleMessage);
+        await pauseChatHistorySync(a.page);
 
-        // User B sets User A's status to OTHER
+        // User B changes the status while User A's chat remains open.
         await setFriendStatus(b.page, a.username, FriendStatus.OTHER);
 
-        // User A tries to send the message
         await a.page.click('#handleSendMessage');
 
-        // Expect an error toast to appear for User A
-        await expect(a.page.locator('.toast.error.show', { hasText: 'toll' })).toBeVisible({ timeout: 15_000 });
+        const tollError = a.page.locator('.toast.error.show', { hasText: 'toll' });
+        await expect(tollError).toBeVisible({ timeout: 15_000 });
+        await expect(a.page.locator('.message.sent', { hasText: staleMessage })).toHaveAttribute('data-status', 'failed');
+        await expect(a.page.locator('#tollValue')).toContainText(networkParams.defaultTollUsd.toFixed(6));
+        await resumeChatHistorySync(a.page);
+
+        // The refreshed toll state is used for the next transaction.
+        await tollError.locator('.toast-close-btn').click();
+        await a.page.fill('#chatModal .message-input', retryMessage);
+        await a.page.click('#handleSendMessage');
+
+        await b.page.click('#switchToChats');
+        await b.page.locator('#chatList .chat-name', { hasText: a.username }).click();
+        await expect(b.page.locator('.message.received .message-content', { hasText: retryMessage })).toBeVisible({ timeout: 30_000 });
     });
 
-    test('Connection -> Blocked: Message fails if blocked', async ({ users }) => {
+    test('Stale Connection -> Blocked: rejected send refreshes local block', async ({ users }) => {
         const { a, b } = users;
+        const staleMessage = 'stale blocked message';
+        const blockedRetryMessage = 'message after blocked refresh';
 
-        // User A opens chat with B and types a message but does not send
-        await a.page.click('#switchToChats');
-        await a.page.locator('#chatList .chat-name', { hasText: b.username }).click();
-        await expect(a.page.locator('#chatModal')).toBeVisible();
-        await a.page.fill('#chatModal .message-input', 'pending message');
+        // User A opens the chat while the cached recipient state is toll-free.
+        await openChatAndWaitForRecipientState(a.page, b.username);
+        await expect(a.page.locator('#tollLabel')).toHaveText('Toll free:');
+        await a.page.fill('#chatModal .message-input', staleMessage);
+        await pauseChatHistorySync(a.page);
 
-        // User B sets User A's status to BLOCKED
+        // User B changes the status while User A's chat remains open.
         await setFriendStatus(b.page, a.username, FriendStatus.BLOCKED);
 
-        // User A tries to send the message
         await a.page.click('#handleSendMessage');
 
-        // Expect an error toast to appear for User A
-        await expect(a.page.locator('.toast.error.show', { hasText: 'blocked' })).toBeVisible({ timeout: 15_000 });
-        // Check that the message is marked as failed
-        await expect(a.page.locator('.message.sent', { hasText: 'pending message' })).toHaveAttribute('data-status', 'failed');
+        const blockedError = a.page.locator('.toast.error.show', { hasText: 'blocked' });
+        await expect(blockedError).toBeVisible({ timeout: 15_000 });
+        await expect(a.page.locator('.message.sent', { hasText: staleMessage })).toHaveAttribute('data-status', 'failed');
+        await expect(a.page.locator('#tollValue')).toHaveText('blocked');
+        await resumeChatHistorySync(a.page);
+
+        // The refreshed block is enforced locally without another optimistic message.
+        await blockedError.locator('.toast-close-btn').click();
+        await a.page.fill('#chatModal .message-input', blockedRetryMessage);
+        await a.page.click('#handleSendMessage');
+
+        await expect(a.page.locator('.toast.error.show', { hasText: 'blocked' })).toBeVisible({ timeout: 10_000 });
+        await expect(a.page.locator('.message.sent', { hasText: blockedRetryMessage })).toHaveCount(0);
     });
 
     test('Send LIB: status changed to OTHER before submit, error and form persists', async ({ users }) => {
