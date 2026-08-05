@@ -5,6 +5,12 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+function waitForNamedDownload(page, expectedFileName) {
+  return page.waitForEvent('download', {
+    predicate: download => download.suggestedFilename() === expectedFileName
+  });
+}
+
 // Helper to create test files with unique names based on test info to avoid conflicts in parallel runs
 async function createTestFile(baseFileName, sizeInMB = 0.5, type = 'image/png', uniqueId) {
   // Generate a unique filename by adding the unique ID before the extension
@@ -280,8 +286,8 @@ test.describe('File Attachment Tests', () => {
     const fileName = fileInfo.fileName;
     const testFilePath = fileInfo.filePath;
 
-    // Start waiting for download before clicking
-    const downloadPromise = page.waitForEvent('download');
+    // Start waiting for the named download before clicking
+    const downloadPromise = waitForNamedDownload(page, fileName);
 
     // Open New Chat
     await page.click('#newChatButton');
@@ -392,8 +398,8 @@ test.describe('File Attachment Tests', () => {
     const recipientPage = await testRecipient.context.newPage();
 
     try {
-      // Start waiting for download before clicking
-      const downloadPromise = recipientPage.waitForEvent('download');
+      // Start waiting for the named download before clicking
+      const downloadPromise = waitForNamedDownload(recipientPage, fileName);
       
       // Sign in as recipient
       await recipientPage.goto('');
@@ -548,7 +554,7 @@ test.describe('File Attachment Tests', () => {
         await expect(attachmentLink).toBeVisible({ timeout: 15000 });
         
         // Set up download listener for this specific attachment
-        const downloadPromise = recipientPage.waitForEvent('download');
+        const downloadPromise = waitForNamedDownload(recipientPage, attachment.fileName);
         
         // Click to download
         await attachmentLink.click();
@@ -692,7 +698,7 @@ test.describe('File Attachment Tests', () => {
     await expect(receivedAttachment).toHaveText(fileName);
 
     // Test download on third user's side
-    const downloadPromise = thirdUserPage.waitForEvent('download');
+    const downloadPromise = waitForNamedDownload(thirdUserPage, fileName);
     await receivedAttachment.click();
     await expect(thirdUserPage.locator('#imageAttachmentContextMenu .context-menu-option[data-action="save"]')).toBeVisible();
     await thirdUserPage.click('#imageAttachmentContextMenu .context-menu-option[data-action="save"]');
