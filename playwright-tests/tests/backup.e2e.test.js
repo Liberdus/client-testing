@@ -1,5 +1,10 @@
 const { test, expect } = require('../fixtures/base');
-const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
+const {
+    createAndSignInUser,
+    generateUsername,
+    signInWithAccountCard,
+    unlockDevice
+} = require('../helpers/userHelpers');
 const { newContext: createContext } = require('../helpers/toastHelpers');
 const path = require('path');
 
@@ -20,22 +25,52 @@ async function backupAccount(page, backupFilePath, password = '') {
     await download.saveAs(backupFilePath);
 }
 
-async function restoreAccount(page, backupFilePath, password = '') {
+async function waitForRestoreReload(page) {
+    const successToast = page.locator('.toast.success.show', { hasText: /\d+ accounts? restored/ });
+    await expect(successToast).toBeVisible({ timeout: 15_000 });
+
+    const navigationPromise = page.waitForNavigation({ waitUntil: 'domcontentloaded' });
+    await successToast.locator('.toast-close-btn').click();
+    await navigationPromise;
+    await expect(page.locator('#welcomeScreen')).toBeVisible();
+}
+
+async function submitRestore(page) {
+    page.once('dialog', dialog => dialog.accept());
+    await page.click('#importForm button[type="submit"]');
+    await waitForRestoreReload(page);
+}
+
+async function restoreAccount(page, backupFilePath, options = {}) {
+    const {
+        backupPassword = '',
+        backupLock = '',
+        deviceLockPassword = '',
+        overwrite = false
+    } = options;
+
     await page.goto('');
     await expect(page.locator('#welcomeScreen')).toBeVisible();
-    await page.click("#openWelcomeMenu")
+    await page.click('#openWelcomeMenu');
+    if (deviceLockPassword) {
+        await unlockDevice(page, deviceLockPassword);
+    }
     await page.click('#welcomeOpenRestore');
     await expect(page.locator('#importModal')).toBeVisible();
 
     await page.setInputFiles('#importFile', backupFilePath);
 
-    if (password) {
-        await page.fill('#importPassword', password);
+    if (backupPassword) {
+        await page.fill('#importPassword', backupPassword);
     }
-    await page.on('dialog', async dialog => {
-        await dialog.accept();
-    });
-    await page.click('#importForm button[type="submit"]');
+    if (backupLock) {
+        await page.fill('#backupAccountLock', backupLock);
+    }
+    if (overwrite) {
+        await page.check('#overwriteAccountsCheckbox');
+    }
+
+    await submitRestore(page);
 }
 
 async function setLock(page, password) {
@@ -82,45 +117,32 @@ async function getProfileName(page) {
 test.describe('Backup and Restore Scenarios', () => {
     test.describe('Single Account Basic', () => {
         let username;
-        let backupFilePath;
         test.beforeEach(async ({ browserName }) => { username = generateUsername(browserName); });
 
         test('backup & restore without password', async ({ page, browser }, testInfo) => {
-            backupFilePath = testInfo.outputPath(path.join('backups', `${username}-no-password.json`));
+            const backupFilePath = testInfo.outputPath(path.join('backups', `${username}-no-password.json`));
             await createAndSignInUser(page, username);
             await backupAccount(page, backupFilePath);
             await page.context().close();
             const newContext = await createContext(browser);
             try {
                 const newPage = await newContext.newPage();
-                await newPage.goto('');
-                await expect(newPage.locator('#welcomeScreen')).toBeVisible();;
-                await expect(newPage.locator('#signInButton')).not.toBeVisible();
                 await restoreAccount(newPage, backupFilePath);
-                await expect(newPage.locator('#welcomeScreen')).toBeVisible();
-                await newPage.click('#signInButton');
-                await expect(newPage.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
-                await expect(newPage.locator('.app-name')).toHaveText(username);
+                await signInWithAccountCard(newPage, username);
             } finally { await newContext.close(); }
         });
 
         test('backup & restore with password', async ({ page, browser }, testInfo) => {
             const password = 'supersecretpassword123';
-            backupFilePath = testInfo.outputPath(path.join('backups', `${username}-with-password.json`));
+            const backupFilePath = testInfo.outputPath(path.join('backups', `${username}-with-password.json`));
             await createAndSignInUser(page, username);
             await backupAccount(page, backupFilePath, password);
             await page.context().close();
             const newContext = await createContext(browser);
             try {
                 const newPage = await newContext.newPage();
-                await newPage.goto('');
-                await expect(newPage.locator('#welcomeScreen')).toBeVisible();
-                await expect(newPage.locator('#signInButton')).not.toBeVisible();
-                await restoreAccount(newPage, backupFilePath, password);
-                await expect(newPage.locator('#welcomeScreen')).toBeVisible();
-                await newPage.click('#signInButton');
-                await expect(newPage.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
-                await expect(newPage.locator('.app-name')).toHaveText(username);
+                await restoreAccount(newPage, backupFilePath, { backupPassword: password });
+                await signInWithAccountCard(newPage, username);
             } finally { await newContext.close(); }
         });
 
@@ -175,16 +197,10 @@ test.describe('Backup and Restore Scenarios', () => {
                 const newContext = await createContext(browser);
                 try {
                     const newPage = await newContext.newPage();
-                    await restoreAccount(newPage, backupFilePath, password);
-                    await expect(newPage.locator('#signInButton')).toBeVisible();
-                    await newPage.click('#signInButton');
-                    const userDropdown = newPage.locator('#username');
-                    await expect(userDropdown).toContainText(username1);
-                    await expect(userDropdown).toContainText(username2);
-                    await userDropdown.selectOption(username1);
-                    await newPage.click('#signInForm button[type="submit"]');
-                    await expect(newPage.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
-                    await expect(newPage.locator('.app-name')).toHaveText(username1);
+                    await restoreAccount(newPage, backupFilePath, { backupPassword: password });
+                    await signInWithAccountCard(newPage, username1, {
+                        expectedAccountUsernames: [username1, username2]
+                    });
                 } finally { await newContext.close(); }
             });
         });
@@ -201,11 +217,9 @@ test.describe('Backup and Restore Scenarios', () => {
                 await createAndSignInUser(page, username2);
                 await page.goto('');
                 await expect(page.locator('#welcomeScreen')).toBeVisible();
-                await page.click('#signInButton');
-                const userDropdown = page.locator('#username');
-                await userDropdown.selectOption(username1);
-                await page.click('#signInForm button[type="submit"]');
-                await expect(page.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
+                await signInWithAccountCard(page, username1, {
+                    expectedAccountUsernames: [username1, username2]
+                });
                 await page.click('#toggleSettings');
                 await expect(page.locator('#settingsModal')).toBeVisible();
                 await page.click('#openBackupForm');
@@ -222,23 +236,16 @@ test.describe('Backup and Restore Scenarios', () => {
                 const newContext = await createContext(browser);
                 try {
                     const newPage = await newContext.newPage();
-                    await restoreAccount(newPage, backupFilePath, password);
-                    await expect(newPage.locator('#welcomeScreen')).toBeVisible();
-                    await newPage.click('#signInButton');
-                    const restoreUserDropdown = newPage.locator('#username');
-                    await expect(restoreUserDropdown).toContainText(username1);
-                    await expect(restoreUserDropdown).toContainText(username2);
-                    await restoreUserDropdown.selectOption(username1);
-                    await newPage.click('#signInForm button[type="submit"]');
-                    await expect(newPage.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
-                    await expect(newPage.locator('.app-name')).toHaveText(username1);
+                    const restoredUsernames = [username1, username2];
+                    await restoreAccount(newPage, backupFilePath, { backupPassword: password });
+                    await signInWithAccountCard(newPage, username1, {
+                        expectedAccountUsernames: restoredUsernames
+                    });
                     await newPage.goto('');
                     await expect(newPage.locator('#welcomeScreen')).toBeVisible();
-                    await newPage.click('#signInButton');
-                    await restoreUserDropdown.selectOption(username2);
-                    await newPage.click('#signInForm button[type="submit"]');
-                    await expect(newPage.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
-                    await expect(newPage.locator('.app-name')).toHaveText(username2);
+                    await signInWithAccountCard(newPage, username2, {
+                        expectedAccountUsernames: restoredUsernames
+                    });
                 } finally { await newContext.close(); }
             });
         });
@@ -264,19 +271,8 @@ test.describe('Backup and Restore Scenarios', () => {
             const restoreCtx = await createContext(browser);
             try {
                 const restorePage = await restoreCtx.newPage();
-                await restorePage.goto('');
-                await expect(restorePage.locator('#welcomeScreen')).toBeVisible();
-                await restorePage.click('#openWelcomeMenu');
-                await restorePage.click('#welcomeOpenRestore');
-                await expect(restorePage.locator('#importModal')).toBeVisible();
-                await restorePage.setInputFiles('#importFile', backupFilePath);
-                await restorePage.fill('#backupAccountLock', lockPassword);
-                restorePage.on('dialog', dialog => dialog.accept());
-                await restorePage.click('#importForm button[type="submit"]');
-                await expect(restorePage.locator('#welcomeScreen')).toBeVisible();
-                await restorePage.click('#signInButton');
-                await expect(restorePage.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
-                await expect(restorePage.locator('.app-name')).toHaveText(username);
+                await restoreAccount(restorePage, backupFilePath, { backupLock: lockPassword });
+                await signInWithAccountCard(restorePage, username);
             } finally { await restoreCtx.close(); }
         });
 
@@ -299,27 +295,13 @@ test.describe('Backup and Restore Scenarios', () => {
                 const username2 = generateUsername(browserName);
                 await createAndSignInUser(restorePage, username2);
                 await setLock(restorePage, lockPassword);
-                await restorePage.goto('');
-                await expect(restorePage.locator('#welcomeScreen')).toBeVisible();
-                await restorePage.click('#openWelcomeMenu');
-                await restorePage.fill('#password', lockPassword);
-                await restorePage.click('#unlockForm button[type="submit"]');
-                await restorePage.click('#welcomeOpenRestore');
-                await expect(restorePage.locator('#importModal')).toBeVisible();
-                await restorePage.setInputFiles('#importFile', backupFilePath);
-                restorePage.on('dialog', dialog => dialog.accept());
-                await restorePage.click('#importForm button[type="submit"]');
-                await expect(restorePage.locator('#welcomeScreen')).toBeVisible();
-                await restorePage.click('#signInButton');
-                await restorePage.fill('#password', lockPassword);
-                await restorePage.click('#unlockForm button[type="submit"]');
-                const restoreUserDropdown = restorePage.locator('#username');
-                await expect(restoreUserDropdown).toContainText(username1);
-                await expect(restoreUserDropdown).toContainText(username2);
-                await restoreUserDropdown.selectOption(username1);
-                await restorePage.click('#signInForm button[type="submit"]');
-                await expect(restorePage.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
-                await expect(restorePage.locator('.app-name')).toHaveText(username1);
+                await restoreAccount(restorePage, backupFilePath, {
+                    deviceLockPassword: lockPassword
+                });
+                await signInWithAccountCard(restorePage, username1, {
+                    expectedAccountUsernames: [username1, username2],
+                    lockPassword
+                });
             } finally { await restoreCtx.close(); }
         });
 
@@ -368,34 +350,16 @@ test.describe('Backup and Restore Scenarios', () => {
                     await page.click('#lockForm button[type="submit"]');
                     await expect(page.locator('.toast.success.show')).toBeVisible({ timeout: 15_000 });
 
-                    // Sign out
                     await page.click('#handleSignOutSettings');
                     await expect(page.locator('#welcomeScreen')).toBeVisible();
 
-                    // Start restore flow WITH overwrite using original lock
-                    await page.click('#openWelcomeMenu');
-                    await expect(page.locator('#unlockModal.active')).toBeVisible();
-                    await page.fill('#password', newLock);
-                    await page.click('#unlockForm button[type="submit"]');
-                    await page.click('#welcomeOpenRestore');
-                    await expect(page.locator('#importModal.active')).toBeVisible();
-                    await page.setInputFiles('#importFile', backupFilePath);
-                    if (backupPassword) {
-                        await page.fill('#importPassword', backupPassword);
-                    }
-                    await page.fill('#backupAccountLock', originalLock);
-                    await page.check('#overwriteAccountsCheckbox');
-                    page.on('dialog', dialog => dialog.accept());
-                    await page.click('#importForm button[type="submit"]');
-                    await expect(page.locator('#welcomeScreen')).toBeVisible();
-
-                    // Sign in (should succeed with restored account)
-                    await page.click('#signInButton');
-                    await expect(page.locator('#unlockModal.active')).toBeVisible();
-                    await page.fill('#password', newLock);
-                    await page.click('#unlockForm button[type="submit"]');
-                    await expect(page.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
-                    await expect(page.locator('.app-name')).toHaveText(username);
+                    await restoreAccount(page, backupFilePath, {
+                        backupLock: originalLock,
+                        backupPassword,
+                        deviceLockPassword: newLock,
+                        overwrite: true
+                    });
+                    await signInWithAccountCard(page, username, { lockPassword: newLock });
                 } finally {
                     await ctx.close();
                 }
@@ -427,24 +391,14 @@ test.describe('Backup and Restore Scenarios', () => {
                 await setLock(pageB, lockB);
                 await pageB.click('#handleSignOutSettings');
                 await expect(pageB.locator('#welcomeScreen')).toBeVisible();
-                await pageB.click('#openWelcomeMenu');
-                await pageB.fill('#password', lockB);
-                await pageB.click('#unlockForm button[type="submit"]');
-                await pageB.click('#welcomeOpenRestore');
-                await expect(pageB.locator('#importModal')).toBeVisible();
-                await pageB.waitForTimeout(1000);
-                await pageB.setInputFiles('#importFile', backupFilePath);
-                await pageB.fill('#backupAccountLock', lockA);
-                pageB.on('dialog', dialog => dialog.accept());
-                await pageB.click('#importForm button[type="submit"]');
-                await expect(pageB.locator('#welcomeScreen')).toBeVisible();
-                await pageB.click('#signInButton');
-                await expect(pageB.locator('#unlockModal.active')).toBeVisible();
-                await pageB.fill('#password', lockB);
-                await pageB.click('#unlockForm button[type="submit"]');
-                const dropdown = pageB.locator('#username');
-                await expect(dropdown).toContainText(usernameA);
-                await expect(dropdown).toContainText(existingUsername);
+                await restoreAccount(pageB, backupFilePath, {
+                    backupLock: lockA,
+                    deviceLockPassword: lockB
+                });
+                await signInWithAccountCard(pageB, usernameA, {
+                    expectedAccountUsernames: [usernameA, existingUsername],
+                    lockPassword: lockB
+                });
             } finally { await ctxB.close(); }
         });
     });
@@ -471,20 +425,13 @@ test.describe('Backup and Restore Scenarios', () => {
                 await page.click('#backupForm button[type="submit"]');
                 const download = await dl1; await download.saveAs(backupFilePath);
                 await page.click('#closeWelcomeMenu');
-                await page.click('#signInButton');
-                await expect(page.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
+                await signInWithAccountCard(page, username);
                 await updateProfileName(page, modifiedName);
                 await page.click('#toggleSettings');
                 await page.click('#handleSignOutSettings');
                 await expect(page.locator('#welcomeScreen')).toBeVisible();
-                await page.click('#openWelcomeMenu');
-                await page.click('#welcomeOpenRestore');
-                await page.setInputFiles('#importFile', backupFilePath);
-                page.on('dialog', dialog => dialog.accept());
-                await page.click('#importForm button[type="submit"]');
-                await expect(page.locator('#welcomeScreen')).toBeVisible();
-                await page.click('#signInButton');
-                await expect(page.locator('#chatsScreen.active')).toBeVisible();
+                await restoreAccount(page, backupFilePath);
+                await signInWithAccountCard(page, username);
                 const current = await getProfileName(page); expect(current).toBe(modifiedName);
             } finally { await ctx.close(); }
         });
@@ -507,21 +454,13 @@ test.describe('Backup and Restore Scenarios', () => {
                 await page.click('#backupForm button[type="submit"]');
                 const download = await dl1; await download.saveAs(backupFilePath);
                 await page.click('#closeWelcomeMenu');
-                await page.click('#signInButton');
-                await expect(page.locator('#chatsScreen.active')).toBeVisible({ timeout: 15_000 });
+                await signInWithAccountCard(page, username);
                 await updateProfileName(page, modifiedName);
                 await page.click('#toggleSettings');
                 await page.click('#handleSignOutSettings');
                 await expect(page.locator('#welcomeScreen')).toBeVisible();
-                await page.click('#openWelcomeMenu');
-                await page.click('#welcomeOpenRestore');
-                await page.setInputFiles('#importFile', backupFilePath);
-                await page.check('#overwriteAccountsCheckbox');
-                page.on('dialog', dialog => dialog.accept());
-                await page.click('#importForm button[type="submit"]');
-                await expect(page.locator('#welcomeScreen')).toBeVisible();
-                await page.click('#signInButton');
-                await expect(page.locator('#chatsScreen.active')).toBeVisible();
+                await restoreAccount(page, backupFilePath, { overwrite: true });
+                await signInWithAccountCard(page, username);
                 const current = await getProfileName(page); expect(current).toBe(originalName);
             } finally { await ctx.close(); }
         });
