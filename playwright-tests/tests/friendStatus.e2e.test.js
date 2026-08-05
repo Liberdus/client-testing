@@ -2,6 +2,7 @@ const { test: base, expect } = require('../fixtures/base');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 const { getLiberdusBalance } = require('../helpers/walletHelpers');
 const { FriendStatus, getCurrentFriendStatus, setFriendStatus } = require('../helpers/friendStatusHelpers');
+const { getInjectedTransaction } = require('../helpers/injectHelpers');
 const { sendMessageTo } = require('../helpers/messageHelpers');
 const networkParams = require('../helpers/networkParams');
 const { newContext } = require('../helpers/toastHelpers');
@@ -115,6 +116,27 @@ test.describe('Friend Status E2E', () => {
         ]);
         expect(checkedA).toBe(FriendStatus.OTHER);
         expect(checkedB).toBe(FriendStatus.CONNECTION);
+    });
+
+    test('Setting the current friend status does not inject a transaction', async ({ users }) => {
+        const { a, b } = users;
+        const friendStatusInjections = [];
+        const captureFriendStatusInjection = (request) => {
+            const transaction = getInjectedTransaction(request);
+            if (transaction?.type === 'update_toll_required') {
+                friendStatusInjections.push(transaction);
+            }
+        };
+
+        a.page.on('request', captureFriendStatusInjection);
+        try {
+            await setFriendStatus(a.page, b.username, FriendStatus.OTHER);
+        } finally {
+            a.page.off('request', captureFriendStatusInjection);
+        }
+
+        expect(friendStatusInjections).toHaveLength(0);
+        expect(await getCurrentFriendStatus(a.page, b.username)).toBe(FriendStatus.OTHER);
     });
 
     test('Block: known blocked state rejects without creating a message', async ({ users }) => {
