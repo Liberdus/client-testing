@@ -142,6 +142,11 @@ function getMessagesBetweenUsers(localStorageObj, ownerUsername, contactUsername
     return [];
 }
 
+function getUserAuthoredMessagesBetweenUsers(localStorageObj, ownerUsername, contactUsername) {
+    return getMessagesBetweenUsers(localStorageObj, ownerUsername, contactUsername)
+        .filter(message => message.type !== 'update_toll_required' && typeof message.message === 'string');
+}
+
 module.exports = {
     getLocalStorage,
     getNetidFromAccounts,
@@ -150,5 +155,6 @@ module.exports = {
     getUserContactMessages,
     countUserMessages,
     findContactByUsername,
-    getMessagesBetweenUsers
+    getMessagesBetweenUsers,
+    getUserAuthoredMessagesBetweenUsers
 };

@@ -1,9 +1,36 @@
 const { test: base, expect } = require('../fixtures/base');
 const { sendMessageTo, checkReceivedMessage } = require('../helpers/messageHelpers');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
-const { getLocalStorage, getMessagesBetweenUsers } = require('../helpers/localStorageHelpers');
+const { getLocalStorage, getUserAuthoredMessagesBetweenUsers } = require('../helpers/localStorageHelpers');
 const { newContext } = require('../helpers/toastHelpers');
 
+function expectStoredMessages(actualMessages, expectedMessages, ownerNumber) {
+    const actual = actualMessages.map(message => ({
+        content: message.message,
+        direction: message.my ? 'sent' : 'received'
+    }));
+    const expected = expectedMessages.map(message => ({
+        content: message.content,
+        direction: message.from === ownerNumber ? 'sent' : 'received'
+    }));
+
+    expect(actual).toHaveLength(expected.length);
+    expect(actual).toEqual(expect.arrayContaining(expected));
+}
+
+async function expectRenderedMessages(page, expectedMessages, ownerNumber) {
+    const messageBubbles = page.locator('#chatModal .messages-list .message:has(.message-content)');
+    await expect(messageBubbles).toHaveCount(expectedMessages.length);
+
+    for (let i = 0; i < expectedMessages.length; i++) {
+        const expectedMessage = expectedMessages[i];
+        const expectedDirection = expectedMessage.from === ownerNumber ? 'sent' : 'received';
+        const messageBubble = messageBubbles.nth(i);
+
+        await expect(messageBubble).toHaveClass(new RegExp(`\\b${expectedDirection}\\b`));
+        await expect(messageBubble.locator('.message-content')).toContainText(expectedMessage.content);
+    }
+}
 
 const test = base.extend({
     messageUsers: async ({ browserName, browser }, use) => {
@@ -23,12 +50,10 @@ const test = base.extend({
             createAndSignInUser(pg2, user2)
         ]);
 
-        // Define 4 alternating messages
+        // Define alternating messages
         const messages = [
             { from: 1, to: 2, content: `Message 1 from ${user1} to ${user2}` },
-            { from: 2, to: 1, content: `Message 2 from ${user2} to ${user1}` },
-            // { from: 1, to: 2, content: `Message 3 from ${user1} to ${user2}` },
-            // { from: 2, to: 1, content: `Message 4 from ${user2} to ${user1}` }
+            { from: 2, to: 1, content: `Message 2 from ${user2} to ${user1}` }
         ];
 
         // Exchange messages
@@ -71,13 +96,6 @@ test.describe('Message Saving Tests', () => {
         const { users: { user1, user2 }, messages } = messageUsers;
 
         try {
-            const expectedMessages = [
-                messages[0].content,
-                messages[1].content,
-                // messages[2].content,
-                // messages[3].content
-            ];
-
             // Explicitly sign out both users
             // Sign out user1
             await user1.page.click('#toggleMenu');
@@ -94,12 +112,20 @@ test.describe('Message Saving Tests', () => {
             // Check that messages ARE present in localStorage after signing out
             const user1LocalStorage = await getLocalStorage(user1.page);
             const user2LocalStorage = await getLocalStorage(user2.page);
-            const storedUser1Messages = getMessagesBetweenUsers(user1LocalStorage, user1.username, user2.username);
-            const storedUser2Messages = getMessagesBetweenUsers(user2LocalStorage, user2.username, user1.username);
-            
+            const storedUser1Messages = getUserAuthoredMessagesBetweenUsers(
+                user1LocalStorage,
+                user1.username,
+                user2.username
+            );
+            const storedUser2Messages = getUserAuthoredMessagesBetweenUsers(
+                user2LocalStorage,
+                user2.username,
+                user1.username
+            );
+
             // When signing out, messages should still be in localStorage
-            expect(storedUser1Messages.length).toBe(expectedMessages.length);
-            expect(storedUser2Messages.length).toBe(expectedMessages.length);
+            expectStoredMessages(storedUser1Messages, messages, 1);
+            expectStoredMessages(storedUser2Messages, messages, 2);
 
             // Sign back in as both users (should automatically sign in from localStorage)
             // Sign in user1
@@ -119,12 +145,7 @@ test.describe('Message Saving Tests', () => {
             await chatItem1.click();
             await expect(user1.page.locator('#chatModal')).toBeVisible();
 
-            // Explicitly check message count and content for user1
-            const user1Messages = await user1.page.locator('#chatModal .messages-list .message').allTextContents();
-            expect(user1Messages.length).toBe(expectedMessages.length);
-            for (let i = 0; i < expectedMessages.length; i++) {
-                expect(user1Messages[i]).toContain(expectedMessages[i]);
-            }
+            await expectRenderedMessages(user1.page, messages, 1);
 
             // Also verify user2's messages are still available
             await user2.page.click('#switchToChats');
@@ -134,12 +155,7 @@ test.describe('Message Saving Tests', () => {
             await chatItem2.click();
             await expect(user2.page.locator('#chatModal')).toBeVisible();
 
-            // Explicitly check message count and content for user2
-            const user2Messages = await user2.page.locator('#chatModal .messages-list .message').allTextContents();
-            expect(user2Messages.length).toBe(expectedMessages.length);
-            for (let i = 0; i < expectedMessages.length; i++) {
-                expect(user2Messages[i]).toContain(expectedMessages[i]);
-            }
+            await expectRenderedMessages(user2.page, messages, 2);
 
         } finally {
             await user1.context.close();
@@ -151,13 +167,6 @@ test.describe('Message Saving Tests', () => {
         const { users: { user1, user2 }, messages } = messageUsers;
 
         try {
-            const expectedMessages = [
-                messages[0].content,
-                messages[1].content,
-                // messages[2].content,
-                // messages[3].content
-            ];
-
             // Close both users' pages (but keep their contexts)
             await user1.page.close();
             await user2.page.close();
@@ -172,13 +181,21 @@ test.describe('Message Saving Tests', () => {
             await newPage2.goto('');
             await newPage2.waitForSelector('#welcomeScreen', { timeout: 30_000 });
 
-            // Check that messages are NOT present in localStorage before signing in (on welcome screen)            
+            // Check that messages remain in localStorage before signing in
             const user1LocalStorage = await getLocalStorage(newPage1);
             const user2LocalStorage = await getLocalStorage(newPage2);
-            const storedUser1Messages = getMessagesBetweenUsers(user1LocalStorage, user1.username, user2.username);
-            const storedUser2Messages = getMessagesBetweenUsers(user2LocalStorage, user2.username, user1.username);
-            expect(storedUser1Messages.length).toBe(expectedMessages.length);
-            expect(storedUser2Messages.length).toBe(expectedMessages.length);
+            const storedUser1Messages = getUserAuthoredMessagesBetweenUsers(
+                user1LocalStorage,
+                user1.username,
+                user2.username
+            );
+            const storedUser2Messages = getUserAuthoredMessagesBetweenUsers(
+                user2LocalStorage,
+                user2.username,
+                user1.username
+            );
+            expectStoredMessages(storedUser1Messages, messages, 1);
+            expectStoredMessages(storedUser2Messages, messages, 2);
 
             // Now click sign in for both users
             await newPage1.click('#signInButton');
@@ -195,12 +212,7 @@ test.describe('Message Saving Tests', () => {
             await chatItem1.click();
             await expect(newPage1.locator('#chatModal')).toBeVisible();
 
-            // Explicitly check message count and content for user1
-            const user1Messages = await newPage1.locator('#chatModal .messages-list .message').allTextContents();
-            expect(user1Messages.length).toBe(expectedMessages.length);
-            for (let i = 0; i < expectedMessages.length; i++) {
-                expect(user1Messages[i]).toContain(expectedMessages[i]);
-            }
+            await expectRenderedMessages(newPage1, messages, 1);
 
             // Also verify user2's messages are still available
             await newPage2.click('#switchToChats');
@@ -210,12 +222,7 @@ test.describe('Message Saving Tests', () => {
             await chatItem2.click();
             await expect(newPage2.locator('#chatModal')).toBeVisible();
 
-            // Explicitly check message count and content for user2
-            const user2Messages = await newPage2.locator('#chatModal .messages-list .message').allTextContents();
-            expect(user2Messages.length).toBe(expectedMessages.length);
-            for (let i = 0; i < expectedMessages.length; i++) {
-                expect(user2Messages[i]).toContain(expectedMessages[i]);
-            }
+            await expectRenderedMessages(newPage2, messages, 2);
 
         } finally {
             await user1.context.close();
@@ -227,13 +234,6 @@ test.describe('Message Saving Tests', () => {
         const { users: { user1, user2 }, messages } = messageUsers;
 
         try {
-            const expectedMessages = [
-                messages[0].content,
-                messages[1].content,
-                // messages[2].content,
-                // messages[3].content
-            ];
-
             // Refresh both users' pages
             await user1.page.reload();
             await expect(user1.page.locator('#welcomeScreen')).toBeVisible({ timeout: 30_000 });
@@ -244,10 +244,18 @@ test.describe('Message Saving Tests', () => {
             // Check that messages ARE present in localStorage after refreshing
             const user1LocalStorage = await getLocalStorage(user1.page);
             const user2LocalStorage = await getLocalStorage(user2.page);
-            const storedUser1Messages = getMessagesBetweenUsers(user1LocalStorage, user1.username, user2.username);
-            const storedUser2Messages = getMessagesBetweenUsers(user2LocalStorage, user2.username, user1.username);
-            expect(storedUser1Messages.length).toBe(expectedMessages.length);
-            expect(storedUser2Messages.length).toBe(expectedMessages.length);
+            const storedUser1Messages = getUserAuthoredMessagesBetweenUsers(
+                user1LocalStorage,
+                user1.username,
+                user2.username
+            );
+            const storedUser2Messages = getUserAuthoredMessagesBetweenUsers(
+                user2LocalStorage,
+                user2.username,
+                user1.username
+            );
+            expectStoredMessages(storedUser1Messages, messages, 1);
+            expectStoredMessages(storedUser2Messages, messages, 2);
 
             // sign in
             await user1.page.click('#signInButton');
@@ -261,12 +269,7 @@ test.describe('Message Saving Tests', () => {
             await chatItem1.click();
             await expect(user1.page.locator('#chatModal')).toBeVisible();
 
-            // Explicitly check message count and content for user1
-            const user1Messages = await user1.page.locator('#chatModal .messages-list .message').allTextContents();
-            expect(user1Messages.length).toBe(expectedMessages.length);
-            for (let i = 0; i < expectedMessages.length; i++) {
-                expect(user1Messages[i]).toContain(expectedMessages[i]);
-            }
+            await expectRenderedMessages(user1.page, messages, 1);
 
             // Also verify user2's messages are still available
             await expect(user2.page.locator('#chatsScreen.active')).toBeVisible();
@@ -275,12 +278,7 @@ test.describe('Message Saving Tests', () => {
             await chatItem2.click();
             await expect(user2.page.locator('#chatModal')).toBeVisible();
 
-            // Explicitly check message count and content for user2
-            const user2Messages = await user2.page.locator('#chatModal .messages-list .message').allTextContents();
-            expect(user2Messages.length).toBe(expectedMessages.length);
-            for (let i = 0; i < expectedMessages.length; i++) {
-                expect(user2Messages[i]).toContain(expectedMessages[i]);
-            }
+            await expectRenderedMessages(user2.page, messages, 2);
 
         } finally {
             await user1.context.close();
