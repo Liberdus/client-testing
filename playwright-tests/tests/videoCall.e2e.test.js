@@ -136,8 +136,9 @@ test.describe('Video Call Tests', () => {
         await expect(a.page.locator('#callScheduleChoiceModal.active')).toBeVisible();
         await a.page.click('#openCallScheduleDateBtn');
 
-        const scheduleModal = a.page.locator('#callScheduleDateModal.active');
-        await expect(scheduleModal).toBeVisible();
+        const dateTimePicker = a.page.locator('#dateTimePickerModal.active');
+        await expect(dateTimePicker).toBeVisible();
+        await expect(dateTimePicker.locator('#dateTimePickerModalTitle')).toHaveText('Schedule Call');
 
         // Choose a schedule time two hours in the future, rounded to the hour for available options.
         const scheduleDate = new Date(Date.now() + 2 * 60 * 60 * 1000);
@@ -153,21 +154,19 @@ test.describe('Video Call Tests', () => {
         const hourSelectValue = hour12.toString().padStart(2, '0');
         const minuteSelectValue = scheduleDate.getMinutes().toString().padStart(2, '0');
         const datePart = `${month}/${day}/${year}`;
-        // Toast time part is like 2:00:00 PM (with seconds)
         const timePart = `${hour12}:${minuteSelectValue} ${amPm}`;
 
-        await scheduleModal.locator('#callScheduleDate').fill(dateInputValue);
-        await scheduleModal.locator('#callScheduleHour').selectOption(hourSelectValue);
-        await scheduleModal.locator('#callScheduleMinute').selectOption(minuteSelectValue);
-        await scheduleModal.locator('#callScheduleAmPm').selectOption(amPm);
+        await dateTimePicker.locator('#dateTimePickerDate').fill(dateInputValue);
+        await dateTimePicker.locator('#dateTimePickerHour').selectOption(hourSelectValue);
+        await dateTimePicker.locator('#dateTimePickerMinute').selectOption(minuteSelectValue);
+        await dateTimePicker.locator('#dateTimePickerAmPm').selectOption(amPm);
 
-        await scheduleModal.locator('#confirmCallSchedule').click();
+        await dateTimePicker.locator('#confirmDateTimePicker').click();
 
         const successToast = a.page.locator('.toast.success.show');
         await expect(successToast).toContainText('Call scheduled for', { timeout: 20_000 });
         await expect(successToast).toContainText(datePart);
-        const toastTimePart = `${hour12}:${minuteSelectValue}:00 ${amPm}`;
-        await expect(successToast).toContainText(toastTimePart);
+        await expect(successToast).toContainText(timePart);
         await a.page.waitForSelector('.toast.success.show', { state: 'hidden' });
 
         // Verify the scheduled call message on the sender side.
