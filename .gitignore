@@ -13,3 +13,8 @@ xvfb.pid
 fluxbox.log
 fluxbox.pid
 playwright-tests/.cache/network-params.json
+playwright-tests/node_modules/
+playwright-tests/.env
+local-network.env
+.deps/
+.artifacts/

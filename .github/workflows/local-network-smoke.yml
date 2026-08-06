@@ -1,0 +1,187 @@
+name: Local Network Smoke
+
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CI: "true"
+      LIBERDUS_PROXY_REF: new-nodelist-response
+      PLAYWRIGHT_BASE_URL: http://127.0.0.1:8080/
+
+    steps:
+      - name: Checkout client-testing
+        uses: actions/checkout@v4
+
+      - name: Checkout server
+        uses: actions/checkout@v4
+        with:
+          repository: Liberdus/server
+          path: .deps/server
+
+      - name: Checkout liberdus-proxy
+        uses: actions/checkout@v4
+        with:
+          repository: Liberdus/liberdus-proxy
+          ref: ${{ env.LIBERDUS_PROXY_REF }}
+          path: .deps/liberdus-proxy
+
+      - name: Checkout web-client-v2
+        uses: actions/checkout@v4
+        with:
+          repository: Liberdus/web-client-v2
+          path: .deps/web-client-v2
+
+      - name: Normalize bind paths for act on Windows
+        if: ${{ env.ACT == 'true' }}
+        run: |
+          set -euo pipefail
+
+          case "$GITHUB_WORKSPACE" in
+            /mnt/[a-zA-Z]/*)
+              drive="${GITHUB_WORKSPACE#/mnt/}"
+              drive="${drive%%/*}"
+              prefix="/mnt/${drive}/"
+              rest="${GITHUB_WORKSPACE#"$prefix"}"
+              win_workspace="${drive^^}:\\${rest//\//\\}"
+
+              {
+                echo "LIBERDUS_SERVER_DIR=${win_workspace}\\.deps\\server"
+                echo "LIBERDUS_PROXY_DIR=${win_workspace}\\.deps\\liberdus-proxy"
+                echo "LIBERDUS_WEB_CLIENT_DIR=${win_workspace}\\.deps\\web-client-v2"
+              } >> "$GITHUB_ENV"
+              ;;
+          esac
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: playwright-tests/package-lock.json
+
+      - name: Show Docker versions
+        run: |
+          docker --version
+          docker compose version
+
+      - name: Validate local network compose config
+        run: docker compose -f docker-compose.local.yml config --quiet
+
+      - name: Clean previous local network state
+        run: docker compose -f docker-compose.local.yml down -v --remove-orphans
+
+      - name: Install Playwright dependencies
+        working-directory: playwright-tests
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Build local network image
+        run: docker compose -f docker-compose.local.yml build --progress=plain local-network
+
+      - name: Start local network
+        run: docker compose -f docker-compose.local.yml up -d --no-build local-network
+
+      - name: Wait for local network readiness
+        run: |
+          set -euo pipefail
+
+          previous_health=""
+          previous_phase=""
+          previous_healthcheck=""
+          for attempt in {1..240}; do
+            cid="$(docker compose -f docker-compose.local.yml ps -q local-network || true)"
+            if [ -z "$cid" ]; then
+              echo "local-network container not found"
+              docker compose -f docker-compose.local.yml ps || true
+              docker compose -f docker-compose.local.yml logs --no-color --tail=400 local-network || true
+              exit 1
+            fi
+
+            status="$(docker inspect --format='{{.State.Status}}' "$cid")"
+            health="$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$cid")"
+            phase="$(
+              docker compose -f docker-compose.local.yml logs --no-color --tail=200 local-network 2>/dev/null \
+                | awk '/\[liberdus-local\]/ { line=$0 } END { print line }' \
+                | sed -E 's/^.*\[liberdus-local\] //'
+            )"
+            healthcheck="$(
+              docker inspect "$cid" \
+                | jq -r '.[0].State.Health.Log[-1].Output // ""' \
+                | tr '\n' ' ' \
+                | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//'
+            )"
+
+            if [ "$health" != "$previous_health" ] || [ $((attempt % 4)) -eq 1 ]; then
+              echo "container status=${status} health=${health}"
+              previous_health="$health"
+            fi
+            if [ -n "$phase" ] && [ "$phase" != "$previous_phase" ]; then
+              echo "startup phase: ${phase}"
+              previous_phase="$phase"
+            fi
+            if [ -n "$healthcheck" ] && [ "$healthcheck" != "$previous_healthcheck" ]; then
+              echo "${healthcheck}"
+              previous_healthcheck="$healthcheck"
+            fi
+
+            if [ "$health" = "healthy" ]; then
+              exit 0
+            fi
+
+            if [ "$status" != "running" ]; then
+              docker compose -f docker-compose.local.yml logs --no-color --tail=400 local-network
+              exit 1
+            fi
+
+            sleep 15
+          done
+
+          docker compose -f docker-compose.local.yml logs --no-color --tail=400 local-network
+          exit 1
+
+      - name: Show local network status
+        run: |
+          docker compose -f docker-compose.local.yml ps
+          curl -fsS http://127.0.0.1:4000/cycleinfo/1 | jq '.cycleInfo[0] | {counter, mode, active, standby, syncing, desired, target, networkId}'
+          curl -fsS http://127.0.0.1:3030/account/0000000000000000000000000000000000000000000000000000000000000000 >/dev/null
+          curl -fsS http://127.0.0.1:8080/ >/dev/null
+
+      - name: Run Playwright smoke
+        working-directory: playwright-tests
+        run: npx playwright test --project=chromium --grep '@smoke' --workers=1 --retries=0 --reporter=github,line
+
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-network-playwright-report-${{ github.run_id }}
+          path: playwright-tests/playwright-report/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Collect local network logs
+        if: always()
+        run: |
+          mkdir -p .artifacts
+          docker compose -f docker-compose.local.yml logs --no-color local-network > .artifacts/local-network.log || true
+          docker compose -f docker-compose.local.yml ps > .artifacts/local-network-ps.txt || true
+
+      - name: Upload local network logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-network-logs-${{ github.run_id }}
+          path: |
+            .artifacts/
+            playwright-tests/test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Stop local network
+        if: always()
+        run: docker compose -f docker-compose.local.yml down -v --remove-orphans
