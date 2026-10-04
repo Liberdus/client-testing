@@ -2,6 +2,7 @@ const { test, expect } = require('../fixtures/newUserFixture');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 const { newContext } = require('../helpers/toastHelpers');
 const { AttachmentMenu } = require('../helpers/attachmentMenu');
+const { TestDiagnostics } = require('../helpers/testDiagnostics');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -397,6 +398,7 @@ test.describe('File Attachment Tests', () => {
 
     // Reuse the recipient context that was created in beforeAll
     const recipientPage = await testRecipient.context.newPage();
+    let recipientError;
 
     try {
       // Start waiting for the named download before clicking
@@ -453,8 +455,12 @@ test.describe('File Attachment Tests', () => {
       } finally {
         // Clean up is handled in afterAll
       }
+    } catch (error) {
+      recipientError = error;
+      throw error;
     } finally {
-      await recipientPage.close();
+      await TestDiagnostics.current().capturePage(recipientPage, 'recipient-before-close');
+      await TestDiagnostics.current().close([recipientPage], recipientError);
     }
   });
 
@@ -530,6 +536,7 @@ test.describe('File Attachment Tests', () => {
     
     // STEP 2: RECIPIENT RECEIVES AND DOWNLOADS ALL ATTACHMENTS
     const recipientPage = await testRecipient.context.newPage();
+    let recipientError;
     
     try {
       // Sign in as recipient
@@ -580,9 +587,12 @@ test.describe('File Attachment Tests', () => {
         // Byte-by-byte comparison
         expect(downloadedFileBuffer.equals(originalFileBuffer)).toBe(true);
       }
+    } catch (error) {
+      recipientError = error;
+      throw error;
     } finally {
-      // Close recipient page
-      await recipientPage.close();
+      await TestDiagnostics.current().capturePage(recipientPage, 'recipient-before-close');
+      await TestDiagnostics.current().close([recipientPage], recipientError);
       
       // Clean up is handled in afterAll
     }

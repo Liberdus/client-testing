@@ -1,3 +1,5 @@
+const { TestDiagnostics } = require('./testDiagnostics');
+
 /**
  * The toast-closing script. Exported so it can be used with both
  * page.addInitScript() and context.addInitScript().
@@ -117,6 +119,7 @@ async function injectToastCloserToContext(context) {
  */
 async function newContext(browser, options) {
   const context = await browser.newContext(options);
+  TestDiagnostics.current().observeContext(context);
   await context.addInitScript(toastCloserScript);
   return context;
 }

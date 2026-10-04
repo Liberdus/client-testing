@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "playwright test --project=chromium"
+    "test": "playwright test --project=chromium",
+    "test:diagnostics": "playwright test -c diagnostics.config.js && node harness-tests/verify-report.js"
   },
   "keywords": [],
   "author": "",

@@ -5,14 +5,22 @@
  */
 const { test: baseTest, expect } = require('@playwright/test');
 const { toastCloserScript } = require('../helpers/toastHelpers');
+const { TestDiagnostics } = require('../helpers/testDiagnostics');
 
 // Extend base test to override context fixture
 const test = baseTest.extend({
-  context: async ({ browser }, use) => {
+  diagnostics: [async ({ browser }, use) => {
+    const diagnostics = TestDiagnostics.current();
+    for (const context of browser.contexts()) diagnostics.observeContext(context);
+    await use(diagnostics);
+    await diagnostics.finish();
+  }, { auto: true }],
+  context: async ({ browser, diagnostics }, use) => {
     const context = await browser.newContext();
     await context.addInitScript(toastCloserScript);
+    diagnostics.observeContext(context);
     await use(context);
-    await context.close();
+    await diagnostics.close([context], null);
   },
 });
 

@@ -6,7 +6,7 @@ exports.test = base.extend({
     const username = generateUsername(browserName);
     await use(username);
   },
-  page: async ({ context, username }, use, testInfo) => {
+  page: async ({ context, username, diagnostics }, use, testInfo) => {
     // Attach the username to the test report for easy access
     await testInfo.attach('username.txt', {
         body: username,
@@ -21,12 +21,12 @@ exports.test = base.extend({
         await dialog.dismiss();
       }
     });
+    diagnostics.identify(page, { role: 'sender' });
     await createAndSignInUser(page, username);
 
     await use(page);
 
-    await page.close();
-    await context.close();
+    await diagnostics.capturePage(page, 'before-page-close');
   }
 });
 

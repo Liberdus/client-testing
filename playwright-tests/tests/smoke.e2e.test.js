@@ -3,32 +3,39 @@
 const { test, expect } = require('../fixtures/newUserFixture');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 
+const { RecipientLookup } = require('../helpers/recipientLookup');
+const { newContext } = require('../helpers/toastHelpers');
+const { TestDiagnostics } = require('../helpers/testDiagnostics');
+
 let RECIPIENT;
 
 test.describe('Tests requiring recipient user', () => {
   // Create the recipient user once before all tests
   test.beforeAll(async ({ browser, browserName }) => {
-    const page = await browser.newPage();
+    const context = await newContext(browser);
+    const page = await context.newPage();
     const recipientName = generateUsername(browserName);
 
-    await createAndSignInUser(page, recipientName);
-    RECIPIENT = recipientName;
-    await page.close();
+    const diagnostics = TestDiagnostics.current();
+    diagnostics.identify(page, { role: 'recipient' });
+    let setupError;
+    try {
+      RECIPIENT = await createAndSignInUser(page, recipientName);
+    } catch (error) {
+      setupError = error;
+      throw error;
+    } finally {
+      await diagnostics.close([context], setupError);
+    }
   });
 
   test('should open New Chat modal, start a chat, and send a message', async ({ page }) => {
-    const recipient = RECIPIENT;
-
     await page.click('#newChatButton');
     await expect(page.locator('#newChatModal')).toBeVisible();
 
-    await page.fill('#chatRecipient', recipient);
-    await page.waitForTimeout(3_000);
-    const recipientStatus = await page.locator('#chatRecipientError').textContent().catch(() => '');
-    expect(recipientStatus).toBe('found');
+    await RecipientLookup.fill(page, RECIPIENT);
 
     const continueBtn = page.locator('#newChatForm button[type="submit"]');
-    await expect(continueBtn).toBeEnabled();
     await continueBtn.click();
 
     await expect(page.locator('#chatModal')).toBeVisible();
@@ -50,18 +57,14 @@ test.describe('Tests requiring recipient user', () => {
   });
 
   test('should send LIB to contact with no memo, and check history', async ({ page }) => {
-    const recipient = RECIPIENT;
+    const recipient = RECIPIENT.username;
     const amount = 20;
 
     // Open New Chat 
     await page.click('#newChatButton');
     await expect(page.locator('#newChatModal')).toBeVisible();
-    await page.fill('#chatRecipient', recipient);
-    await page.waitForTimeout(3_000);
-    const recipientStatus = await page.locator('#chatRecipientError').textContent().catch(() => '');
-    expect(recipientStatus).toBe('found');
+    await RecipientLookup.fill(page, RECIPIENT);
     const continueBtn = page.locator('#newChatForm button[type="submit"]');
-    await expect(continueBtn).toBeEnabled();
     await continueBtn.click();
     await expect(page.locator('#chatModal')).toBeVisible();
 

@@ -1,4 +1,5 @@
 const { expect } = require("@playwright/test");
+const { AccountSetup } = require("./accountSetup");
 
 async function createUser(page, username) {
     await page.goto('', { waitUntil: 'networkidle' });
@@ -15,14 +16,7 @@ async function createUser(page, username) {
 
 // Helper to create and sign in a new user
 async function createAndSignInUser(page, username) {
-    await createUser(page, username);
-    // expect loading toast to appear
-    await expect(page.locator('.toast.loading.show')).toBeVisible({ timeout: 20_000 });
-    // wait for the loading toast to disappear
-    await page.waitForSelector('.toast.loading.show', { state: 'detached' });
-    await expect(page.locator('#chatsScreen')).toBeVisible({ timeout: 20_000 });
-    const appName = await page.locator('.app-name').textContent();
-    await expect(appName.trim()).toBe(username);
+    return new AccountSetup(page, username).run();
 }
 
 function signInAccountCard(page, username) {

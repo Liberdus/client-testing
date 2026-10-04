@@ -6,13 +6,15 @@ const { newContext } = require('../helpers/toastHelpers');
 
 // Setup test fixture with two users
 const test = base.extend({
-  users: async ({ browser, browserName }, use, testInfo) => {
+  users: async ({ browser, browserName, diagnostics }, use, testInfo) => {
     const ctxA = await newContext(browser);
     const ctxB = await newContext(browser);
     const pageA = await ctxA.newPage();
     const pageB = await ctxB.newPage();
     const userA = generateUsername(browserName);
     const userB = generateUsername(browserName);
+    diagnostics.identify(pageA, { role: 'account-a' });
+    diagnostics.identify(pageB, { role: 'account-b' });
 
     // Attach both usernames to the report
     await testInfo.attach('test-users.json', {
@@ -20,12 +22,15 @@ const test = base.extend({
       contentType: 'application/json'
     });
 
+    let setupError;
     try {
-      // Create both users in parallel
-      await Promise.all([
+      // Let both bounded setups finish so either account retains its own evidence.
+      const setup = await Promise.allSettled([
         createAndSignInUser(pageA, userA),
         createAndSignInUser(pageB, userB)
       ]);
+      const failure = setup.find(result => result.status === 'rejected');
+      if (failure) throw failure.reason;
 
       // Get initial balances
       const [balanceA, balanceB] = await Promise.all([
@@ -47,10 +52,15 @@ const test = base.extend({
           balance: parseFloat(balanceB)
         }
       });
+    } catch (error) {
+      setupError = error;
+      throw error;
     } finally {
-      // Ensure we close the pages and contexts even if test fails
-      await ctxA.close();
-      await ctxB.close();
+      await Promise.all([
+        diagnostics.capturePage(pageA, 'transfer-cleanup'),
+        diagnostics.capturePage(pageB, 'transfer-cleanup'),
+      ]);
+      await diagnostics.close([ctxA, ctxB], setupError);
     }
   }
 });

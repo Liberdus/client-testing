@@ -29,10 +29,10 @@ export default defineConfig({
     /* Base URL to use in actions like `await page.goto('/')`. */
     baseURL: 'https://liberdus.com/dev/',
 
-    /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
-    trace: 'on-first-retry',
+    /* Keep the failing attempt, including attempt zero and custom browser contexts. */
+    trace: 'retain-on-failure',
     headless: process.env.CI ? true : false,  
-    screenshot: 'on-first-failure',
+    screenshot: 'only-on-failure',
     launchOptions: { slowMo: 1000 }
   },
   // Fetch network parameters once before the test run and cache them for sync consumption in tests
