@@ -17,9 +17,10 @@ base('private account can be created successfully', async ({ page, browserName }
   await expect(page.locator('#newUsernameAvailable')).toHaveText('available', { timeout: 10_000 });
 
   // reveal and enable private account option
-  await page.locator('#toggleMoreOptions').click();
-  await expect(page.locator('#togglePrivateAccount')).toBeVisible();
-  await page.locator('#togglePrivateAccount').click();
+  await page.locator('#advancedOptionsSummary').click();
+  await expect(page.locator('label.create-account-option-toggle[for="togglePrivateAccount"]')).toBeVisible();
+  await page.locator('label.create-account-option-toggle[for="togglePrivateAccount"]').click();
+  await expect(page.locator('#togglePrivateAccount')).toBeChecked();
 
   const createBtn = page.locator('#createAccountForm button[type="submit"]');
   await expect(createBtn).toBeEnabled();
@@ -49,8 +50,9 @@ test('private/public chat restrictions enforced', async ({ browser, browserName 
     await pagePrivate.click('#createAccountButton');
     await pagePrivate.locator('#newUsername').pressSequentially(privateUser);
     await expect(pagePrivate.locator('#newUsernameAvailable')).toHaveText('available', { timeout: 10_000 });
-    await pagePrivate.locator('#toggleMoreOptions').click();
-    await pagePrivate.locator('#togglePrivateAccount').click();
+    await pagePrivate.locator('#advancedOptionsSummary').click();
+    await pagePrivate.locator('label.create-account-option-toggle[for="togglePrivateAccount"]').click();
+    await expect(pagePrivate.locator('#togglePrivateAccount')).toBeChecked();
     await pagePrivate.locator('#createAccountForm button[type="submit"]').click();
     await expect(pagePrivate.locator('.toast.loading.show')).toBeVisible({ timeout: 20_000 });
     await pagePrivate.waitForSelector('.toast.loading.show', { state: 'detached' });
@@ -112,8 +114,9 @@ test('private/public transfer shows error toast', async ({ browser, browserName 
     await pagePrivate.click('#createAccountButton');
     await pagePrivate.locator('#newUsername').pressSequentially(privateUser);
     await expect(pagePrivate.locator('#newUsernameAvailable')).toHaveText('available', { timeout: 10_000 });
-    await pagePrivate.locator('#toggleMoreOptions').click();
-    await pagePrivate.locator('#togglePrivateAccount').click();
+    await pagePrivate.locator('#advancedOptionsSummary').click();
+    await pagePrivate.locator('label.create-account-option-toggle[for="togglePrivateAccount"]').click();
+    await expect(pagePrivate.locator('#togglePrivateAccount')).toBeChecked();
     await pagePrivate.locator('#createAccountForm button[type="submit"]').click();
     await expect(pagePrivate.locator('.toast.loading.show')).toBeVisible({ timeout: 20_000 });
     await pagePrivate.waitForSelector('.toast.loading.show', { state: 'detached' });
