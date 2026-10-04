@@ -1,6 +1,7 @@
 const { test, expect } = require('../fixtures/newUserFixture');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 const { newContext } = require('../helpers/toastHelpers');
+const { AttachmentMenu } = require('../helpers/attachmentMenu');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -553,16 +554,11 @@ test.describe('File Attachment Tests', () => {
         const attachmentLink = recipientPage.locator('.message.received .attachment-label', { hasText: attachment.fileName });
         await expect(attachmentLink).toBeVisible({ timeout: 15000 });
         
-        // Set up download listener for this specific attachment
-        const downloadPromise = waitForNamedDownload(recipientPage, attachment.fileName);
-        
-        // Click to download
-        await attachmentLink.click();
-        await expect(recipientPage.locator('#imageAttachmentContextMenu .context-menu-option[data-action="save"]')).toBeVisible();
-        await recipientPage.click('#imageAttachmentContextMenu .context-menu-option[data-action="save"]');
-        
-        // Wait for download to start
-        const download = await downloadPromise;
+        const saveOption = await AttachmentMenu.open(attachmentLink);
+        const [download] = await Promise.all([
+          waitForNamedDownload(recipientPage, attachment.fileName),
+          saveOption.click(),
+        ]);
         expect(download.suggestedFilename()).toBe(attachment.fileName);
         
         // Define path for the downloaded file with unique ID to avoid conflicts
