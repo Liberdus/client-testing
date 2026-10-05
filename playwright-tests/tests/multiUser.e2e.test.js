@@ -2,7 +2,7 @@
 
 const { test, expect } = require('../fixtures/base');
 const { createAndSignInUser } = require('../helpers/userHelpers');
-const { getLiberdusBalance } = require('../helpers/walletHelpers');
+const { getLiberdusBalance, expectLiberdusBalanceToEqual } = require('../helpers/walletHelpers');
 const { sendMessageTo, checkReceivedMessage } = require('../helpers/messageHelpers');
 const { generateUsername } = require('../helpers/userHelpers');
 const networkParams = require('../helpers/networkParams');
@@ -96,41 +96,26 @@ test.describe('Multi User Tests', () => {
       // User2 ➜ User1
       await sendMessageTo(pg2, user1, msg2);
 
-      // User1: Wait for message, then check wallet balance
-      await pg1.waitForTimeout(10_000);
+      // The reply reward window starts with the original message, so avoid fixed pauses.
       await checkReceivedMessage(pg1, user2, msg2);
-      
-      // User1 checks wallet balance after sending message 
-      await pg1.click('#switchToWallet');
-      await pg1.waitForSelector('#walletScreen.active', { timeout: 10_000 });
-      await pg1.waitForTimeout(20_000);
-      await pg1.click('#refreshBalance');
-      const balanceAfter = await getLiberdusBalance(pg1);
       
       // Only half the toll is received on read minus the 1% network fee on tolls
       const readToll = (tollInLib / 2);
       const readTollAfterTax = readToll - (readToll * networkParams.networkTollTax); // 1% network fee on tolls
 
       const balanceBeforeNum = parseFloat(balanceBefore);
-      let expectedBalance = balanceBeforeNum + readTollAfterTax - networkParams.networkFeeLib;
-      // UI round to 6 decimal places
-      expect(balanceAfter.toString()).toEqual(expectedBalance.toFixed(6));
+      const expectedBalance = balanceBeforeNum + readTollAfterTax - networkParams.networkFeeLib;
+      // Confirm the read reward at the UI's six-decimal precision before replying.
+      await expectLiberdusBalanceToEqual(pg1, expectedBalance.toFixed(6));
 
       // reply to message to get the other half of the toll
       const replyMsg = 'Replying to get the other half of the toll';
       await sendMessageTo(pg1, user2, replyMsg);
-      await pg2.waitForTimeout(10_000);
       await checkReceivedMessage(pg2, user1, replyMsg);
 
       // User1 check wallet balance again for the second half of the toll
-      await pg1.click('#switchToWallet');
-      await expect(pg1.locator('#walletScreen.active')).toBeVisible();
-      await pg1.waitForTimeout(20_000);
-      await pg1.click('#refreshBalance');
-      const finalBalance = await getLiberdusBalance(pg1);
       const expectedFinalBalance = expectedBalance + readTollAfterTax - networkParams.networkFeeLib;
-      // UI round to 6 decimal places
-      expect(finalBalance).toEqual(expectedFinalBalance.toFixed(6));
+      await expectLiberdusBalanceToEqual(pg1, expectedFinalBalance.toFixed(6));
     } finally {
       await ctx1.close();
       await ctx2.close();
