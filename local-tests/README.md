@@ -1,6 +1,6 @@
 # Local client regression tests
 
-This directory brings 61 reusable test and fixture files formerly stored in ignored client `tests/` directories into version control on `codex/local-client-tests`. The original files are kept during the initial migration so existing local commands remain usable. Add future tests here, and use the runner to select the client checkout explicitly. See [MIGRATION.md](MIGRATION.md) for provenance and baseline results.
+This directory brings reusable tests and fixtures formerly stored in ignored client `tests/` directories or local branch history into version control on `codex/local-client-tests`. Original local copies remain available to existing commands. Add future tests here, and use the runner to select the client checkout explicitly. See [MIGRATION.md](MIGRATION.md) for provenance and baseline results.
 
 ## Run against an implementation checkout
 
@@ -16,6 +16,19 @@ node local-tests/run.mjs dao-timeline.test.mjs
 ```
 
 Pass filenames from `local-tests/tests/`. The default run selects Node tests that do not launch a browser. `--list` shows all filenames, including the `.browser.test.mjs` scripts and manual `.html` fixtures. The runner copies tests into a temporary directory, links the selected client's source and assets, and removes the temporary directory on normal completion. It leaves both repository checkouts unchanged. Some migrated tests describe behavior from a particular feature branch and can fail on a different client revision. Check the test's assumptions before changing an assertion or the implementation; record incompatible tests in the result instead of treating the entire migration as a passing baseline.
+
+The recovered multichain suites import `fixtures/near-rpc.mjs`, which supplies a fixed contract-vector salt for `current_salt` queries to `intents.near` and rejects every other fetch. Their service mocks cover all other operations. The fixture applies only to those suites, and the runner copies it alongside the tests.
+
+Run the 12 tests recovered from merged PR history with:
+
+```bash
+WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs \
+  asset-icons.test.mjs intents.test.mjs \
+  intents-activity.test.mjs intents-addresses.test.mjs intents-assets.test.mjs \
+  intents-chat.test.mjs intents-deposits.test.mjs intents-swap.test.mjs \
+  intents-transfer.test.mjs intents-withdraw.test.mjs \
+  f01-security.test.mjs f02-attachment-security.test.mjs
+```
 
 For manual HTML fixtures, start the local overlay server:
 

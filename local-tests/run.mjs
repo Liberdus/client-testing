@@ -45,6 +45,7 @@ class LocalTestRunner {
     try {
       // Copy tests: symlinking them would make ESM resolve ../ against this repository.
       await cp(join(this.directory, 'tests'), join(workspace, 'tests'), { recursive: true });
+      await cp(join(this.directory, 'fixtures'), join(workspace, 'fixtures'), { recursive: true });
       const assetDirectories = ['bridge', 'data', 'explorer', 'external', 'fonts', 'media', 'meet', 'network', 'dev-fixtures', 'dev-patches'];
       for (const entry of await readdir(this.client, { withFileTypes: true })) {
         if ((entry.isFile() && /\.(js|html|css)$/.test(entry.name)) || assetDirectories.includes(entry.name)) {

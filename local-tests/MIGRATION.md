@@ -42,3 +42,34 @@ Failing file baseline:
 - `message-confirmation.test.cjs`
 - `popup-select-container.test.mjs`
 - `registration-confirmation.test.cjs`
+
+## Recovered from merged PR history
+
+Added 12 more offline test files on 2026-10-15. All original assertions are preserved. Changes are limited to module paths, filenames, run instructions, the NEAR fixture import, and awaiting the protocol suite's async entry point so an unsettled promise cannot produce a false success.
+
+- The ten multichain suites come from `test/` on `backup-near-intents-before-consolidation-20260928`, commit `c99e209411ab60d3a3e5b2b1a414e68d3b7314b7`. They were excluded during the consolidation merged in [PR #1715](https://github.com/Liberdus/web-client-v2/pull/1715). Imports now target the consolidated `near-assets.js`, and filenames end in `.test.mjs` for runner discovery.
+- `f01-security.test.mjs` comes from `c54312bae^:tests/f01-security.test.mjs`, before its removal during [PR #1700](https://github.com/Liberdus/web-client-v2/pull/1700). Its helper source path now points to `lib.js`.
+- `f02-attachment-security.test.mjs` comes from `37c812f^:tests/f02-attachment-security.test.mjs`, before its removal during [PR #1702](https://github.com/Liberdus/web-client-v2/pull/1702). Its helper source path now points to `lib.js`.
+
+The multichain suites import `fixtures/near-rpc.mjs`. It returns the deterministic `252812b3` contract-vector salt only for `current_salt` queries to `intents.near`; all other fetch calls reject without network access. Existing service mocks handle deposits, transfer preparation, quotes, withdrawals, and receipt checks. Live-account scripts and interactive development demos were excluded.
+
+Verified against client checkout `92921ba4b51b3792295f5fbb4ea689fc5655de74` (application source identical to `bc439f28`), using Node v20.19.6 and the repository's `local-tests/run.mjs`:
+
+| Added suite | Passing checks |
+| --- | ---: |
+| `asset-icons.test.mjs` | 36 |
+| `intents.test.mjs` | 31 |
+| `intents-activity.test.mjs` | 48 |
+| `intents-addresses.test.mjs` | 65 |
+| `intents-assets.test.mjs` | 57 |
+| `intents-chat.test.mjs` | 60 |
+| `intents-deposits.test.mjs` | 37 |
+| `intents-swap.test.mjs` | 27 |
+| `intents-transfer.test.mjs` | 33 |
+| `intents-withdraw.test.mjs` | 44 |
+| `f01-security.test.mjs` | 6 |
+| `f02-attachment-security.test.mjs` | 7 |
+
+All 12 added files passed: 438 multichain assertions and 13 security tests. The complete default offline run now contains **62 files: 41 passed, 21 failed**. Every previous file's result matches the initial baseline above; none of the new files fails. The 3 opt-in browser scripts and 8 manual HTML fixtures remain outside that default run.
+
+The runner's fixture copy, deterministic salt response, and rejection of unsupported RPC methods and contract IDs were also checked. The focused command is documented in [README.md](README.md).
