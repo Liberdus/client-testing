@@ -11,114 +11,130 @@ import {
 const ACCOUNT_A = '11'.repeat(20);
 const ACCOUNT_B = '22'.repeat(20);
 
-function createMemoryStorage() {
-  const values = new Map();
-  return {
-    getItem(key) {
-      return values.has(key) ? values.get(key) : null;
-    },
-    setItem(key, value) {
-      values.set(key, String(value));
-    },
-    getStoredValues() {
-      return [...values.values()].map((value) => JSON.parse(value));
-    },
-  };
-}
+class VoteFixture {
+  constructor() {
+    this.accounts = new Map();
+    this.selectAccount('network-a', ACCOUNT_A);
+    this.tracker = createDaoProposalVoteTracker({
+      getDaoUserVotes: () => this.getVotes(),
+      setDaoUserVotes: (votes) => this.setVotes(votes),
+    });
+  }
 
-function settle(tracker, overrides = {}) {
-  tracker.handleSettlement({
-    type: DAO_ACTION_TYPES.VOTE,
-    outcome: 'success',
-    networkId: 'network-a',
-    accountAddress: ACCOUNT_A,
-    proposalNumber: 12,
-    claimStart: 1_000,
-    claimEnd: 2_000,
-    ...overrides,
-  });
+  selectAccount(networkId, address) {
+    const key = `${networkId}:${address}`;
+    if (!this.accounts.has(key)) this.accounts.set(key, { daoUserVotes: {} });
+    this.account = this.accounts.get(key);
+  }
+
+  getVotes() {
+    return this.account.daoUserVotes;
+  }
+
+  setVotes(votes) {
+    this.account.daoUserVotes = votes;
+  }
+
+  settle(overrides = {}) {
+    this.tracker.handleSettlement({
+      type: DAO_ACTION_TYPES.VOTE,
+      outcome: 'success',
+      proposalNumber: 12,
+      ...overrides,
+    });
+  }
 }
 
 test('confirmed votes are deduplicated and isolated by network and account', () => {
-  const storage = createMemoryStorage();
-  const tracker = createDaoProposalVoteTracker(storage);
+  const fixture = new VoteFixture();
+  const { tracker } = fixture;
 
-  settle(tracker);
-  settle(tracker);
+  fixture.settle();
+  tracker.setAuthoritativeClaimWindow(12, 1_000, 2_000);
+  fixture.settle();
 
-  assert.deepEqual(tracker.getOpenClaimProposalNumbers('network-a', ACCOUNT_A, 1_500), [12]);
-  assert.deepEqual(tracker.getOpenClaimProposalNumbers('network-b', ACCOUNT_A, 1_500), []);
-  assert.deepEqual(tracker.getOpenClaimProposalNumbers('network-a', ACCOUNT_B, 1_500), []);
-  assert.deepEqual(storage.getStoredValues(), [[{
-    proposalNumber: 12,
-    claimStart: 1_000,
-    claimEnd: 2_000,
-  }]]);
+  assert.deepEqual(tracker.getOpenClaimProposalNumbers(1_500), [12]);
+  assert.deepEqual(fixture.getVotes(), { 12: { claimStart: 1_000, claimEnd: 2_000 } });
+  fixture.selectAccount('network-b', ACCOUNT_A);
+  assert.deepEqual(tracker.getOpenClaimProposalNumbers(1_500), []);
+  fixture.selectAccount('network-a', ACCOUNT_B);
+  assert.deepEqual(tracker.getOpenClaimProposalNumbers(1_500), []);
+  fixture.selectAccount('network-a', ACCOUNT_A);
+  assert.deepEqual(tracker.getOpenClaimProposalNumbers(1_500), [12]);
 });
 
 test('only proposals with an open saved claim window are returned', () => {
-  const tracker = createDaoProposalVoteTracker(createMemoryStorage());
-  settle(tracker);
+  const fixture = new VoteFixture();
+  const { tracker } = fixture;
+  fixture.settle();
+  tracker.setAuthoritativeClaimWindow(12, 1_000, 2_000);
 
-  assert.deepEqual(tracker.getOpenClaimProposalNumbers('network-a', ACCOUNT_A, 999), []);
-  assert.deepEqual(tracker.getOpenClaimProposalNumbers('network-a', ACCOUNT_A, 1_000), [12]);
-  assert.deepEqual(tracker.getOpenClaimProposalNumbers('network-a', ACCOUNT_A, 2_000), [12]);
-  assert.deepEqual(tracker.getOpenClaimProposalNumbers('network-a', ACCOUNT_A, 2_001), []);
+  assert.deepEqual(tracker.getOpenClaimProposalNumbers(999), []);
+  assert.deepEqual(tracker.getOpenClaimProposalNumbers(1_000), [12]);
+  assert.deepEqual(tracker.getOpenClaimProposalNumbers(2_000), [12]);
+  assert.deepEqual(tracker.getOpenClaimProposalNumbers(2_001), []);
 });
 
 test('a repeated confirmed vote preserves the original saved claim window', () => {
-  const tracker = createDaoProposalVoteTracker(createMemoryStorage());
-  settle(tracker);
-  settle(tracker, { claimStart: 3_000, claimEnd: 4_000 });
+  const fixture = new VoteFixture();
+  const { tracker } = fixture;
+  fixture.settle();
+  tracker.setAuthoritativeClaimWindow(12, 1_000, 2_000);
+  fixture.settle({ votingEndsAt: 3_000, estimatedClaimEndsAt: 4_000, reminderExpiresAt: 5_000 });
 
-  assert.deepEqual(tracker.getOpenClaimProposalNumbers('network-a', ACCOUNT_A, 1_500), [12]);
-  assert.deepEqual(tracker.getOpenClaimProposalNumbers('network-a', ACCOUNT_A, 3_500), []);
+  assert.deepEqual(tracker.getOpenClaimProposalNumbers(1_500), [12]);
+  assert.equal(fixture.getVotes()[12].claimStart, 1_000);
+  assert.equal(fixture.getVotes()[12].claimEnd, 2_000);
+  assert.deepEqual(tracker.getOpenClaimProposalNumbers(3_500), []);
 });
 
 test('only a confirmed successful claim removes a tracked proposal', () => {
-  const tracker = createDaoProposalVoteTracker(createMemoryStorage());
-  settle(tracker);
+  const fixture = new VoteFixture();
+  const { tracker } = fixture;
+  fixture.settle();
+  tracker.setAuthoritativeClaimWindow(12, 1_000, 2_000);
 
-  settle(tracker, { type: DAO_ACTION_TYPES.CLAIM_REWARD, outcome: 'failure' });
-  settle(tracker, { type: DAO_ACTION_TYPES.CLAIM_REWARD, outcome: 'timeout' });
-  assert.deepEqual(tracker.getOpenClaimProposalNumbers('network-a', ACCOUNT_A, 1_500), [12]);
+  fixture.settle({ type: DAO_ACTION_TYPES.CLAIM_REWARD, outcome: 'failure' });
+  fixture.settle({ type: DAO_ACTION_TYPES.CLAIM_REWARD, outcome: 'timeout' });
+  assert.deepEqual(tracker.getOpenClaimProposalNumbers(1_500), [12]);
 
-  settle(tracker, { type: DAO_ACTION_TYPES.CLAIM_REWARD });
-  assert.deepEqual(tracker.getOpenClaimProposalNumbers('network-a', ACCOUNT_A, 1_500), []);
+  fixture.settle({ type: DAO_ACTION_TYPES.CLAIM_REWARD });
+  assert.deepEqual(tracker.getOpenClaimProposalNumbers(1_500), []);
+  assert.deepEqual(fixture.getVotes(), {});
 });
 
 test('failed and timed-out votes are not tracked', () => {
-  const tracker = createDaoProposalVoteTracker(createMemoryStorage());
+  const fixture = new VoteFixture();
+  const { tracker } = fixture;
 
-  settle(tracker, { outcome: 'failure' });
-  settle(tracker, { outcome: 'timeout' });
+  fixture.settle({ outcome: 'failure' });
+  fixture.settle({ outcome: 'timeout' });
 
-  assert.deepEqual(tracker.getOpenClaimProposalNumbers('network-a', ACCOUNT_A, 1_500), []);
+  assert.deepEqual(tracker.getPendingClaimProposalNumbers(), []);
+  assert.deepEqual(tracker.getOpenClaimProposalNumbers(1_500), []);
+  assert.deepEqual(fixture.getVotes(), {});
 });
 
-test('malformed and unavailable storage fail safely', () => {
-  const malformedStorage = {
-    getItem() {
-      return '{bad json';
-    },
-    setItem() {
-      throw new Error('unavailable');
-    },
-  };
-  const unavailableStorage = {
-    getItem() {
-      throw new Error('unavailable');
-    },
-    setItem() {
-      throw new Error('unavailable');
-    },
-  };
-
-  for (const storage of [null, malformedStorage, unavailableStorage]) {
-    const tracker = createDaoProposalVoteTracker(storage);
-    assert.deepEqual(tracker.getOpenClaimProposalNumbers('network-a', ACCOUNT_A, 1_500), []);
-    assert.doesNotThrow(() => settle(tracker));
+test('malformed account state and unavailable callbacks fail safely', (t) => {
+  assert.throws(() => createDaoProposalVoteTracker({}), /account vote state accessors/);
+  for (const votes of [null, '{bad json', [], { 12: null }]) {
+    const fixture = new VoteFixture();
+    fixture.setVotes(votes);
+    assert.deepEqual(fixture.tracker.getOpenClaimProposalNumbers(1_500), []);
+    assert.doesNotThrow(() => fixture.settle());
+    assert.deepEqual(fixture.tracker.getPendingClaimProposalNumbers(), [12]);
   }
+
+  const unreadable = new VoteFixture();
+  t.mock.method(unreadable, 'getVotes', () => { throw new Error('unavailable'); });
+  assert.deepEqual(unreadable.tracker.getOpenClaimProposalNumbers(1_500), []);
+  assert.doesNotThrow(() => unreadable.settle());
+
+  const unwritable = new VoteFixture();
+  t.mock.method(unwritable, 'setVotes', () => { throw new Error('unavailable'); });
+  assert.doesNotThrow(() => unwritable.settle());
+  assert.deepEqual(unwritable.tracker.getPendingClaimProposalNumbers(), []);
+  assert.deepEqual(unwritable.getVotes(), {});
 });
 
 test('tracked metadata candidates are selected without filtering by status', () => {
