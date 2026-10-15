@@ -21,6 +21,8 @@ The migration does not claim that the historical suite is green. Default executi
 
 Failing file baseline:
 
+The subsequent [failure audit](FAILURES.md) records each file's observed error, cause, and recommended action. Some suites require unmerged features; they should not all be treated as stale tests.
+
 - `contextual-evm-modal.test.mjs`
 - `dao-authoritative-claim-window.test.mjs`
 - `dao-backend-fetcher.test.mjs`
