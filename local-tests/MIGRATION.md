@@ -1,5 +1,7 @@
 # Migration record
 
+Subsequent maintenance repaired 13 files in individual commits, with all 100 repaired cases passing. The current default suite is **54 passing / 8 failing files**; see [REPAIRS.md](REPAIRS.md) for commits and remaining client requirements. Counts below preserve the original migration baseline.
+
 Imported on 2026-10-15:
 
 - 60 unique files from the primary `web-client-v2/tests/` directory at client commit `bc439f28ada1119a55397fd06d780641db1fefc5`.

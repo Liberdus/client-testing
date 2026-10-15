@@ -2,7 +2,7 @@
 
 This directory brings reusable tests and fixtures formerly stored in ignored client `tests/` directories or local branch history into version control on `codex/local-client-tests`. Original local copies remain available to existing commands. Add future tests here, and use the runner to select the client checkout explicitly. See [MIGRATION.md](MIGRATION.md) for provenance and baseline results.
 
-See [FAILURES.md](FAILURES.md) for the diagnosis and recommended action for each of the 21 failing files. It distinguishes current test maintenance, missing/old fixtures, feature-specific suites, and a reproduced client receipt-handling bug. Recheck those diagnoses against the selected client revision before using them to explain a failure.
+See [REPAIRS.md](REPAIRS.md) for the current result: **54/62 files pass**, including all **100 cases in 13 individually committed repaired files**. It lists each repair commit and the client requirements for the eight remaining failures. [FAILURES.md](FAILURES.md) preserves the historical diagnosis of the original 21 failing files. Recheck these results against the selected client revision before using them to explain a failure.
 
 ## Run against an implementation checkout
 

@@ -1,5 +1,7 @@
 # Offline test failure audit
 
+This is the historical pre-repair audit at test commit `b424be0`. Follow-up repairs now pass all 100 cases in 13 repaired files; the default suite is **54 passing / 8 failing files**. See [REPAIRS.md](REPAIRS.md) for the individual commits and remaining client requirements. The observations and recommendations below describe the original baseline.
+
 Every failing file needs either a test repair, current fixtures, an explicit client feature requirement, or a client fix. The 21 failing files are not evidence of 21 independent client bugs. The message-confirmation suite does expose a current null-receipt bug; several other suites depend on features that have not merged.
 
 Audited on 2026-10-15 with Node v20.19.6, test sources at `b424be0`, and client checkout `92921ba4b51b3792295f5fbb4ea689fc5655de74`. Its application source matches client `bc439f28ada1119a55397fd06d780641db1fefc5`. All 21 files were rerun with `local-tests/run.mjs`. This audit changes documentation only; the failures remain visible.
