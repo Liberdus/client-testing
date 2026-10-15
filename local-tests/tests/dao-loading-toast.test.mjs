@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
+import { DAO_PROJECT_FILTERS, DAO_STATES } from '../dao.js';
 
 const source = await readFile(new URL('../app.js', import.meta.url), 'utf8');
 const daoClass = source.slice(source.indexOf('class DaoModal {'), source.indexOf('const daoModal = new DaoModal();'));
@@ -16,6 +17,9 @@ function setup() {
   let nextId = 0;
   let allowOpen = true;
   const context = {
+    AbortController, assert, myData: {}, network: { netid: 'fixture' },
+    DAO_FILTER_OPTIONS: [{ key: 'all' }, { key: 'claimable' }, ...DAO_STATES, ...DAO_PROJECT_FILTERS],
+    DAO_PROJECT_FILTER_KEYS: new Set(DAO_PROJECT_FILTERS.map(({ key }) => key)),
     DAO_PROPOSAL_PAGE_SIZE: 10, createEmptyDaoNotificationSummary: () => ({}),
     getCorrectedTimestamp: () => 1000, menuModal: null, footer: null,
     enterFullscreen() {}, console: { warn() {} },
@@ -27,7 +31,7 @@ function setup() {
       return id;
     },
     hideToast: (id) => toasts.delete(id),
-    daoRepo: { refresh() { const request = deferred(); pending.push(request); return request.promise; } },
+    daoRepo: { reset() {}, refresh() { const request = deferred(); pending.push(request); return request.promise; } },
   };
   const DaoModal = vm.runInNewContext(daoClass + '\nDaoModal', context);
   const dao = new DaoModal();
