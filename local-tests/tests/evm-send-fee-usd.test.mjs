@@ -1,30 +1,57 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFile } from 'node:fs/promises';
 import { EvmSendConfirmationModal } from '../evm-assets.js';
 import { installModalTransitionListeners } from '../lib.js';
 
+const markup = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 const transitions = new Map();
-const memoElement = { textContent: '' };
 globalThis.document = {
   addEventListener: (type, listener) => transitions.set(type, listener),
-  getElementById: (id) => id === 'confirmMemo' ? memoElement : null,
+};
+globalThis.MutationObserver = class {
+  constructor(callback) { this.callback = callback; }
+  observe(element) { element.onClassChange = this.callback; }
 };
 installModalTransitionListeners();
 
-function confirmation() {
-  const modal = new EvmSendConfirmationModal();
-  modal.loaded = true;
-  const classes = new Set();
-  modal.modal = { classList: {
-    add: (name) => classes.add(name),
-    remove: (name) => classes.delete(name),
-    contains: (name) => classes.has(name),
-  } };
-  for (const name of ['recipient', 'amount', 'asset', 'networkValue', 'feeValue', 'feeUsd',
-    'signingNotice', 'amountUsd', 'memoGroup', 'networkGroup', 'feeGroup', 'confirmButton', 'cancelButton']) {
-    modal[name] = { textContent: '', style: { display: '' }, hidden: false };
+class ConfirmationElement {
+  constructor() {
+    this.textContent = '';
+    this.style = { display: '' };
+    this.listeners = new Map();
+    const classes = new Set();
+    this.classList = {
+      add: name => { classes.add(name); this.onClassChange?.(); },
+      remove: name => { classes.delete(name); this.onClassChange?.(); },
+      contains: name => classes.has(name),
+    };
   }
-  return modal;
+  addEventListener(type, listener) {
+    const listeners = this.listeners.get(type) || [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+  click() {
+    for (const listener of this.listeners.get('click') || []) listener({ preventDefault() {} });
+  }
+}
+
+class ConfirmationFixture {
+  constructor() {
+    globalThis.document = this;
+    this.elements = new Map([...markup.matchAll(/\bid="([^"]+)"/g)].map(([, id]) => [id, new ConfirmationElement()]));
+    this.modal = new EvmSendConfirmationModal();
+    this.modal.load();
+  }
+  getElementById(id) {
+    assert.ok(this.elements.has(id), `Client markup is missing ${id}`);
+    return this.elements.get(id);
+  }
+}
+
+function confirmation() {
+  return new ConfirmationFixture().modal;
 }
 
 function prepared(price = '600') {
@@ -75,17 +102,30 @@ test('hides overflowing USD estimates', () => {
 });
 
 for (const close of ['cancel', 'reset', 'dismiss', 'confirm']) {
-  test(`${close} restores shared USD visibility and resolves the confirmation`, async () => {
+  test(`${close} resolves the dedicated confirmation and permits a fresh render`, async () => {
     const modal = confirmation();
-    modal.amountUsd.style.display = 'inline';
-    const result = modal.confirm('', prepared(null));
+    const transfer = prepared(null);
+    transfer.chat = { totalRequired: '1000000000000000000', note: 'Previous note' };
+    const result = modal.confirm('', transfer);
     transitions.get('transitionend')({ target: modal.modal, propertyName: 'opacity' });
     assert.equal(modal.amountUsd.style.display, 'none');
+    assert.equal(modal.memo.textContent, 'Previous note');
     if (close === 'reset') modal.reset();
-    else modal.settle(close === 'confirm', { close: close !== 'dismiss' });
+    else if (close === 'dismiss') modal.modal.classList.remove('active');
+    else (close === 'confirm' ? modal.confirmButton : modal.cancelButton).click();
     assert.equal(await result, close === 'confirm');
-    assert.equal(modal.amountUsd.style.display, 'inline');
-    assert.equal(modal.feeGroup.hidden, true);
+    assert.equal(modal.pending, null);
+    assert.equal(modal.modal.classList.contains('active'), false);
+
+    const next = modal.confirm('', prepared());
+    transitions.get('transitionend')({ target: modal.modal, propertyName: 'opacity' });
+    assert.equal(modal.amountUsd.style.display, 'block');
+    assert.equal(modal.amountUsd.textContent, usd(6));
+    assert.equal(modal.feeUsd.textContent, usd(0.06));
+    assert.equal(modal.memo.textContent, '');
+    assert.equal(modal.memoGroup.style.display, 'none');
+    modal.reset();
+    assert.equal(await next, false);
   });
 }
 
@@ -174,13 +214,13 @@ test('keeps notes, LIB costs and duplicate warnings alongside independent USD es
   transfer.duplicatePaymentWarning = 'An earlier payment is still pending.';
   modal.render(transfer);
   assert.equal(modal.memoGroup.style.display, 'block');
-  assert.equal(memoElement.textContent, transfer.chat.note);
+  assert.equal(modal.memo.textContent, transfer.chat.note);
   assert.match(modal.signingNotice.textContent, /1 LIB/);
   assert.match(modal.signingNotice.textContent, /An earlier payment is still pending/);
   assert.equal(modal.feeValue.textContent, '0.0001 BNB');
   assert.equal(modal.feeUsd.style.display, 'none');
   modal.render(prepared());
   assert.equal(modal.memoGroup.style.display, 'none');
-  assert.equal(memoElement.textContent, '');
+  assert.equal(modal.memo.textContent, '');
   assert.equal(modal.feeUsd.textContent, usd(0.06));
 });
