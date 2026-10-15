@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { big2str, bigxnum2big } from '../lib.js';
+import { big2str, bigxnum2big, EthNum } from '../lib.js';
 
 const [appSource, markup] = await Promise.all([
   readFile(new URL('../app.js', import.meta.url), 'utf8'),
@@ -49,14 +49,16 @@ class LibModalFixture {
     this.account = { username: 'alice', keys: { address: 'a'.repeat(40) } };
     this.lib = { id: 'liberdus', name: 'Liberdus', symbol: 'LIB', balance: 100n * wei, price: 0.2 };
     this.evm = { id: 'bsc:native', name: 'BNB', symbol: 'BNB', balance: 900n * wei, price: 600 };
-    this.data = { account: {}, wallet: { assets: [this.evm, this.lib], history: [] }, contacts: {}, pending: [] };
+    this.data = { account: {}, wallet: { assets: [this.evm, this.lib], history: [] }, contacts: {}, pending: [], chats: [] };
     this.validations = [];
+    this.transfers = [];
     this.toasts = [];
     this.qrTexts = [];
     this.refreshes = 0;
     this.context = {
       document: this, myData: this.data, myAccount: this.account, isOnline: true,
-      wei, big2str, bigxnum2big, Blob, Event, setTimeout, clearTimeout,
+      parameters: { current: { stabilityFactorStr: '0.2' } },
+      wei, big2str, bigxnum2big, EthNum, Blob, Event, setTimeout, clearTimeout,
       MAX_MEMO_BYTES: 1000, BUTTON_COOLDOWN_MS: 1000,
       withButtonCooldown: (_button, _delay, _finish, listener) => listener,
       normalizeUnsignedFloat: value => value,
@@ -66,7 +68,8 @@ class LibModalFixture {
       normalizeTollToLibWei: toll => toll, getEffectiveTollLibWei: toll => toll,
       isValidEthereumAddress: () => false, normalizeUsername: value => value,
       normalizeAddress: value => value, longAddress: value => value,
-      queryNetwork: async () => ({ account: {} }),
+      queryNetwork: async path => path.startsWith('/address/')
+        ? { address: 'b'.repeat(40) } : { account: {} },
       showToast: (...args) => this.toasts.push(args),
       validateBalance: async (amount, index, warning) => {
         this.validations.push({ amount, index });
@@ -83,6 +86,20 @@ class LibModalFixture {
         return new Uint8Array([1]);
       } },
       chatsScreen: { updateChatList() {} }, PopupSelect: { syncAll() {} },
+      hashBytes: () => 'synthetic-username-hash',
+      createNewContact: (address, username) => {
+        this.data.contacts[address] = { address, username, messages: [] };
+      },
+      ensureContactKeys: async () => {},
+      stringify: JSON.stringify,
+      getCorrectedTimestamp: () => 123456,
+      postAssetTransfer: async (address, amount, payload, keys, index) => {
+        this.transfers.push({ address, amount, payload, keys, index });
+        return { result: { success: true }, txid: 'synthetic-transfer' };
+      },
+      insertSorted: (items, item) => items.unshift(item),
+      chatModal: { address: null, isActive: () => false },
+      historyModal: { open() {} },
       console: { error() {}, warn() {} },
     };
     const sources = [
@@ -125,6 +142,14 @@ class LibModalFixture {
     this.send.usernameAvailable.textContent = 'found';
     this.send.usernameAvailable.style.display = 'inline';
     this.send.foundAddressObject = { address: 'b'.repeat(40) };
+  }
+  async approve(amount = '10', unit = 'LIB') {
+    await this.send.open();
+    this.prepareRecipient();
+    this.send.balanceSymbol.textContent = unit;
+    this.send.amountInput.value = amount;
+    await this.send.handleSendFormSubmit({ preventDefault() {} });
+    assert.equal(this.confirm.isActive(), true);
   }
   encodePayment(payment) { return `liberdus://${Buffer.from(JSON.stringify(payment)).toString('base64')}`; }
   lastPayment() {
@@ -176,6 +201,36 @@ test('Send uses refreshed LIB balances and its actual wallet position for valida
   assert.equal(fixture.send.submitButton.disabled, true);
 });
 
+test('USD validation uses the wallet replacement received during its price refresh', async () => {
+  const fixture = new LibModalFixture();
+  await fixture.send.open();
+  fixture.prepareRecipient();
+  fixture.send.balanceSymbol.textContent = 'USD';
+  fixture.send.amountInput.value = '10';
+  fixture.context.getNetworkParams = async () => {
+    fixture.data.wallet.assets = [{ ...fixture.lib, balance: 4n * wei }, fixture.evm];
+  };
+  await fixture.send.refreshSendButtonDisabledState();
+  assert.deepEqual(fixture.validations.at(-1), { amount: 50n * wei, index: 0 });
+  assert.equal(fixture.send.submitButton.disabled, true);
+});
+
+test('confirmation validates the wallet replacement received during recipient lookup', async () => {
+  const fixture = new LibModalFixture();
+  await fixture.send.open();
+  fixture.prepareRecipient();
+  fixture.send.balanceSymbol.textContent = 'USD';
+  fixture.send.amountInput.value = '10';
+  fixture.context.queryNetwork = async () => {
+    fixture.data.wallet.assets = [{ ...fixture.lib, balance: 80n * wei }, fixture.evm];
+    return { account: {} };
+  };
+  await fixture.send.handleSendFormSubmit({ preventDefault() {} });
+  assert.deepEqual(fixture.validations.at(-1), { amount: 50n * wei, index: 0 });
+  assert.equal(fixture.confirm.isActive(), true);
+  assert.equal(fixture.confirm.confirmAmount.textContent, '50');
+});
+
 test('Send max and LIB/USD balances retain the LIB fee and price', async () => {
   const fixture = new LibModalFixture();
   await fixture.send.open();
@@ -188,6 +243,72 @@ test('Send max and LIB/USD balances retain the LIB fee and price', async () => {
   assert.equal(fixture.send.transactionFee.textContent, '$0.20');
   await fixture.send.fillAmount();
   assert.equal(fixture.send.amountInput.value, '19.8');
+  assert.equal(fixture.send.getAmountWei(), 99n * wei);
+  await fixture.send.handleToggleBalance();
+  assert.equal(fixture.send.amountInput.value, '99');
+  assert.equal(fixture.send.getAmountWei(), 99n * wei);
+});
+
+for (const { amount, unit, price = '0.2', expected } of [
+  { amount: '1.000000000000000001', unit: 'LIB', expected: 1000000000000000001n },
+  { amount: '10000000000000000.000000000000000001', unit: 'LIB', expected: 10000000000000000000000000000000001n },
+  { amount: '0.000000000000000001', unit: 'LIB', expected: 1n },
+  { amount: '0.000000000000000001', unit: 'USD', expected: 5n },
+  { amount: '0.02', unit: 'USD', expected: 100000000000000000n },
+  { amount: '1', unit: 'USD', price: '0.3', expected: 3333333333333333333n },
+]) {
+  test(`${unit} amount ${amount} converts exactly at LIB price ${price}`, () => {
+    const fixture = new LibModalFixture();
+    fixture.send.amountInput.value = amount;
+    fixture.send.balanceSymbol.textContent = unit;
+    fixture.context.parameters.current.stabilityFactorStr = price;
+    assert.equal(fixture.send.getAmountWei(), expected);
+  });
+}
+
+test('Send rejects invalid, zero and excessive-precision amounts before confirmation', async () => {
+  const fixture = new LibModalFixture();
+  await fixture.send.open();
+  fixture.prepareRecipient();
+  for (const amount of ['', '0', '-1', 'bad', 'NaN', 'Infinity', '1e-18', '1.0000000000000000001']) {
+    fixture.send.amountInput.value = amount;
+    assert.equal(fixture.send.getAmountWei(), null, amount);
+    await fixture.send.refreshSendButtonDisabledState();
+    assert.equal(fixture.send.submitButton.disabled, true, amount);
+    await fixture.send.handleSendFormSubmit({ preventDefault() {} });
+    assert.equal(fixture.confirm.isActive(), false, amount);
+  }
+  assert.deepEqual(fixture.transfers, []);
+});
+
+test('USD requires a usable network quote while LIB remains available without one', async () => {
+  const fixture = new LibModalFixture();
+  await fixture.send.open();
+  fixture.prepareRecipient();
+  fixture.send.amountInput.value = '1';
+  for (const price of [undefined, null, '', 'bad', '0', '-0.2', 'Infinity', '0.0000000000000000001']) {
+    fixture.context.parameters.current.stabilityFactorStr = price;
+    fixture.send.balanceSymbol.textContent = 'USD';
+    assert.equal(fixture.send.getAmountWei(), null, String(price));
+    await fixture.send.refreshSendButtonDisabledState();
+    assert.equal(fixture.send.submitButton.disabled, true, String(price));
+    await fixture.send.handleSendFormSubmit({ preventDefault() {} });
+    assert.equal(fixture.confirm.isActive(), false, String(price));
+    fixture.send.balanceSymbol.textContent = 'LIB';
+    assert.equal(fixture.send.getAmountWei(), wei, String(price));
+  }
+});
+
+test('a USD amount below one native wei stays disabled', async () => {
+  const fixture = new LibModalFixture();
+  await fixture.send.open();
+  fixture.prepareRecipient();
+  fixture.context.parameters.current.stabilityFactorStr = '2';
+  fixture.send.balanceSymbol.textContent = 'USD';
+  fixture.send.amountInput.value = '0.000000000000000001';
+  assert.equal(fixture.send.getAmountWei(), null);
+  await fixture.send.refreshSendButtonDisabledState();
+  assert.equal(fixture.send.submitButton.disabled, true);
 });
 
 test('memo toll validation remains expressed in LIB', async () => {
@@ -205,6 +326,33 @@ test('memo toll validation remains expressed in LIB', async () => {
   assert.equal(fixture.send.submitButton.disabled, false);
 });
 
+test('USD validation compares exact native LIB amounts at fee and memo toll boundaries', async () => {
+  const fixture = new LibModalFixture();
+  await fixture.send.open();
+  fixture.prepareRecipient();
+  fixture.send.balanceSymbol.textContent = 'USD';
+  fixture.send.memoInput.value = 'memo';
+  fixture.send.tollInfo = { required: 1, toll: 3n * wei, tollUnit: 'LIB' };
+  fixture.send.amountInput.value = '0.6';
+  await fixture.send.refreshSendButtonDisabledState();
+  assert.equal(fixture.validations.at(-1).amount, 3n * wei);
+  assert.equal(fixture.send.submitButton.disabled, false);
+
+  fixture.send.amountInput.value = '0.599999999999999999';
+  await fixture.send.refreshSendButtonDisabledState();
+  assert.equal(fixture.send.submitButton.disabled, true);
+  assert.equal(fixture.send.balanceWarning.textContent, 'less than toll for memo');
+
+  fixture.send.memoInput.value = '';
+  fixture.send.amountInput.value = '19.8';
+  await fixture.send.refreshSendButtonDisabledState();
+  assert.equal(fixture.validations.at(-1).amount, 99n * wei);
+  assert.equal(fixture.send.submitButton.disabled, false);
+  fixture.send.amountInput.value = '19.800000000000000001';
+  await fixture.send.refreshSendButtonDisabledState();
+  assert.equal(fixture.send.submitButton.disabled, true);
+});
+
 test('confirmation derives the LIB label from wallet data and preserves USD previews', async () => {
   const fixture = new LibModalFixture();
   await fixture.send.open();
@@ -217,6 +365,7 @@ test('confirmation derives the LIB label from wallet data and preserves USD prev
   assert.equal(fixture.confirm.confirmAmountUSD.textContent, '≈ $2.000000 USD');
   assert.equal(fixture.confirm.confirmMemo.textContent, 'memo');
 
+  fixture.confirm.close();
   fixture.lib.name = 'LIB';
   fixture.send.balanceSymbol.textContent = 'USD';
   await fixture.send.handleSendFormSubmit({ preventDefault() {} });
@@ -225,14 +374,129 @@ test('confirmation derives the LIB label from wallet data and preserves USD prev
   assert.equal(fixture.confirm.confirmAmountUSD.textContent, '≈ $10.000000 USD');
 });
 
-test('LIB submission validates the current LIB wallet slot', async () => {
+test('USD Send posts the same native LIB amount that was approved', async () => {
   const fixture = new LibModalFixture();
   await fixture.send.open();
   fixture.prepareRecipient();
-  fixture.send.amountInput.value = '101';
+  fixture.send.balanceSymbol.textContent = 'USD';
+  fixture.send.amountInput.value = '10';
+  await fixture.send.refreshSendButtonDisabledState();
+  assert.equal(fixture.validations.at(-1).amount, 50n * wei);
+  assert.equal(fixture.send.submitButton.disabled, false);
+  await fixture.send.handleSendFormSubmit({ preventDefault() {} });
+  assert.equal(fixture.confirm.confirmAmount.textContent, '50');
   await fixture.confirm.handleSendAsset({ preventDefault() {} });
-  assert.deepEqual(fixture.validations.at(-1), { amount: 101n * wei, index: 1 });
-  assert.match(fixture.toasts.at(-1)[0], /Insufficient balance: 101.00 \+ 1.00 \(fee\) > 100.00 LIB/);
+  assert.equal(fixture.transfers.length, 1);
+  assert.equal(fixture.validations.at(-1).amount, 50n * wei);
+  assert.equal(fixture.transfers[0].amount, 50n * wei);
+  assert.equal(fixture.data.wallet.history[0].amount, 50n * wei);
+  assert.equal(fixture.data.contacts['b'.repeat(40)].messages[0].amount, 50n * wei);
+  assert.equal(fixture.confirm.isActive(), false);
+  await fixture.confirm.handleSendAsset({ preventDefault() {} });
+  assert.equal(fixture.transfers.length, 1);
+});
+
+test('confirmation submits its approved amount when the hidden input and quote change', async () => {
+  const fixture = new LibModalFixture();
+  await fixture.send.open();
+  fixture.prepareRecipient();
+  fixture.send.balanceSymbol.textContent = 'USD';
+  fixture.send.amountInput.value = '10';
+  fixture.send.memoInput.value = 'approved memo';
+  await fixture.send.handleSendFormSubmit({ preventDefault() {} });
+  assert.equal(fixture.confirm.confirmAmount.textContent, '50');
+  fixture.context.getStabilityFactor = () => 0.5;
+  fixture.context.parameters.current.stabilityFactorStr = '0.5';
+  fixture.send.amountInput.value = '7';
+  fixture.send.usernameInput.value = 'carol';
+  fixture.send.memoInput.value = 'changed memo';
+  fixture.confirm.confirmAmount.textContent = '999';
+  await fixture.confirm.handleSendAsset({ preventDefault() {} });
+  assert.equal(fixture.transfers.length, 1);
+  assert.equal(fixture.transfers[0].amount, 50n * wei);
+  assert.equal(fixture.data.wallet.history[0].memo, 'approved memo');
+  assert.equal(fixture.data.contacts['b'.repeat(40)].username, 'bob');
+});
+
+for (const action of ['cancel', 'form close', 'form reset', 'new session', 'account change']) {
+  test(`${action} invalidates a previously approved LIB payment`, async () => {
+    const fixture = new LibModalFixture();
+    await fixture.approve();
+    if (action === 'cancel') fixture.confirm.close();
+    if (action === 'form close') await fixture.send.close();
+    if (action === 'form reset') fixture.send.reset();
+    if (action === 'new session') fixture.send.session = { account: fixture.account };
+    if (action === 'account change') fixture.context.myAccount = { username: 'other', keys: {} };
+    await fixture.confirm.handleSendAsset({ preventDefault() {} });
+    assert.deepEqual(fixture.transfers, []);
+    assert.deepEqual(fixture.data.wallet.history, []);
+  });
+}
+
+test('reopening USD Send clears its old confirmation and preserves its amount unit', async () => {
+  const fixture = new LibModalFixture();
+  await fixture.approve('10', 'USD');
+  await fixture.send.reopen();
+  assert.equal(fixture.confirm.isActive(), false);
+  assert.equal(fixture.send.balanceSymbol.textContent, 'USD');
+  assert.equal(fixture.send.amountInput.value, '10');
+  await fixture.confirm.handleSendAsset({ preventDefault() {} });
+  assert.deepEqual(fixture.transfers, []);
+  fixture.prepareRecipient();
+  await fixture.send.handleSendFormSubmit({ preventDefault() {} });
+  assert.equal(fixture.confirm.confirmAmount.textContent, '50');
+  await fixture.confirm.handleSendAsset({ preventDefault() {} });
+  assert.equal(fixture.transfers.length, 1);
+  assert.equal(fixture.transfers[0].amount, 50n * wei);
+});
+
+test('a failed confirmation opening cannot leave a payment ready to submit', async () => {
+  const fixture = new LibModalFixture();
+  await fixture.send.open();
+  fixture.prepareRecipient();
+  fixture.send.amountInput.value = '10';
+  fixture.context.openModal = modal => {
+    assert.equal(modal, fixture.confirm.modal);
+    return false;
+  };
+  await fixture.send.handleSendFormSubmit({ preventDefault() {} });
+  assert.equal(fixture.confirm.isActive(), false);
+  await fixture.confirm.handleSendAsset({ preventDefault() {} });
+  assert.deepEqual(fixture.transfers, []);
+});
+
+for (const boundary of ['balance validation', 'recipient lookup', 'contact keys']) {
+  test(`closing confirmation during ${boundary} prevents a broadcast`, async () => {
+    const fixture = new LibModalFixture();
+    await fixture.approve();
+    let release;
+    let reached;
+    const ready = new Promise(resolve => { reached = resolve; });
+    const gate = async () => {
+      reached();
+      await new Promise(resolve => { release = resolve; });
+    };
+    if (boundary === 'balance validation') fixture.context.validateBalance = async () => { await gate(); return true; };
+    if (boundary === 'recipient lookup') fixture.context.queryNetwork = async () => { await gate(); return { address: 'b'.repeat(40) }; };
+    if (boundary === 'contact keys') fixture.context.ensureContactKeys = gate;
+    const sending = fixture.confirm.handleSendAsset({ preventDefault() {} });
+    await ready;
+    fixture.confirm.close();
+    release();
+    await sending;
+    assert.deepEqual(fixture.transfers, []);
+    assert.deepEqual(fixture.data.wallet.history, []);
+  });
+}
+
+test('LIB submission validates the current LIB wallet slot', async () => {
+  const fixture = new LibModalFixture();
+  await fixture.approve('99');
+  fixture.data.wallet.assets = [{ ...fixture.lib, balance: 98n * wei }, fixture.evm];
+  await fixture.confirm.handleSendAsset({ preventDefault() {} });
+  assert.deepEqual(fixture.validations.at(-1), { amount: 99n * wei, index: 0 });
+  assert.match(fixture.toasts.at(-1)[0], /Insufficient balance: 99.00 \+ 1.00 \(fee\) > 98.00 LIB/);
+  assert.deepEqual(fixture.transfers, []);
 });
 
 test('missing LIB never falls back to EVM and keeps Send disabled', async () => {
@@ -261,6 +525,7 @@ for (const unit of ['LIB', 'USD']) {
     assert.equal(fixture.send.amountInput.value, '10');
     assert.equal(fixture.send.memoInput.value, 'memo');
     assert.equal(fixture.send.balanceSymbol.textContent, unit);
+    assert.equal(fixture.send.getAmountWei(), (unit === 'USD' ? 50n : 10n) * wei);
     assert.deepEqual(fixture.send.usernameInput.events, ['input']);
     assert.deepEqual(fixture.send.amountInput.events, ['input']);
   });
