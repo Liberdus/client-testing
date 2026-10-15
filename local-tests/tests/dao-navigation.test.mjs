@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
+import { DAO_PROJECT_FILTERS, DAO_STATES } from '../dao.js';
 
 const app = await readFile(new URL('../app.js', import.meta.url), 'utf8');
 const lib = await readFile(new URL('../lib.js', import.meta.url), 'utf8');
@@ -21,16 +22,20 @@ function setup() {
   const menu = modalElement();
   const calls = [];
   const context = {
+    AbortController, assert, myData: {}, network: { netid: 'fixture' },
+    DAO_FILTER_OPTIONS: [{ key: 'all' }, { key: 'claimable' }, ...DAO_STATES, ...DAO_PROJECT_FILTERS],
+    DAO_PROJECT_FILTER_KEYS: new Set(DAO_PROJECT_FILTERS.map(({ key }) => key)),
     setTimeout: () => 1, clearTimeout() {},
     DAO_PROPOSAL_PAGE_SIZE: 10, createEmptyDaoNotificationSummary: () => ({}),
     getCorrectedTimestamp: () => 1000,
+    showToast: () => 1, hideToast() {},
     menuModal: {
       isActive: () => menu.classList.contains('active'),
       close() { calls.push('close menu'); menu.classList.remove('active'); },
     },
     footer: { closeNewChatButton: () => calls.push('close new chat') },
     enterFullscreen: () => calls.push('fullscreen'),
-    daoRepo: { refresh: async () => calls.push('refresh') },
+    daoRepo: { reset() {}, refresh: async () => calls.push('refresh') },
   };
   const { DaoModal, openModal, finishModalTransition } = vm.runInNewContext(
     guard.replaceAll('export function', 'function') + daoClass
