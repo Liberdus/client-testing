@@ -6,19 +6,15 @@ import { getDaoProposalInfoStateLabel } from '../dao.js';
 
 const appSource = await readFile(new URL('../app.js', import.meta.url), 'utf8');
 
-function createProjectProposal(projectStatus, proposalStatus = 'applied') {
-  return {
-    proposalType: 'project',
-    status: proposalStatus,
-    project: { status: projectStatus },
-  };
-}
-
-test('shows the runtime project state after proposal acceptance', () => {
-  assert.equal(getDaoProposalInfoStateLabel(createProjectProposal('started')), 'Started');
-  assert.equal(getDaoProposalInfoStateLabel(createProjectProposal('completed')), 'Completed');
-  assert.equal(getDaoProposalInfoStateLabel(createProjectProposal('terminated')), 'Terminated');
-  assert.equal(getDaoProposalInfoStateLabel(createProjectProposal('pending', 'accepted')), 'Accepted');
+test('shows authoritative top-level lifecycle state instead of nested legacy status', () => {
+  for (const [status, label] of [
+    ['executing', 'Executing'], ['completed', 'Completed'], ['terminated', 'Terminated'],
+    ['accepted', 'Accepted'], ['applied', 'Applied'],
+  ]) {
+    const proposal = { proposalType: 'project', status, project: { status: 'started' } };
+    assert.equal(getDaoProposalInfoStateLabel(proposal), label);
+    assert.equal(getDaoProposalInfoStateLabel({ ...proposal, status: undefined, state: status }), label);
+  }
   assert.equal(getDaoProposalInfoStateLabel({ proposalType: 'project', status: 'applied' }), 'Applied');
   assert.match(appSource, /this\.setTitle\(getDaoProposalInfoStateLabel\(proposal\)\)/);
 });
