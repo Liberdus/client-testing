@@ -44,7 +44,13 @@ The server binds to loopback on port `8765` and serves the selected client toget
 WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs evm-payment-explorer.browser.test.mjs
 ```
 
-`evm-send-fee-usd.browser.test.mjs` also needs the `--serve` command running in another terminal against the same checkout. The other two browser scripts start their own local servers. Browser scripts can write screenshots to `/tmp` as their original sources specify.
+`evm-send-fee-usd.browser.test.mjs` also needs the `--serve` command running in another terminal against the same checkout. The other browser scripts start their own local servers. Browser scripts can write screenshots to `/tmp` as their original sources specify.
+
+`lib-send-receive.browser.test.mjs` starts the actual client with synthetic wallet and recipient data, checks native Send/Receive and the separate EVM forms at desktop and mobile sizes, and saves screenshots under `/tmp/lib-send-receive-browser`. It needs no live account: network responses are synthetic, external requests are blocked, and broadcasts are forbidden. Run it with:
+
+```bash
+WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs lib-send-receive.browser.test.mjs
+```
 
 When browser scripts need Playwright, install the repository's pinned dependencies:
 
