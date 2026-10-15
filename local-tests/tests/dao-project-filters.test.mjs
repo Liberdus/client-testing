@@ -1,15 +1,18 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import vm from 'node:vm';
+import { escapeHtml } from '../lib.js';
 
 import {
   DAO_PROJECT_FILTERS,
   createDaoBackendFetcher,
   daoRepo,
   getDaoProposalListFilterKey,
+  getEffectiveDaoState,
   setDaoBackendFetcher,
 } from '../dao.js';
-import { createDaoProjectProposalInfoFixtures } from '../dev-fixtures/dao-project-proposal-info-fixtures.js';
+import { DaoProjectFixtures } from '../fixtures/dao-projects.mjs';
 
 const NOW = 2_000_000_000_000;
 const [markup, styles, appSource] = await Promise.all([
@@ -27,51 +30,44 @@ test('defines the three project lifecycle filters without an archive filter', ()
   assert.equal(DAO_PROJECT_FILTERS.some(({ key }) => key === 'archived'), false);
 });
 
-test('renders a labeled project filter row without an archive chip', () => {
-  const projectRow = markup.slice(
-    markup.indexOf('class="dao-filter-row-label"'),
-    markup.indexOf('</div>', markup.indexOf('class="dao-filter-row-label"')),
+test('renders a Projects context containing every project lifecycle filter', () => {
+  const projectPanel = markup.slice(
+    markup.indexOf('data-dao-filters="projects"'),
+    markup.indexOf('class="dao-filter-placeholder'),
   );
-  const filterKeys = [...projectRow.matchAll(/data-filter-key="([^"]+)"/g)]
+  const filterKeys = [...projectPanel.matchAll(/data-filter-key="([^"]+)"/g)]
     .map(([, key]) => key);
 
-  assert.match(projectRow, />Projects:<\/span>/);
+  assert.match(markup, /data-dao-context="projects"[^>]*>Projects<\/button>/);
+  assert.match(projectPanel, /inert aria-hidden="true"/);
   assert.deepEqual(filterKeys, ['executing', 'terminated', 'completed']);
   assert.doesNotMatch(markup, /data-filter-key="archived"/);
-  assert.match(styles, /#daoModal \.dao-filter-bar \{[^}]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
-  assert.match(styles, /#daoModal \.dao-project-filter-row \{[^}]*grid-template-columns: max-content repeat\(3, minmax\(0, 1fr\)\)/);
-  assert.match(styles, /@media \(max-width: 640px\) \{[\s\S]*#daoModal \.dao-project-filter-row \{[^}]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
+  assert.match(styles, /#daoModal \.dao-filter-row--projects \{[^}]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
 });
 
-test('maps nested project statuses into project filters', () => {
-  const projectProposal = (status, proposalState = 'applied') => ({
-    proposalType: 'project',
-    status: proposalState,
-    project: { status },
-  });
-
-  assert.equal(getDaoProposalListFilterKey(projectProposal('started')), 'executing');
-  assert.equal(getDaoProposalListFilterKey(projectProposal('terminated')), 'terminated');
-  assert.equal(getDaoProposalListFilterKey(projectProposal('completed')), 'completed');
-  assert.equal(getDaoProposalListFilterKey(projectProposal('pending', 'accepted')), 'accepted');
-  assert.equal(getDaoProposalListFilterKey(projectProposal('pending')), '');
+test('uses authoritative proposal states without deriving them from nested project fields', () => {
+  for (const status of ['executing', 'terminated', 'completed', 'accepted', 'applied']) {
+    const proposal = { proposalType: 'project', status, project: { status: 'started' } };
+    assert.equal(getDaoProposalListFilterKey(proposal), status);
+    assert.equal(getDaoProposalListFilterKey({ ...proposal, status: undefined, state: status }), status);
+  }
   assert.equal(getDaoProposalListFilterKey({ proposalType: 'governance', status: 'applied' }), 'applied');
 });
 
 test('includes the project status in every fixture title', async () => {
-  const fixtures = createDaoProjectProposalInfoFixtures({ now: NOW });
+  const fixtures = new DaoProjectFixtures({ now: NOW });
   const fetcher = createDaoBackendFetcher(fixtures.queryDaoApi);
   const metadata = await fetcher.fetchMeta();
   const proposals = Object.values(await fetcher.fetchProposals(metadata.proposals));
 
   assert.equal(proposals.length, 12);
   assert.ok(proposals.every((proposal) => (
-    proposal.title.includes(`[Project status: ${proposal.project?.status || 'unavailable'}]`)
+    proposal.title.includes(`[Project status: ${proposal.status}]`)
   )));
 });
 
 test('classifies project detail fixtures after proposal finalization', async (t) => {
-  const fixtures = createDaoProjectProposalInfoFixtures({ now: NOW });
+  const fixtures = new DaoProjectFixtures({ now: NOW });
   const fetcher = createDaoBackendFetcher(fixtures.queryDaoApi);
   setDaoBackendFetcher(fetcher);
   daoRepo.reset();
@@ -83,7 +79,7 @@ test('classifies project detail fixtures after proposal finalization', async (t)
   await daoRepo.refresh({ force: true });
   const metadata = daoRepo.getProposalMetaForUi();
   await daoRepo.loadProposalEntries(
-    metadata.filter(({ status }) => status === 'accepted' || status === 'applied'),
+    metadata.filter(({ status }) => ['accepted', 'applied', ...DAO_PROJECT_FILTERS.map(filter => filter.key)].includes(status)),
   );
   const proposals = daoRepo.getProposalsForUi();
   const counts = proposals.reduce((result, proposal) => {
@@ -99,7 +95,7 @@ test('classifies project detail fixtures after proposal finalization', async (t)
   assert.equal(counts.terminated, 1);
   assert.equal(counts.completed, 1);
   assert.equal(counts.accepted, 2);
-  assert.equal(counts.applied, undefined);
+  assert.equal(counts.applied, 1); // The intentionally missing-project fixture retains its metadata state.
   assert.match(titlesByFilter.executing, /Executing/);
   assert.match(titlesByFilter.terminated, /Terminated/);
   assert.match(titlesByFilter.completed, /Completed/);
@@ -113,7 +109,7 @@ test('merges project fixtures with queried proposals and delegates real proposal
     emergencyFlag: false,
     timestamp: NOW - 1,
   };
-  const fixtures = createDaoProjectProposalInfoFixtures({
+  const fixtures = new DaoProjectFixtures({
     now: NOW,
     queryUpstream: async (path) => {
       calls.push(path);
@@ -143,16 +139,28 @@ test('merges project fixtures with queried proposals and delegates real proposal
   assert.equal(metadata.proposals.length, 13);
   assert.equal(proposals.length, 13);
   assert.ok(proposals.some((proposal) => proposal.title === 'Queried proposal'));
-  assert.ok(proposals.some((proposal) => proposal.title.includes('[Project status: started]')));
+  assert.ok(proposals.some((proposal) => proposal.title.includes('[Project status: executing]')));
   assert.deepEqual(calls, ['/dao/proposals/meta', '/dao/proposals/42']);
 });
 
-test('uses finalized project filter labels for proposal row status tokens', () => {
-  const previewStart = appSource.indexOf('  renderProposalRowPreview(proposal) {');
-  const previewEnd = appSource.indexOf('  async openProposal(', previewStart);
-  const previewSource = appSource.slice(previewStart, previewEnd);
-
-  assert.match(previewSource, /DAO_PROJECT_FILTERS\.find/);
-  assert.match(previewSource, /value: projectFilter\.label/);
-  assert.match(previewSource, /else if \(result && state !== 'accepted'\)/);
+test('renders finalized project lifecycle labels instead of ballot-result labels', async () => {
+  const start = appSource.indexOf('  renderProposalRowPreview(proposal) {');
+  const end = appSource.indexOf('  async openProposal(', start);
+  assert.ok(start >= 0 && end > start);
+  const renderPreview = vm.runInNewContext(
+    '({' + appSource.slice(start, end) + '}).renderProposalRowPreview',
+    {
+      DAO_PROJECT_FILTERS, getEffectiveDaoState, getDaoProposalListFilterKey, escapeHtml,
+      escapeDaoFormAttribute: escapeHtml, getDaoProjectStatusTone: () => '',
+      getDaoProposalResultSummary: () => ({ headline: 'Winning ballot option', tone: 'accepted' }),
+      getDaoProposalRewardSummary: () => ({}), getDaoProposalLifecycleActions: () => [],
+    },
+  );
+  const fixtures = new DaoProjectFixtures({ now: NOW });
+  for (const [number, label] of [[906, 'Executing'], [907, 'Completed'], [908, 'Terminated']]) {
+    const { proposal } = await fixtures.queryDaoApi(`/dao/proposals/${number}`);
+    const html = renderPreview(proposal);
+    assert.ok(html.includes(label));
+    assert.equal(html.includes('Winning ballot option'), false);
+  }
 });
