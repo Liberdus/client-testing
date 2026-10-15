@@ -3,21 +3,6 @@ import test from 'node:test';
 
 import { createDaoBackendFetcher } from '../dao.js';
 
-function createMemoryStorage() {
-  const map = new Map();
-  return {
-    getItem(key) {
-      return map.has(key) ? map.get(key) : null;
-    },
-    setItem(key, value) {
-      map.set(key, String(value));
-    },
-    removeItem(key) {
-      map.delete(key);
-    },
-  };
-}
-
 test('loads indexed proposals from meta and preserves their index metadata', async (t) => {
   const calls = [];
   const fetcher = createDaoBackendFetcher(async (path) => {
@@ -51,20 +36,22 @@ test('loads indexed proposals from meta and preserves their index metadata', asy
     }
 
     return null;
-  }, { storage: createMemoryStorage(), getNetId: () => 'testnet' });
+  });
 
   t.mock.method(console, 'warn', () => {});
-  const store = await fetcher();
+  const meta = await fetcher.fetchMeta();
+  assert.deepEqual(calls, ['/dao/proposals/meta']);
+  const proposals = await fetcher.fetchProposals(meta.proposals);
 
   assert.deepEqual(calls, [
     '/dao/proposals/meta',
     '/dao/proposals/42',
     '/dao/proposals/41',
   ]);
-  assert.equal(store.meta.count, 42);
-  assert.deepEqual(Object.keys(store.proposals), ['42_proposal-42']);
+  assert.equal(meta.count, 42);
+  assert.deepEqual(Object.keys(proposals), ['42_proposal-42']);
 
-  const proposal = store.proposals['42_proposal-42'];
+  const proposal = proposals['42_proposal-42'];
   assert.equal(proposal.status, 'review');
   assert.equal(proposal.state_changed, 4200);
   assert.equal(proposal.emergency, false);
@@ -75,13 +62,15 @@ test('does not request proposal details for an empty metadata index', async () =
   const fetcher = createDaoBackendFetcher(async (path) => {
     calls.push(path);
     return { meta: { count: 0, proposals: [] } };
-  }, { storage: createMemoryStorage(), getNetId: () => 'testnet' });
+  });
 
-  const store = await fetcher();
+  const meta = await fetcher.fetchMeta();
+  const proposals = await fetcher.fetchProposals(meta.proposals);
 
   assert.deepEqual(calls, ['/dao/proposals/meta']);
-  assert.equal(store.meta.count, 0);
-  assert.deepEqual(store.proposals, {});
+  assert.equal(meta.count, 0);
+  assert.deepEqual(meta.proposals, []);
+  assert.deepEqual(proposals, {});
 });
 
 test('does not enumerate 1..N when the metadata index is incomplete', async () => {
@@ -92,11 +81,13 @@ test('does not enumerate 1..N when the metadata index is incomplete', async () =
       return { meta: { count: 5, proposals: [] } };
     }
     throw new Error(`Unexpected query ${path}`);
-  }, { storage: createMemoryStorage(), getNetId: () => 'testnet' });
+  });
 
-  const store = await fetcher();
+  const meta = await fetcher.fetchMeta();
+  const proposals = await fetcher.fetchProposals(meta.proposals);
 
   assert.deepEqual(calls, ['/dao/proposals/meta']);
-  assert.equal(store.meta.count, 5);
-  assert.deepEqual(store.proposals, {});
+  assert.equal(meta.count, 5);
+  assert.deepEqual(meta.proposals, []);
+  assert.deepEqual(proposals, {});
 });
