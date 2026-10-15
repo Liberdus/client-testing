@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import vm from 'node:vm';
+import { longAddress } from '../lib.js';
 
 import {
   DAO_PROJECT_DURATION_MAX_DAYS,
+  DAO_PROJECT_TYPE,
+  DAO_PROPOSAL_DAY_MS,
+  DAO_PROPOSAL_TITLE_MAX_LENGTH,
+  buildDaoProjectProposalCreateDraft,
   DAO_PROJECT_MAX_MILESTONES,
   DAO_PROJECT_MILESTONE_TEXT_MAX_LENGTH,
   DAO_PROJECT_MILESTONE_TITLE_MAX_LENGTH,
@@ -15,9 +21,8 @@ import {
   normalizeDaoProjectDraft,
 } from '../dao.js';
 
-const [appSource, daoSource, markup, styles] = await Promise.all([
+const [appSource, markup, styles] = await Promise.all([
   readFile(new URL('../app.js', import.meta.url), 'utf8'),
-  readFile(new URL('../dao.js', import.meta.url), 'utf8'),
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
   readFile(new URL('../styles.css', import.meta.url), 'utf8'),
 ]);
@@ -57,7 +62,8 @@ test('normalizes a Project draft without UI-only milestone ids', () => {
 
   assert.equal(normalized.address, `${'a'.repeat(40)}${'0'.repeat(24)}`);
   assert.equal(normalized.milestones.length, 1);
-  assert.equal(normalized.milestones[0].durationDays, 30);
+  assert.equal(normalized.milestones[0].duration, 30 * DAO_PROPOSAL_DAY_MS);
+  assert.equal('durationDays' in normalized.milestones[0], false);
   assert.equal(normalized.milestones[0].costUsdStr, '10000');
   assert.equal('uiId' in normalized.milestones[0], false);
 });
@@ -75,7 +81,7 @@ test('validates Project recipient and milestone bounds', () => {
     () => normalizeDaoProjectDraft(createProjectDraft({
       milestones: Array.from({ length: DAO_PROJECT_MAX_MILESTONES + 1 }, () => createMilestone()),
     })),
-    /at most 10 milestones/,
+    new RegExp(`at most ${DAO_PROJECT_MAX_MILESTONES} milestones`),
   );
 });
 
@@ -98,7 +104,7 @@ test('validates required Project milestone text and configured limits', () => {
     () => normalizeDaoProjectDraft(createProjectDraft({
       milestones: [createMilestone({ deliverable: 'x'.repeat(DAO_PROJECT_MILESTONE_TEXT_MAX_LENGTH + 1) })],
     })),
-    /Milestone 1 deliverable must be 1000 characters or less/,
+    new RegExp(`Milestone 1 deliverable must be ${DAO_PROJECT_MILESTONE_TEXT_MAX_LENGTH} characters or less`),
   );
 });
 
@@ -200,25 +206,45 @@ test('includes the Project editor and accessible milestone controls', () => {
   assert.match(styles, /@media \(max-width: 520px\)[\s\S]*\.dao-project-milestone-fields/);
 });
 
-test('branches Project away from config loading and parameter draft creation', () => {
+test('routes Project editing and submission without parameter config or validation', async () => {
   const classStart = appSource.indexOf('class AddProposalModal');
   const classEnd = appSource.indexOf('const addProposalModal', classStart);
+  assert.ok(classStart >= 0 && classEnd > classStart);
   const classSource = appSource.slice(classStart, classEnd);
-  const typeHandlerStart = classSource.indexOf('\n  handleProposalTypeChange() {');
-  const typeHandlerEnd = classSource.indexOf('\n  resetConfigCache()', typeHandlerStart);
-  const typeHandler = classSource.slice(typeHandlerStart, typeHandlerEnd);
-  const createHandlerStart = classSource.indexOf('async handleCreate()');
-  const createHandler = classSource.slice(createHandlerStart);
-
-  assert.match(typeHandler, /if \(this\.isProjectProposal\(\)\) \{[\s\S]*return;[\s\S]*\}/);
-  assert.ok(typeHandler.indexOf('return;') < typeHandler.indexOf('refreshSelectedConfigOptions()'));
   assert.doesNotMatch(classSource, /this\.submitButton\.disabled = this\.isProjectProposal\(\)/);
   assert.match(classSource, /this\.projectDraft = \{[\s\S]*milestones: \[this\.createProjectMilestone\(\)\]/);
-  assert.match(classSource, /data-dao-milestone-move="-1"/);
-  assert.match(classSource, /data-dao-remove-milestone/);
-  assert.match(createHandler, /if \(proposalType === DAO_PROJECT_TYPE\) \{[\s\S]*buildDaoProjectProposalPreviewDraft[\s\S]*confirmProposalModal\.open\(draft\)[\s\S]*return;/);
-  assert.ok(createHandler.indexOf('buildDaoProjectProposalPreviewDraft') < createHandler.indexOf('getValidatedOptions'));
-  assert.match(daoSource, /if \(!isDaoParameterProposalTypeKey\(safeProposalType\)\)/);
+  const drafts = [];
+  const AddProposalModal = vm.runInNewContext(
+    classSource + '\nAddProposalModal',
+    {
+      DAO_PROJECT_TYPE, DAO_PROPOSAL_TITLE_MAX_LENGTH, isDaoParameterProposalTypeKey,
+      buildDaoProjectProposalCreateDraft, buildDaoProposalCreateDraft, longAddress,
+      myAccount: { keys: { address: 'b'.repeat(40) } },
+      confirmProposalModal: { open: draft => drafts.push(draft) },
+    },
+  );
+  const modal = new AddProposalModal();
+  let renderedProjects = 0;
+  Object.assign(modal, {
+    titleInput: { value: 'Fund a release' }, descriptionInput: { value: 'Ship a public release.' },
+    typeSelect: { value: 'project' }, emergencySelect: { value: 'false' },
+    proposalFeeUsdStr: '5', gracePeriodMs: 0, maxGracePeriodMs: 1000,
+    projectDraft: createProjectDraft(), configRequestId: 0,
+    clearValidationErrors() {}, renderProposalTypeEditor() {},
+    renderProjectEditor() { renderedProjects++; }, getReviewStartTimeMs: () => 0,
+    refreshSelectedConfigOptions: () => assert.fail('Project must not load parameter config'),
+    getValidatedOptions: () => assert.fail('Project must not validate parameter options'),
+    showValidationError: error => assert.fail(error.message),
+  });
+  modal.handleProposalTypeChange();
+  assert.equal(renderedProjects, 1);
+  assert.equal(modal.configRequestId, 1);
+  await modal.handleCreate();
+  assert.equal(drafts.length, 1);
+  assert.equal(drafts[0].transaction.proposalType, 'project');
+  assert.deepEqual(drafts[0].transaction.project, normalizeDaoProjectDraft(createProjectDraft()));
+  assert.equal(drafts[0].transaction.from, longAddress('b'.repeat(40)));
+  assert.deepEqual(drafts[0].transaction.options, ['no', 'Fund project']);
 });
 
 test('uses accessible inline milestone action icons beside the heading', () => {
