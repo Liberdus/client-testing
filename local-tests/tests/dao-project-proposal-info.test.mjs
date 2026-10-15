@@ -1,106 +1,115 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import vm from 'node:vm';
 
-import {
-  createDaoBackendFetcher,
-  getDaoProjectPresentation,
-} from '../dao.js';
-import { createDaoProjectProposalInfoFixtures } from '../dev-fixtures/dao-project-proposal-info-fixtures.js';
+import * as dao from '../dao.js';
+import { escapeHtml, EthNum } from '../lib.js';
+import { DaoProjectFixtures } from '../fixtures/dao-projects.mjs';
 
 const NOW = 2_000_000_000_000;
-const fixtures = createDaoProjectProposalInfoFixtures({ now: NOW });
-const [appSource, styles, fixturePatch] = await Promise.all([
+const fixtures = new DaoProjectFixtures({ now: NOW });
+const [appSource, styles] = await Promise.all([
   readFile(new URL('../app.js', import.meta.url), 'utf8'),
   readFile(new URL('../styles.css', import.meta.url), 'utf8'),
-  readFile(new URL('../dev-patches/dao-project-proposal-info-fixtures.patch', import.meta.url), 'utf8'),
 ]);
 
-async function getFixtureProposals() {
-  const { meta } = await fixtures.queryDaoApi('/dao/proposals/meta');
-  return Promise.all(meta.proposals.map(async (entry) => {
-    const { proposal } = await fixtures.queryDaoApi(`/dao/proposals/${entry.proposal}`);
-    return { entry, proposal };
-  }));
+class ProjectInfoHarness {
+  static async proposals() {
+    const { meta } = await fixtures.queryDaoApi('/dao/proposals/meta');
+    return Promise.all(meta.proposals.map(async (entry) => {
+      const { proposal } = await fixtures.queryDaoApi(`/dao/proposals/${entry.proposal}`);
+      return { entry, proposal };
+    }));
+  }
+
+  static functionSource(name) {
+    const start = appSource.indexOf(`function ${name}(`);
+    assert.notEqual(start, -1, `Missing production helper: ${name}`);
+    const next = /\n(?:function |class |const )/.exec(appSource.slice(start + 1));
+    assert.ok(next, `Missing end of production helper: ${name}`);
+    return appSource.slice(start, start + 1 + next.index);
+  }
+
+  static renderer() {
+    const start = appSource.indexOf('function formatDaoDurationSummary(');
+    const end = appSource.indexOf('class ConfirmProposalModal', start);
+    assert.ok(start >= 0 && end > start);
+    const helpers = [
+      'formatDaoProposalTitle', 'formatDaoTimestamp', 'formatDaoDetailTimestamp',
+      'formatDaoShortNumber', 'formatDaoLibWei', 'formatDaoDetailValue',
+      'isDaoProjectLifecycleAction', 'shouldRenderDaoLifecycleAction',
+    ];
+    return vm.runInNewContext([
+      appSource.slice(start, end),
+      ...helpers.map(name => this.functionSource(name)),
+      'renderDaoProjectProposalInfo',
+    ].join('\n'), { ...dao, escapeHtml, EthNum, stringify: JSON.stringify });
+  }
 }
 
-test('provides a read-only Project fixture for every proposal state', async () => {
-  const proposals = await getFixtureProposals();
-  const states = new Set(proposals.map(({ entry }) => entry.status));
+const renderProject = ProjectInfoHarness.renderer();
 
-  assert.deepEqual(states, new Set([
-    'review',
-    'voting',
-    'accepted',
-    'withheld',
-    'rejected',
-    'applied',
-    'canceled',
+test('provides read-only Project fixtures across proposal and project lifecycle states', async () => {
+  const proposals = await ProjectInfoHarness.proposals();
+  assert.deepEqual(new Set(proposals.map(({ entry }) => entry.status)), new Set([
+    'review', 'voting', 'accepted', 'withheld', 'rejected', 'executing',
+    'completed', 'terminated', 'canceled', 'applied',
   ]));
   assert.ok(proposals.every(({ proposal }) => proposal.proposalType === 'project'));
   assert.ok(proposals.every(({ proposal }) => proposal.title.startsWith('[Fixture')));
-  assert.deepEqual(fixtures.getClaimableProposalNumbers(NOW), [910]);
+  const claimable = proposals.filter(({ proposal }) => (
+    dao.getDaoRewardClaimStatus(proposal, fixtures.address, NOW) === 'Claimable'
+  ));
+  assert.deepEqual(claimable.map(({ proposal }) => proposal.number), [910]);
 });
 
 test('normalizes a prefixed current-account address in claimable fixtures', async () => {
-  const prefixedAddress = `0x${'a'.repeat(40)}`;
-  const addressFixtures = createDaoProjectProposalInfoFixtures({
-    now: NOW,
-    getCurrentAddress: () => prefixedAddress,
-  });
+  const addressFixtures = new DaoProjectFixtures({ now: NOW, address: `0x${'a'.repeat(40)}` });
   const { proposal } = await addressFixtures.queryDaoApi('/dao/proposals/910');
-
   assert.equal(proposal.voterList[0].address, 'a'.repeat(40));
+  assert.equal(dao.getDaoRewardClaimStatus(proposal, `0x${'a'.repeat(40)}`, NOW), 'Claimable');
 });
 
 test('loads Project fixtures through the production DAO backend adapter', async () => {
-  const fetcher = createDaoBackendFetcher(fixtures.queryDaoApi);
+  const fetcher = dao.createDaoBackendFetcher(fixtures.queryDaoApi);
   const metadata = await fetcher.fetchMeta();
   const proposals = Object.values(await fetcher.fetchProposals(metadata.proposals));
-  const startedFixture = proposals.find((proposal) => proposal.title.includes('Project started'));
-  const maximumFixture = proposals.find((proposal) => proposal.title.includes('pending activation'));
-  const presentations = proposals.map(getDaoProjectPresentation);
-
+  const executing = proposals.find(proposal => proposal.status === 'executing');
+  const maximum = proposals.find(proposal => proposal.title.includes('pending activation'));
   assert.equal(metadata.count, 12);
   assert.equal(proposals.length, metadata.proposals.length);
-  assert.equal(presentations.filter((project) => project.kind === 'available').length, 11);
-  assert.equal(startedFixture.state, 'applied');
-  assert.equal(startedFixture.project.status, 'started');
-  assert.equal(getDaoProjectPresentation(startedFixture).completeness, 'complete');
-  assert.equal(getDaoProjectPresentation(maximumFixture).milestones.length, 10);
+  assert.equal(proposals.map(dao.getDaoProjectPresentation).filter(project => project.kind === 'available').length, 11);
+  assert.equal(executing.state, 'executing');
+  assert.equal(dao.getDaoProjectPresentation(executing).completeness, 'complete');
+  assert.equal(dao.getDaoProjectPresentation(maximum).milestones.length, dao.DAO_PROJECT_MAX_MILESTONES);
 });
 
-test('normalizes complete Project runtime data for Proposal Info', async () => {
-  const proposals = await getFixtureProposals();
-  const startedFixture = proposals.find(({ proposal }) => proposal.title.includes('Project started'));
-  const project = getDaoProjectPresentation(startedFixture.proposal);
-
+test('normalizes complete server Project runtime data for Proposal Info', async () => {
+  const { proposal } = await fixtures.queryDaoApi('/dao/proposals/906');
+  const project = dao.getDaoProjectPresentation(proposal);
   assert.equal(project.kind, 'available');
   assert.equal(project.completeness, 'complete');
-  assert.equal(project.status.key, 'started');
+  assert.deepEqual(project.status, { key: 'executing', label: 'Executing' });
   assert.equal(project.balanceWei, 125000000000000000000n);
-  assert.equal(project.claimableBalanceWei, 1000000000000000000n);
+  assert.equal(project.rateUsdStr, '0.5');
   assert.deepEqual(project.budget, {
-    baseCostUsdStr: '6000',
-    maximumBonusUsdStr: '300',
-    maximumAuthorizedUsdStr: '6300',
+    baseCostUsdStr: '6000', maximumBonusUsdStr: '300', maximumAuthorizedUsdStr: '6300',
   });
-  assert.deepEqual(project.milestones.map((milestone) => milestone.status.key), [
-    'completed',
-    'started',
-    'pending',
+  assert.deepEqual(project.milestones.map(milestone => milestone.status.key), [
+    'completed', 'executing', 'pending',
   ]);
-  assert.equal(project.milestones[0].paid, true);
-  assert.equal(project.milestones[0].payoutWei, 1000000000000000000n);
+  assert.equal(project.milestones[0].durationMs, 16 * dao.DAO_PROPOSAL_DAY_MS);
+  assert.equal(project.milestones[0].paidWei, 1000000000000000000n);
+  assert.equal(project.milestones[0].endTime, NOW - 2 * 60 * 60 * 1000);
+  assert.equal(project.milestones[1].paidWei, 0n);
 });
 
 test('returns intentional partial and unavailable Project states', async () => {
-  const proposals = await getFixtureProposals();
-  const partialFixture = proposals.find(({ proposal }) => proposal.title.includes('partial malformed'));
-  const missingFixture = proposals.find(({ proposal }) => proposal.title.includes('missing Project data'));
-  const partialProject = getDaoProjectPresentation(partialFixture.proposal);
-  const missingProject = getDaoProjectPresentation(missingFixture.proposal);
-
+  const { proposal: partial } = await fixtures.queryDaoApi('/dao/proposals/912');
+  const { proposal: missing } = await fixtures.queryDaoApi('/dao/proposals/911');
+  const partialProject = dao.getDaoProjectPresentation(partial);
+  const missingProject = dao.getDaoProjectPresentation(missing);
   assert.equal(partialProject.kind, 'available');
   assert.equal(partialProject.completeness, 'partial');
   assert.ok(partialProject.issueCount > 0);
@@ -111,33 +120,39 @@ test('returns intentional partial and unavailable Project states', async () => {
   assert.match(missingProject.message, /unavailable/);
 });
 
-test('renders Project details through the production Proposal Info path', () => {
-  const renderProposalStart = appSource.indexOf('  renderProposal(proposal) {');
-  const renderProposalEnd = appSource.indexOf('    if (this.detailsContent) {', renderProposalStart);
-  const renderProposalSource = appSource.slice(renderProposalStart, renderProposalEnd);
-
-  assert.match(appSource, /function renderDaoProjectProposalInfo\(proposal, proposalState\)/);
-  assert.match(appSource, /getDaoProjectPresentation\(proposal\)/);
-  assert.match(appSource, /renderDaoProjectProposalInfo\(proposal, state\)/);
-  assert.match(appSource, /getDaoProposalOptionLabels\(proposal\)/);
-  assert.match(appSource, /this\.renderLoading\(\)/);
-  assert.match(appSource, /Project Funding/);
-  assert.match(appSource, /Milestone status/);
-  assert.match(appSource, /proposal\?\.proposalType === DAO_PROJECT_TYPE\) return null/);
+test('renders funding, milestone runtime and incomplete states with production helpers', async () => {
+  const { proposal } = await fixtures.queryDaoApi('/dao/proposals/906');
+  const html = renderProject(proposal, proposal.status, [], () => assert.fail('Unexpected lifecycle action'));
+  assert.match(html, /Project Funding/);
+  assert.match(html, /Milestone status/);
+  assert.match(html, /125 LIB/);
+  assert.match(html, /6000 USD/);
+  assert.match(html, /16 days/);
+  assert.match(html, /Completed/);
+  assert.match(html, /Executing/);
+  assert.match(html, /dao-project-info-runtime/);
+  assert.doesNotMatch(html, /Some project details are unavailable/);
+  const { proposal: partial } = await fixtures.queryDaoApi('/dao/proposals/912');
+  assert.match(renderProject(partial, partial.status, [], () => ''), /Some project details are unavailable/);
+  const { proposal: missing } = await fixtures.queryDaoApi('/dao/proposals/911');
+  assert.match(renderProject(missing, missing.status, [], () => ''), /Project details unavailable/);
+  const hostile = structuredClone(proposal);
+  hostile.project.milestones[0].title = '<img src=x onerror=alert(1)>';
+  const escaped = renderProject(hostile, hostile.status, [], () => '');
+  assert.ok(escaped.includes('&lt;img src=x onerror=alert(1)&gt;'));
+  assert.equal(escaped.includes('<img src=x'), false);
+  assert.match(appSource, /projectProposalInfoSection = isProjectProposal\s*\? renderDaoProjectProposalInfo\(/);
   assert.match(styles, /#proposalInfoModal \.dao-project-review-milestone/);
   assert.match(styles, /#proposalInfoModal \.dao-project-info-notice--partial/);
   assert.match(styles, /#proposalInfoModal \.dao-project-info-runtime/);
   assert.match(styles, /@media \(max-width: 420px\)[\s\S]*#proposalInfoModal \.dao-project-info-funding \.proposal-info-row/);
-  assert.ok(
-    renderProposalSource.indexOf('renderDaoProjectProposalInfo(proposal, state)')
-      < renderProposalSource.indexOf('renderDaoProposalOptions(proposal)'),
-  );
 });
 
-test('documents an applyable and reversible read-only fixture patch', () => {
-  assert.match(fixturePatch, /git apply --check dev-patches\/dao-project-proposal-info-fixtures\.patch/);
-  assert.match(fixturePatch, /git apply --check --reverse dev-patches\/dao-project-proposal-info-fixtures\.patch/);
-  assert.match(fixturePatch, /DAO_PROJECT_FIXTURE_MODE = true/);
-  assert.match(fixturePatch, /DAO fixture mode is read-only/);
-  assert.match(fixturePatch, /createDaoProjectProposalInfoFixtures/);
+test('rejects transaction and non-DAO paths before any upstream callback', async () => {
+  const readOnly = new DaoProjectFixtures({
+    now: NOW, queryUpstream: () => assert.fail('Unsupported paths must not reach upstream'),
+  });
+  for (const path of ['/inject', '/dao/proposals/906/vote', '/account/example']) {
+    await assert.rejects(readOnly.queryDaoApi(path), /Unsupported fixture read/);
+  }
 });
