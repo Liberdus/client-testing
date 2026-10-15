@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <link rel="stylesheet" href="../styles.css">
+  </head>
+  <body style="align-items: flex-start">
+    <main id="signInModal" style="width: 100%; max-width: 430px; background: white">
+      <ul class="sign-in-account-list" aria-label="Accounts">
+        <li class="sign-in-account-item" role="button" tabindex="0">
+          <div class="sign-in-account-card">
+            <span class="sign-in-account-avatar" aria-hidden="true" id="publicAvatar"></span>
+            <span class="sign-in-account-name">public-user-with-a-long-name-that-must-truncate</span>
+            <span class="sign-in-account-badge" aria-label="Has notifications">🔔</span>
+          </div>
+        </li>
+        <li class="sign-in-account-section" role="presentation">Private accounts</li>
+        <li class="sign-in-account-item is-private" role="button" tabindex="0">
+          <div class="sign-in-account-card">
+            <span class="sign-in-account-avatar" aria-hidden="true" id="privateAvatar"></span>
+            <span class="sign-in-account-name">private-user</span>
+          </div>
+        </li>
+        <li class="sign-in-account-item" role="button" tabindex="0">
+          <div class="sign-in-account-card">
+            <span class="sign-in-account-avatar" aria-hidden="true"></span>
+            <span class="sign-in-account-name">missing-address</span>
+          </div>
+        </li>
+      </ul>
+    </main>
+    <pre id="result" hidden>WAITING</pre>
+    <script type="module">
+      import { generateIdenticon, normalizeAddress } from '../lib.js';
+
+      const uploadedAvatar = document.createElement('img');
+      uploadedAvatar.className = 'contact-avatar-img';
+      uploadedAvatar.width = 40;
+      uploadedAvatar.height = 40;
+      uploadedAvatar.alt = '';
+      uploadedAvatar.src = URL.createObjectURL(new Blob([
+        '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="#3d3dce"/><circle cx="20" cy="16" r="8" fill="white"/><path d="M8 38c1-10 7-14 12-14s11 4 12 14" fill="white"/></svg>',
+      ], { type: 'image/svg+xml' }));
+      await uploadedAvatar.decode();
+      document.querySelector('#publicAvatar').replaceChildren(uploadedAvatar);
+      document.querySelector('#privateAvatar').innerHTML = generateIdenticon(normalizeAddress('b'.repeat(40)), 40);
+      document.fonts.ready.then(() => {
+        const rows = [...document.querySelectorAll('.sign-in-account-item')];
+        const firstCard = rows[0].querySelector('.sign-in-account-card');
+        const firstAvatar = rows[0].querySelector('.sign-in-account-avatar');
+        const name = rows[0].querySelector('.sign-in-account-name');
+        rows[0].focus();
+        const checks = {
+          avatarWidth: getComputedStyle(firstAvatar).width,
+          avatarHeight: getComputedStyle(firstAvatar).height,
+          uploadedTag: firstAvatar.firstElementChild?.tagName,
+          uploadedObjectFit: getComputedStyle(firstAvatar.firstElementChild).objectFit,
+          cardHeight: getComputedStyle(firstCard).height,
+          emptyAvatarDisplay: getComputedStyle(rows[2].querySelector('.sign-in-account-avatar')).display,
+          focusOutline: getComputedStyle(firstCard).outlineStyle,
+          nameOverflow: getComputedStyle(name).textOverflow,
+          privateName: rows[1].querySelector('.sign-in-account-name').textContent,
+        };
+        const passed = checks.avatarWidth === '40px'
+          && checks.avatarHeight === '40px'
+          && checks.uploadedTag === 'IMG'
+          && checks.uploadedObjectFit === 'cover'
+          && Number.parseFloat(checks.cardHeight) >= 40
+          && checks.emptyAvatarDisplay === 'none'
+          && checks.focusOutline === 'solid'
+          && checks.nameOverflow === 'ellipsis'
+          && checks.privateName === 'private-user';
+        document.querySelector('#result').textContent = JSON.stringify({ passed, checks });
+      });
+    </script>
+  </body>
+</html>

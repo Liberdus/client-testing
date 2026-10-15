@@ -1,5 +1,9 @@
 # Automated Liberdus Web Client Testing
 
+## Local client regression tests
+
+Reusable offline tests and manual fixtures migrated from ignored client `tests/` directories live in [`local-tests/`](local-tests/README.md) on branch `codex/local-client-tests`. Start with that guide to test a specific implementation checkout or add regression coverage. Agent workflow instructions are in [`AGENTS.md`](AGENTS.md).
+
 ## Demo Video
 
 https://drive.google.com/file/d/19oWRpK_AJUo3G3hHYYGN_ZryAT-CSjyd/view?usp=sharing
