@@ -52,6 +52,12 @@ WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs evm-pay
 WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs lib-send-receive.browser.test.mjs
 ```
 
+`mock-catalog.test.mjs` verifies the generated mock catalog is current and covers every production modal. `mock-board.browser.test.mjs` serves the mock locally and checks rendered wallet fixtures, separate LIB/EVM transfer forms, contact and direct-address EVM transfers, DAO navigation states, EVM chat statuses and recovery menus, category filters, zoom controls, and canvas panning. It blocks external requests and the production `app.js`; no live account or wallet service runs. These tests require a client branch containing `mock/`. Run both with:
+
+```bash
+WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs mock-catalog.test.mjs mock-board.browser.test.mjs
+```
+
 When browser scripts need Playwright, install the repository's pinned dependencies:
 
 ```bash
