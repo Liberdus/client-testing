@@ -537,20 +537,38 @@ test('confirmation submits its approved amount when the hidden input and quote c
   assert.equal(fixture.data.contacts['b'.repeat(40)].username, 'bob');
 });
 
-for (const action of ['cancel', 'form close', 'form reset', 'new session', 'account change']) {
+for (const action of ['cancel', 'form close', 'form reset', 'form reopen']) {
   test(`${action} invalidates a previously approved LIB payment`, async () => {
     const fixture = new LibModalFixture();
     await fixture.approve();
-    if (action === 'cancel') fixture.confirm.close();
+    const approved = fixture.confirm.payment;
+    if (action === 'cancel') fixture.confirm.cancelButton.listeners.get('click')();
     if (action === 'form close') await fixture.send.close();
     if (action === 'form reset') fixture.send.reset();
-    if (action === 'new session') fixture.send.session = { account: fixture.account };
-    if (action === 'account change') fixture.context.myAccount = { username: 'other', keys: {} };
+    if (action === 'form reopen') await fixture.send.reopen();
+    assert.equal(fixture.confirm.isActive(), false);
+    assert.equal(fixture.confirm.isCurrentPayment(approved), false);
     await fixture.confirm.handleSendAsset({ preventDefault() {} });
     assert.deepEqual(fixture.transfers, []);
     assert.deepEqual(fixture.data.wallet.history, []);
   });
 }
+
+test('an overlapping confirmation opening preserves the approved payment', async () => {
+  const fixture = new LibModalFixture();
+  const openModal = fixture.context.openModal;
+  fixture.context.openModal = modal => !modal.classList.contains('active') && openModal(modal);
+  await fixture.approve();
+  const approved = fixture.confirm.payment;
+  const approvedAmount = fixture.confirm.confirmAmount.textContent;
+  fixture.send.amountInput.value = '20';
+  await fixture.send.handleSendFormSubmit({ preventDefault() {} });
+  assert.equal(fixture.confirm.payment, approved);
+  assert.equal(fixture.confirm.confirmAmount.textContent, approvedAmount);
+  await fixture.confirm.handleSendAsset({ preventDefault() {} });
+  assert.equal(fixture.transfers.length, 1);
+  assert.equal(fixture.transfers[0].amount, 10n * wei);
+});
 
 test('reopening USD Send clears its old confirmation and preserves its amount unit', async () => {
   const fixture = new LibModalFixture();
