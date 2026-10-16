@@ -516,13 +516,12 @@ for (const action of ['cancel', 'form close', 'form reset', 'form reopen']) {
   test(`${action} invalidates a previously approved LIB payment`, async () => {
     const fixture = new LibModalFixture();
     await fixture.approve();
-    const approved = fixture.confirm.payment;
     if (action === 'cancel') fixture.confirm.cancelButton.listeners.get('click')();
     if (action === 'form close') await fixture.send.close();
     if (action === 'form reset') fixture.send.reset();
     if (action === 'form reopen') await fixture.send.reopen();
     assert.equal(fixture.confirm.isActive(), false);
-    assert.equal(fixture.confirm.isCurrentPayment(approved), false);
+    assert.equal(fixture.confirm.payment, null);
     await fixture.confirm.handleSendAsset({ preventDefault() {} });
     assert.deepEqual(fixture.transfers, []);
     assert.deepEqual(fixture.data.wallet.history, []);
