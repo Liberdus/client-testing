@@ -15,7 +15,7 @@
     <div id="fixture">
       <label for="subject">Parameter</label>
       <select id="subject" class="form-control" aria-label="Select parameter" required></select>
-      <select id="unchanged"><option>Native select</option></select>
+      <select id="other"><option value="other">Other select</option></select>
     </div>
     <div id="secondary-fixture">
       <label for="proposal-type">Proposal Type</label>
@@ -50,6 +50,7 @@
 
       const result = document.getElementById('result');
       const select = document.getElementById('subject');
+      const otherSelect = document.getElementById('other');
       const proposalType = document.getElementById('proposal-type');
       const proposalEmergency = document.getElementById('proposal-emergency');
       const fixture = document.getElementById('fixture');
@@ -85,12 +86,9 @@
       }
 
       try {
-        PopupSelect.load();
         labels.forEach((label, index) => select.add(new Option(label, `value-${index}`)));
         select.selectedIndex = 2;
-        PopupSelect.enhance(select);
-        PopupSelect.enhance(proposalType);
-        PopupSelect.enhance(proposalEmergency);
+        PopupSelect.load();
         const trigger = PopupSelect.getTrigger(select);
         const typeTrigger = PopupSelect.getTrigger(proposalType);
         const emergencyTrigger = PopupSelect.getTrigger(proposalEmergency);
@@ -98,7 +96,8 @@
         assert(select.getAttribute('aria-hidden') === 'true', 'native select should be hidden from accessibility');
         assert(select.tabIndex === -1, 'native select should be removed from keyboard navigation');
         assert(document.querySelector('label').htmlFor === trigger.id, 'label should target visible trigger');
-        assert(document.getElementById('unchanged').nextElementSibling === null, 'unrelated native select should be unchanged');
+        assert(PopupSelect.getTrigger(otherSelect), 'other static selects should also be enhanced');
+        assert(otherSelect.value === 'other', 'enhancement should preserve the native selection');
         assert(trigger.getAttribute('aria-haspopup') === 'listbox', 'trigger should expose listbox popup');
         assert(trigger.getAttribute('aria-expanded') === 'false', 'trigger should start collapsed');
         assert(trigger.textContent.includes('Minimum Vote Spend'), 'trigger should show selected label');
