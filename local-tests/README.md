@@ -1,8 +1,8 @@
 # Local client regression tests
 
-This directory brings reusable tests and fixtures formerly stored in ignored client `tests/` directories or local branch history into version control on `codex/local-client-tests`. Original local copies remain available to existing commands. Add future tests here, and use the runner to select the client checkout explicitly. See [MIGRATION.md](MIGRATION.md) for provenance and baseline results.
+This directory brings reusable tests and fixtures formerly stored in ignored client `tests/` directories or local branch history into version control on `codex/local-client-tests`. Original local copies remain available to existing commands. Add future tests on dedicated topic branches and submit PRs to that shared branch. Use the runner to select the client checkout explicitly. See [MIGRATION.md](MIGRATION.md) for provenance and baseline results.
 
-See [REPAIRS.md](REPAIRS.md) for the current result: **54/62 files pass**, including all **100 cases in 13 individually committed repaired files**. It lists each repair commit and the client requirements for the eight remaining failures. [FAILURES.md](FAILURES.md) preserves the historical diagnosis of the original 21 failing files. Recheck these results against the selected client revision before using them to explain a failure.
+The 2026-10-15 [repair baseline](REPAIRS.md) recorded **54/62 files passing**, including all **100 cases in 13 individually committed repaired files**. It lists the repair commits and client requirements at that time. [FAILURES.md](FAILURES.md) preserves the historical diagnosis of the original 21 failing files. These are historical results; rerun against the selected client and test revisions before using them to explain a failure.
 
 ## Run against an implementation checkout
 
@@ -79,26 +79,37 @@ The existing `playwright-tests/` suite targets live end-to-end flows. Its accoun
 ## Add tests while implementing
 
 1. Inspect the branch and dirty state of the client checkout and this repository. Set `WEB_CLIENT_ROOT` to the exact checkout receiving the implementation.
-2. Start from `codex/local-client-tests`. For parallel work, give each agent a separate topic branch or worktree and integrate verified commits into the shared branch sequentially.
+2. For every change, create a dedicated topic branch in an isolated worktree based on the latest published `codex/local-client-tests`. Give concurrent agents separate branches and worktrees; preserve existing checkouts and local work.
 3. Add a focused test here using synthetic fixtures. Prefer observable behavior over assertions that duplicate source text, and keep any necessary source-extraction tests narrowly scoped.
-4. Run the focused test and relevant existing tests against the implementation checkout. Include the client revision, commands, and results with the change.
-5. Commit the test change in this repository and the implementation in the client repository. Reference the companion commit in each handoff or PR. Keep reports, profiles, real account data, and generated downloads ignored.
+4. Run the focused test and relevant existing tests against the implementation checkout. Record the exact client and test commits, commands, results, and any required client features.
+5. Commit implementation and companion tests separately. Publish the topic branches and open a test PR targeting `codex/local-client-tests`, following the user's authorization. Link the test PR in the client PR and the client PR in the test PR. For standalone test maintenance, identify the client revision the test PR supports.
+6. Leave a feature-dependent test PR unmerged until all required client features have merged into `web-client-v2/main`. Before merging a PR that changes tests, set `WEB_CLIENT_ROOT` to a checkout of the merged `main` revision, rerun the focused tests, and record the exact client SHA, test commit, commands, and results in the test PR. Merge through the PR only after those tests pass. Report broader legacy failures separately. Documentation-only PRs can use documentation checks and explain why runtime coverage is N/A.
+7. Include both PR links, commit IDs, validation results, and remaining publication or merge steps in the handoff. Keep reports, profiles, real account data, and generated downloads ignored.
 
-The branch is a shared history of reusable tests. Push it to the repository remote when publishing the tests for other machines or agents; a local commit alone does not make it available elsewhere.
+The shared branch changes through reviewed test PRs. Do not commit, run `git merge` or `git cherry-pick`, or push directly to `codex/local-client-tests`. A local commit alone does not publish a test; verify the topic branch and PR are available remotely before reporting them as available for review. After PR merge, verify the remote shared branch contains the resulting merge or squash commit before reporting integration as complete.
 
 ## Point client agents here
 
 Add a short instruction to the client repository's root `AGENTS.md`, for example:
 
 ```markdown
-Reusable client regression tests live in the companion `client-testing` repository
-on branch `codex/local-client-tests`. Locate it using `CLIENT_TESTING_ROOT` when
-set; otherwise check for a sibling `../client-testing` checkout. If neither is
-available, report the missing checkout instead of silently skipping validation.
-Read its `AGENTS.md` and `local-tests/README.md`, set `WEB_CLIENT_ROOT` to this
-implementation checkout's absolute path, and add/run relevant regression tests
-there. Commit companion tests and include their commit in the implementation
-handoff. Preserve other agents' branches and uncommitted work.
+Reusable regression tests live in `Liberdus/client-testing`; its shared PR target
+is `codex/local-client-tests`. Use `CLIENT_TESTING_ROOT` when set and report an
+invalid override. Otherwise inspect nearby checkouts and the primary client's
+sibling directory using `git worktree list`; clone the testing repository if
+needed and report access failures or a missing shared branch.
+Read its `AGENTS.md` and `local-tests/README.md`. Set `WEB_CLIENT_ROOT` to this
+implementation checkout's absolute path, then add/run relevant regression tests
+on a dedicated topic branch and isolated worktree based on the latest shared target.
+Open a companion test PR to `codex/local-client-tests`; link it in the client PR
+and link the client PR in the test PR. Commit implementation and tests separately
+and include both commit IDs, commands, and results in the handoff.
+Keep feature-dependent test PRs unmerged until their required client features are
+on main. Before merging changed tests, rerun focused tests against the merged main
+SHA. For documentation-only PRs, report documentation checks and runtime N/A.
+Do not commit, git merge, cherry-pick, or push directly to the shared branch.
+Preserve other agents' branches and uncommitted work, and report remaining PR,
+publication, or validation steps accurately.
 ```
 
 Set `CLIENT_TESTING_ROOT` locally when repositories are not siblings; avoid committing a machine-specific absolute path. A client worktree may live away from the main checkout, so its sibling discovery can require this override. Codex reads applicable `AGENTS.md` files from the working repository's ancestor directories, so an explicit reference is needed to use instructions in a companion repository. See [Codex agent configuration](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
