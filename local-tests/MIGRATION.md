@@ -37,10 +37,19 @@ request new client PRs for already-merged behavior.
 | `message-confirmation.test.cjs` | Separate coverage for [#1802](https://github.com/Liberdus/web-client-v2/pull/1802). |
 | `evm-payment-explorer.*` | Separate coverage for [#1793](https://github.com/Liberdus/web-client-v2/pull/1793). |
 | `issue-1680-chat-attachment-thumbnails.*` | Dependent coverage for [#1684](https://github.com/Liberdus/web-client-v2/pull/1684) → [#1685](https://github.com/Liberdus/web-client-v2/pull/1685). |
+| `issue-1553-call-links.test.mjs` | New focused companion coverage for [#1553](https://github.com/Liberdus/web-client-v2/pull/1553); 5/5 cases pass at its client head, while the eligible-link regression case fails on current client main. |
+| MLS `test/*.mjs` | Already committed in client [#1655](https://github.com/Liberdus/web-client-v2/pull/1655), including its `npm run test:mls` entry point; retain the 11 suites there without duplicating their implementation dependencies in this repository. |
 | `mock-catalog.test.mjs`, `mock-board.browser.test.mjs` | Preserved in the legacy branch; the mock implementation has no matching open client PR in this migration. |
 | `evm-note-editing*`, `registration-confirmation.test.cjs` | Preserve until closed/unmerged client features resume: [#1800](https://github.com/Liberdus/web-client-v2/pull/1800), [#1744](https://github.com/Liberdus/web-client-v2/pull/1744). |
 | `dao-backend-fetcher.test.mjs`, `dao-user-vote-summary.test.mjs` | Preserve historical/prototype contracts; no compatible current-main implementation is established. |
 | `evm-send-fee-usd.browser.test.mjs` | Preserve the historical browser harness pending adaptation from shared-modal selectors; the repaired numerical/lifecycle Node suite is in this foundation. |
+
+The MLS audit at client `8e1c86a13af1f82a7df3d31d06cd7a8f9e191559`
+ran all 11 unchanged suites individually under Node 20.19.6. Ten completed;
+`test/leave-effective.mjs` repeatedly aborted after seven checks with a V8
+invalid-size fatal error (SIGTRAP). Full MLS validation remains incomplete;
+the crash cause is unresolved. This failure belongs to existing client coverage,
+not to a test imported by this foundation.
 
 The original imports came from ignored client tests and commit
 `861dd8e5260290e1bb6870cf2994d3d58c56a161` (message confirmation); recovered
