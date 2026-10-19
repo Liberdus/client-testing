@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile, mkdir } from 'node:fs/promises';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, isAbsolute, resolve, sep } from 'node:path';
 import { chromium } from 'playwright';
@@ -16,7 +16,9 @@ setupConnectivityDetection = () => {};
 getNetworkParams = async () => parameters;
 updateAssetPricesIfNeeded = async () => {};
 window.__broadcasts = 0;
+window.__signings = 0;
 postAssetTransfer = async () => { window.__broadcasts++; throw Error('Fixture forbids broadcasting'); };
+signObj = async () => { window.__signings++; throw Error('Fixture forbids signing'); };
 queryNetwork = async (path) => {
   if (path.endsWith('/balance')) return { balance: 1000n * wei };
   if (path.includes('/toll')) return { toll: { required: [0, 0], payOnRead: [0n, 0n], payOnReply: [0n, 0n] } };
@@ -29,7 +31,7 @@ checkUsernameAvailability = async (username, owner, found) => {
   return 'taken';
 };
 window.__fixture = {
-  sendAssetFormModal, sendAssetConfirmModal, receiveModal, evmAssets,
+  sendAssetFormModal, sendAssetConfirmModal, receiveModal, evmAssets, cooldownMs: BUTTON_COOLDOWN_MS,
   configure() {
     parameters.current.stabilityFactorStr = '0.20';
     parameters.current.transactionFeeUsdStr = '0.01';
@@ -51,7 +53,39 @@ window.__fixture = {
     const walletNetwork = { id: 'ethereum', chainId: 1, name: 'Ethereum', nativeSymbol: 'ETH', assets: [asset] };
     evmAssets.discovery.getCatalog = () => [walletNetwork];
     evmAssets.discovery.refresh = async () => [walletNetwork];
+    evmAssets.transactions.send = async () => { window.__signings++; throw Error('Fixture forbids EVM signing'); };
+    evmAssets.transactions.broadcast = async () => { window.__broadcasts++; throw Error('Fixture forbids EVM broadcasts'); };
+    chatPaymentPanel.run = async () => { window.__signings++; throw Error('Fixture forbids multichain signing'); };
     this.evmSelection = { networkId: 'ethereum', assetKey: asset.key };
+  },
+  setLibPrice(price) {
+    parameters.current.stabilityFactorStr = price;
+    walletScreen.getLibAsset().price = Number(price);
+  },
+  previewEvm() {
+    const native = { networkId: 'bsc', chainId: 56, tokenType: 'native', contractAddress: null,
+      tokenSymbol: 'BNB', tokenName: 'BNB', tokenPriceUsd: '600' };
+    const asset = { ...native, tokenType: 'erc20', contractAddress: '0x' + 'c'.repeat(40),
+      tokenSymbol: 'USDT', tokenName: 'Tether', tokenPriceUsd: '1' };
+    window.__evmDecision = evmAssets.confirmationModal.confirm('Synthetic preview', {
+      network: { id: 'bsc', chainId: 56, name: 'BNB Smart Chain', nativeSymbol: 'BNB', assets: [native, asset] },
+      asset, validation: { recipient: '0x' + 'b'.repeat(40) }, recipientLabel: 'recipient',
+      maximumFee: 100000000000000n, displayAmount: '10',
+    });
+  },
+  async previewMultichain() {
+    chatPaymentPanel.load();
+    // A missing logo address exercises the production fallback mark without an external image request.
+    const asset = { key: 'synthetic-usdc', tokenSymbol: 'USDC', tokenName: 'USD Coin', blockchain: 'near',
+      contractAddress: null, tokenDecimals: 6, tokenAmount: '10', rawAmount: '10000000', tokenPriceUsd: '1' };
+    chatPaymentPanel.selectedAsset = () => asset;
+    chatPaymentPanel.recipientAddress = 'b'.repeat(40);
+    chatPaymentPanel.recipientName = 'recipient';
+    chatPaymentPanel.prepareRecipient = async () => ({ problem: null });
+    chatPaymentPanel.amount.reset();
+    chatPaymentPanel.amountInput.value = '2.5';
+    chatPaymentPanel.noteInput.value = 'Lunch';
+    await chatPaymentPanel.review();
   },
   qrData() { return receiveModal.createQRPaymentData(); },
 };
@@ -69,6 +103,43 @@ const server = createServer(async (request, response) => {
 });
 await new Promise(done => server.listen(0, '127.0.0.1', done));
 const origin = `http://127.0.0.1:${server.address().port}`;
+const measurements = [];
+
+class ConfirmationGeometry {
+  static async measure(page, { modal, amount, usd, group, next, primary = true }) {
+    await page.locator(usd).scrollIntoViewIfNeeded();
+    const geometry = await page.evaluate(({ modal, amount, usd, group, next }) => {
+      const rect = selector => {
+        const { x, y, width, height, top, bottom, left, right } = document.querySelector(selector).getBoundingClientRect();
+        return { x, y, width, height, top, bottom, left, right };
+      };
+      const style = selector => {
+        const value = getComputedStyle(document.querySelector(selector));
+        return Object.fromEntries(['position', 'clip', 'clipPath', 'fontSize', 'fontWeight', 'fontVariantNumeric', 'color', 'overflowWrap', 'backgroundColor'].map(key => [key, value[key]]));
+      };
+      return { modal: rect(modal), amount: rect(amount), usd: rect(usd), group: rect(group), next: next ? rect(next) : null,
+        amountStyle: style(amount), usdStyle: style(usd), viewportWidth: innerWidth, viewportHeight: innerHeight };
+    }, { modal, amount, usd, group, next });
+    assert.ok(geometry.usd.width > 20 && geometry.usd.height >= 14, `${usd} has visible text dimensions`);
+    assert.ok(geometry.usd.top >= geometry.amount.bottom + 3, `${usd} is below its native amount`);
+    assert.ok(geometry.usd.bottom <= geometry.group.bottom + 1, `${usd} participates in its row's height`);
+    assert.ok(geometry.usd.left >= geometry.modal.left && geometry.usd.right <= geometry.modal.right, `${usd} stays inside its modal`);
+    assert.ok(geometry.usd.left >= 0 && geometry.usd.right <= geometry.viewportWidth, `${usd} stays inside the viewport`);
+    assert.ok(geometry.usd.top >= 0 && geometry.usd.bottom <= geometry.viewportHeight, `${usd} is visible after scrolling`);
+    if (geometry.next) assert.ok(geometry.next.top >= geometry.usd.bottom, `${usd} does not overlap the next row`);
+    assert.notEqual(geometry.usdStyle.position, 'absolute');
+    assert.equal(geometry.usdStyle.clip, 'auto');
+    assert.equal(geometry.usdStyle.clipPath, 'none');
+    assert.equal(geometry.usdStyle.fontSize, '14px');
+    if (primary) {
+      assert.equal(geometry.amountStyle.fontWeight, '700');
+      assert.match(geometry.amountStyle.fontVariantNumeric, /tabular-nums/);
+      assert.equal(geometry.amountStyle.overflowWrap, 'anywhere');
+    }
+    return geometry;
+  }
+}
+
 let browser;
 try {
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
@@ -109,13 +180,31 @@ try {
     await page.locator('#sendForm button[type="submit"]').click();
     await page.locator('#sendAssetConfirmModal.is-transition-complete').waitFor();
     assert.equal(await page.locator('#confirmRecipient').textContent(), 'recipient');
-    assert.equal(await page.locator('#confirmAmount').textContent(), '10');
+    assert.equal(await page.locator('#confirmAmount').textContent(), '10 LIB');
+    assert.equal(await page.locator('#confirmAmountUSD').textContent(), '≈ $2.00 USD');
     assert.match(await page.locator('#confirmAsset').textContent(), /LIB/);
     assert.equal(await page.locator('#confirmMemo').textContent(), 'Lunch');
     await page.screenshot({ path: `${out}/confirm-${viewport.name}.png`, fullPage: true });
     await page.locator('#cancelSendButton').click();
     await page.waitForFunction(() => !document.querySelector('#sendAssetConfirmModal').classList.contains('active'));
     assert.equal(await page.locator('#sendAmount').inputValue(), '10');
+
+    await page.evaluate(() => __fixture.setLibPrice('0.008'));
+    await page.locator('#toggleBalance').click();
+    await page.locator('#sendAmount').fill('0.04');
+    // The second submission must follow the production button's minimum cooldown.
+    await page.waitForTimeout(await page.evaluate(() => __fixture.cooldownMs));
+    await page.waitForFunction(() => !document.querySelector('#sendForm button[type="submit"]').disabled);
+    await page.locator('#sendForm button[type="submit"]').click();
+    await page.locator('#sendAssetConfirmModal.active.is-transition-complete').waitFor();
+    assert.equal(await page.locator('#confirmAmount').textContent(), '5 LIB');
+    assert.equal(await page.locator('#confirmAmountUSD').textContent(), '≈ $0.04 USD');
+    const nativeGeometry = await ConfirmationGeometry.measure(page, { modal: '#sendAssetConfirmModal', amount: '#confirmAmount',
+      usd: '#confirmAmountUSD', group: '#sendAssetConfirmModal .form-group:has(#confirmAmount)', next: '#confirmAsset' });
+    measurements.push({ viewport: viewport.name, kind: 'native', ...nativeGeometry });
+    await page.screenshot({ path: `${out}/confirm-native-usd-${viewport.name}.png`, fullPage: true });
+    await page.locator('#cancelSendButton').click();
+    await page.evaluate(() => __fixture.setLibPrice('0.20'));
     await page.locator('#closeSendAssetFormModal').click();
     await page.locator('#openReceiveModal').click();
     await page.locator('#receiveModal.is-transition-complete').waitFor();
@@ -150,12 +239,47 @@ try {
     assert.equal(await page.locator('#evmReceiveQRCode img').count(), 1);
     assert.equal(await page.evaluate(() => __fixture.evmAssets.receiveModal.createQRPaymentData().n), 'ethereum');
     await page.locator('#closeEvmReceiveModal').click();
+
+    await page.evaluate(() => __fixture.previewEvm());
+    await page.locator('#evmSendConfirmModal.is-transition-complete').waitFor();
+    assert.equal(await page.locator('#evmConfirmAmount').textContent(), '10 USDT');
+    assert.equal(await page.locator('#evmConfirmAmountUSD').textContent(), '≈ $10.00');
+    const evmGeometry = await ConfirmationGeometry.measure(page, { modal: '#evmSendConfirmModal', amount: '#evmConfirmAmount',
+      usd: '#evmConfirmAmountUSD', group: '#evmSendConfirmModal .form-group:has(#evmConfirmAmount)', next: '#evmConfirmAsset' });
+    measurements.push({ viewport: viewport.name, kind: 'evm', ...evmGeometry });
+    await page.screenshot({ path: `${out}/confirm-evm-usd-${viewport.name}.png`, fullPage: true });
+    assert.equal(await page.locator('#evmConfirmFee').textContent(), '0.0001 BNB');
+    assert.equal(await page.locator('#evmConfirmFeeUSD').textContent(), '≈ $0.06');
+    const feeGeometry = await ConfirmationGeometry.measure(page, { modal: '#evmSendConfirmModal', amount: '#evmConfirmFee',
+      usd: '#evmConfirmFeeUSD', group: '#evmSendConfirmModal .form-group:has(#evmConfirmFee)', next: '#evmConfirmSigningNotice', primary: false });
+    measurements.push({ viewport: viewport.name, kind: 'evm-fee', ...feeGeometry });
+    await page.screenshot({ path: `${out}/confirm-evm-fee-${viewport.name}.png`, fullPage: true });
+    await page.locator('#cancelEvmSendButton').click();
+    assert.equal(await page.evaluate(() => window.__evmDecision), false);
+
+    await page.evaluate(() => __fixture.previewMultichain());
+    await page.locator('#multichainConfirmModal.is-transition-complete').waitFor();
+    assert.equal(await page.locator('#multichainConfirmHero .multichain-confirm-amount').textContent(), '2.5 USDC');
+    assert.equal(await page.locator('#multichainConfirmHero .multichain-confirm-sub').textContent(), 'about $2.50');
+    const multichainGeometry = await ConfirmationGeometry.measure(page, { modal: '#multichainConfirmModal',
+      amount: '#multichainConfirmHero .multichain-confirm-amount', usd: '#multichainConfirmHero .multichain-confirm-sub',
+      group: '#multichainConfirmHero', next: '#multichainConfirmRows' });
+    measurements.push({ viewport: viewport.name, kind: 'multichain', ...multichainGeometry });
+    assert.equal(nativeGeometry.usdStyle.color, evmGeometry.usdStyle.color);
+    assert.equal(nativeGeometry.usdStyle.color, multichainGeometry.usdStyle.color);
+    assert.equal(nativeGeometry.amountStyle.color, multichainGeometry.amountStyle.color);
+    assert.notEqual(nativeGeometry.amountStyle.backgroundColor, multichainGeometry.amountStyle.backgroundColor);
+    await page.screenshot({ path: `${out}/confirm-multichain-usd-${viewport.name}.png`, fullPage: true });
+    await page.locator('#closeMultichainConfirmModal').click();
     assert.equal(await page.evaluate(() => __broadcasts), 0);
+    assert.equal(await page.evaluate(() => __signings), 0);
     assert.deepEqual(errors, []);
-    console.log(`PASS ${viewport.name}: actual startup/buttons; Send LIB/Receive LIB; no Asset row; native lookup with LIB at wallet index 1; recipient/balance/memo; LIB/USD conversion; LIB confirmation and Cancel; payment QR; separate EVM send/receive and Ethereum QR; zero broadcasts; blocked external attempts=${external.length}`);
+    assert.deepEqual(external, []);
+    console.log(`PASS ${viewport.name}: actual Send/Receive startup and LIB/USD/QR behavior; native5LIB/$0.04, EVM amount/fee USD, and multichain USD below amounts without clipping/overlap; shared typography; zero signing/broadcasts/external requests`);
     await context.close();
   }
-  console.log(`Screenshots: ${out}`);
+  await writeFile(`${out}/confirmation-geometry.json`, JSON.stringify(measurements, null, 2));
+  console.log(`Screenshots and confirmation-geometry.json: ${out}`);
 } finally {
   await browser?.close();
   await new Promise(done => server.close(done));
