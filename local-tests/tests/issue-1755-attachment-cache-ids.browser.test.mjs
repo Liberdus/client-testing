@@ -79,7 +79,13 @@ before(async () => {
     };
     window.withCache = (callback, fixture) => withDatabaseName(async name => {
       if (fixture) await seedDatabase(name, fixture.version, fixture.stores);
-      const database = new ThumbnailCache();
+      class FutureCache extends ThumbnailCache {
+        get migrations() { return [...super.migrations, this.migrateToVersion4]; }
+        migrateToVersion4(transaction, done) {
+          transaction.objectStore(this.storeName).count().onsuccess = done;
+        }
+      }
+      const database = fixture?.upgradeVersion === 4 ? new FutureCache() : new ThumbnailCache();
       database.dbName = name;
       if (fixture?.upgradeVersion) database.dbVersion = fixture.upgradeVersion;
       try {
@@ -87,6 +93,111 @@ before(async () => {
         return await callback(database, new FullImageCache(database));
       } finally { database.db?.close(); }
     });
+  });
+});
+
+for (const oldVersion of [0, 1, 2, 3]) {
+  test(`opening v${oldVersion} at v3 runs only the remaining migrations in order`, async () => {
+    const result = await page.evaluate(version => withDatabaseName(async name => {
+      if (version) {
+        const stores = [{ name: 'thumbnails', keyPath: version === 3 ? 'id' : 'url', records: [] }];
+        if (version >= 2) stores.push({ name: 'fullImages', keyPath: version === 3 ? 'id' : 'url', records: [] });
+        await seedDatabase(name, version, stores);
+      }
+      const events = [];
+      const transactions = new Set();
+      class TracedCache extends ThumbnailCache {
+        get migrations() {
+          return super.migrations.map((migration, index) => (transaction, done) => {
+            events.push(`start:${index + 1}`);
+            transactions.add(transaction);
+            migration.call(this, transaction, () => {
+              events.push(`finish:${index + 1}`);
+              done();
+            });
+          });
+        }
+      }
+      const database = new TracedCache();
+      database.dbName = name;
+      try {
+        await database.init();
+        return {
+          events, transactionCount: transactions.size,
+          transactionModes: Array.from(transactions, transaction => transaction.mode),
+          version: database.db.version,
+          keyPaths: ['thumbnails', 'fullImages'].map(store => database.db.transaction(store).objectStore(store).keyPath),
+        };
+      } finally { database.db?.close(); }
+    }), oldVersion);
+    const versions = [1, 2, 3].filter(version => version > oldVersion);
+    assert.deepEqual(result, {
+      events: versions.flatMap(version => [`start:${version}`, `finish:${version}`]),
+      transactionCount: oldVersion === 3 ? 0 : 1,
+      transactionModes: oldVersion === 3 ? [] : ['versionchange'],
+      version: 3, keyPaths: ['id', 'id'],
+    });
+  });
+}
+
+test('a future migration sees both ID stores only after asynchronous v3 copying and replacement finish', async () => {
+  const result = await page.evaluate(() => withDatabaseName(async name => {
+    await seedDatabase(name, 2, ['thumbnails', 'fullImages'].map(storeName => ({
+      name: storeName, keyPath: 'url', records: [{
+        url: 'https://old.example/get/kept', cachedAt: 123,
+        ...(storeName === 'thumbnails' ? { thumbnail: new Blob(['kept-thumb']) } : { blob: new Blob(['kept-image']), size: 10 }),
+      }],
+    })));
+    const events = [];
+    const transactions = new Set();
+    let schemaAtVersion4;
+    class FutureCache extends ThumbnailCache {
+      get migrations() {
+        return [...super.migrations, this.migrateToVersion4].map((migration, index) => (transaction, done) => {
+          events.push(`start:${index + 1}`);
+          transactions.add(transaction);
+          migration.call(this, transaction, () => {
+            events.push(`finish:${index + 1}`);
+            done();
+          });
+        });
+      }
+      migrateToVersion4(transaction, done) {
+        schemaAtVersion4 = {
+          stores: Array.from(transaction.db.objectStoreNames),
+          keyPaths: ['thumbnails', 'fullImages'].map(store => transaction.objectStore(store).keyPath),
+        };
+        // Both copied records must already be addressable by their new key.
+        const thumbnail = transaction.objectStore('thumbnails').get('kept');
+        const image = transaction.objectStore('fullImages').get('kept');
+        image.onsuccess = () => {
+          const state = transaction.db.createObjectStore('v4');
+          state.put({ thumbnail: thumbnail.result, image: image.result }, 'after-copy').onsuccess = done;
+        };
+      }
+    }
+    const database = new FutureCache();
+    database.dbName = name;
+    database.dbVersion = 4;
+    try {
+      await database.init();
+      const stored = await new Promise((resolve, reject) => {
+        const request = database.db.transaction('v4').objectStore('v4').get('after-copy');
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      return {
+        events, transactionCount: transactions.size, schemaAtVersion4, version: database.db.version,
+        thumbnail: { ...stored.thumbnail, thumbnail: await stored.thumbnail.thumbnail.text() },
+        image: { ...stored.image, blob: await stored.image.blob.text() },
+      };
+    } finally { database.db?.close(); }
+  }));
+  assert.deepEqual(result, {
+    events: ['start:3', 'finish:3', 'start:4', 'finish:4'], transactionCount: 1, version: 4,
+    schemaAtVersion4: { stores: ['fullImages', 'thumbnails'], keyPaths: ['id', 'id'] },
+    thumbnail: { id: 'kept', cachedAt: 123, thumbnail: 'kept-thumb' },
+    image: { id: 'kept', cachedAt: 123, blob: 'kept-image', size: 10 },
   });
 });
 
@@ -206,15 +317,24 @@ for (const scenario of [
   });
 }
 
-for (const failure of ['invalid legacy URL', 'unsupported key path', 'destination write failure']) {
-  test(`a migration with ${failure} rolls back both stores and the database version`, async () => {
-    const result = await page.evaluate(reason => withDatabaseName(async name => {
+for (const { failure, version } of [
+  { failure: 'invalid legacy URL', version: 2 },
+  { failure: 'unsupported key path', version: 2 },
+  { failure: 'destination write failure', version: 2 },
+  { failure: 'a failed later migration', version: 1 },
+  { failure: 'a failed later migration', version: 2 },
+  { failure: 'an unregistered version step', version: 2 },
+]) {
+  test(`an upgrade from v${version} with ${failure} rolls back every store and the database version`, async () => {
+    const result = await page.evaluate(({ failure: reason, version }) => withDatabaseName(async name => {
       const legacyUrl = reason === 'invalid legacy URL' ? 'https://old.example/unsupported/image' : 'https://old.example/get/kept';
       const fullImageKeyPath = reason === 'unsupported key path' ? 'unsupported' : 'url';
-      await seedDatabase(name, 2, [
-        { name: 'thumbnails', keyPath: 'url', records: [{ url: legacyUrl, thumbnail: new Blob(['kept-thumb']), cachedAt: 123 }] },
-        { name: 'fullImages', keyPath: fullImageKeyPath, records: [{ [fullImageKeyPath]: legacyUrl, blob: new Blob(['kept-image']), size: 10, cachedAt: 123 }] },
-      ]);
+      const stores = [{ name: 'thumbnails', keyPath: 'url', records: [{ url: legacyUrl, thumbnail: new Blob(['kept-thumb']), cachedAt: 123 }] }];
+      if (version === 2) stores.push({
+        name: 'fullImages', keyPath: fullImageKeyPath,
+        records: [{ [fullImageKeyPath]: legacyUrl, blob: new Blob(['kept-image']), size: 10, cachedAt: 123 }],
+      });
+      await seedDatabase(name, version, stores);
       const originalPut = IDBObjectStore.prototype.put;
       if (reason === 'destination write failure') {
         IDBObjectStore.prototype.put = function(record, ...args) {
@@ -224,8 +344,18 @@ for (const failure of ['invalid legacy URL', 'unsupported key path', 'destinatio
           return request;
         };
       }
-      const database = new ThumbnailCache();
+      const keyPathsAtVersion4 = [];
+      class FailedLaterCache extends ThumbnailCache {
+        get migrations() { return [...super.migrations, this.migrateToVersion4]; }
+        migrateToVersion4(transaction) {
+          keyPathsAtVersion4.push(...Array.from(transaction.db.objectStoreNames, store => transaction.objectStore(store).keyPath));
+          transaction.db.createObjectStore('v4');
+          throw new Error('Synthetic later migration failure');
+        }
+      }
+      const database = reason === 'a failed later migration' ? new FailedLaterCache() : new ThumbnailCache();
       database.dbName = name;
+      if (reason === 'a failed later migration' || reason === 'an unregistered version step') database.dbVersion = 4;
       let rejected = false;
       try {
         await database.init();
@@ -241,21 +371,23 @@ for (const failure of ['invalid legacy URL', 'unsupported key path', 'destinatio
       });
       try {
         const thumbnails = await readRecords({ db: original }, 'thumbnails');
-        const images = await readRecords({ db: original }, 'fullImages');
+        const images = version === 2 ? await readRecords({ db: original }, 'fullImages') : [];
         return {
-          rejected, version: original.version, stores: Array.from(original.objectStoreNames),
-          keyPaths: ['thumbnails', 'fullImages'].map(store => original.transaction(store).objectStore(store).keyPath),
+          rejected, keyPathsAtVersion4, version: original.version, stores: Array.from(original.objectStoreNames),
+          keyPaths: stores.map(store => original.transaction(store.name).objectStore(store.name).keyPath),
           thumbnail: { ...thumbnails[0], thumbnail: await thumbnails[0].thumbnail.text() },
-          image: { ...images[0], blob: await images[0].blob.text() },
+          image: images.length ? { ...images[0], blob: await images[0].blob.text() } : null,
         };
       } finally { original.close(); }
-    }), failure);
+    }), { failure, version });
     const legacyUrl = failure === 'invalid legacy URL' ? 'https://old.example/unsupported/image' : 'https://old.example/get/kept';
     const fullImageKeyPath = failure === 'unsupported key path' ? 'unsupported' : 'url';
     assert.deepEqual(result, {
-      rejected: true, version: 2, stores: ['fullImages', 'thumbnails'], keyPaths: ['url', fullImageKeyPath],
+      rejected: true, keyPathsAtVersion4: failure === 'a failed later migration' ? ['id', 'id'] : [], version,
+      stores: version === 2 ? ['fullImages', 'thumbnails'] : ['thumbnails'],
+      keyPaths: version === 2 ? ['url', fullImageKeyPath] : ['url'],
       thumbnail: { url: legacyUrl, thumbnail: 'kept-thumb', cachedAt: 123 },
-      image: { [fullImageKeyPath]: legacyUrl, blob: 'kept-image', size: 10, cachedAt: 123 },
+      image: version === 2 ? { [fullImageKeyPath]: legacyUrl, blob: 'kept-image', size: 10, cachedAt: 123 } : null,
     });
   });
 }
