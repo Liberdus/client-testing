@@ -52,32 +52,23 @@ before(async () => {
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    window.withCache = async (callback, legacyVersion) => {
+    window.seedDatabase = (name, version, stores) => new Promise((resolve, reject) => {
+      const request = indexedDB.open(name, version);
+      request.onupgradeneeded = () => {
+        for (const { name: storeName, keyPath, records, cachedAtIndex = true } of stores) {
+          const store = request.result.createObjectStore(storeName, { keyPath });
+          if (cachedAtIndex) store.createIndex('cachedAt', 'cachedAt');
+          for (const record of records) store.put(record);
+        }
+      };
+      request.onsuccess = () => { request.result.close(); resolve(); };
+      request.onerror = () => reject(request.error);
+    });
+    window.withDatabaseName = async callback => {
       const name = `issue-1755-${crypto.randomUUID()}`;
-      if (legacyVersion) {
-        await new Promise((resolve, reject) => {
-          const request = indexedDB.open(name, legacyVersion);
-          request.onupgradeneeded = () => {
-            const thumbnails = request.result.createObjectStore('thumbnails', { keyPath: 'url' });
-            thumbnails.createIndex('cachedAt', 'cachedAt');
-            thumbnails.put({ url: 'https://old.example/get/legacy', thumbnail: new Blob(['legacy-thumb']), cachedAt: 1 });
-            if (legacyVersion === 2) {
-              const images = request.result.createObjectStore('fullImages', { keyPath: 'url' });
-              images.createIndex('cachedAt', 'cachedAt');
-              images.put({ url: 'https://old.example/get/legacy', blob: new Blob(['legacy-image']), size: 12, cachedAt: 1 });
-            }
-          };
-          request.onsuccess = () => { request.result.close(); resolve(); };
-          request.onerror = () => reject(request.error);
-        });
-      }
-      const database = new ThumbnailCache();
-      database.dbName = name;
-      await database.init();
       try {
-        return await callback(database, new FullImageCache(database));
+        return await callback(name);
       } finally {
-        database.db.close();
         await new Promise((resolve, reject) => {
           const request = indexedDB.deleteDatabase(name);
           request.onsuccess = () => resolve();
@@ -86,6 +77,16 @@ before(async () => {
         });
       }
     };
+    window.withCache = (callback, fixture) => withDatabaseName(async name => {
+      if (fixture) await seedDatabase(name, fixture.version, fixture.stores);
+      const database = new ThumbnailCache();
+      database.dbName = name;
+      if (fixture?.upgradeVersion) database.dbVersion = fixture.upgradeVersion;
+      try {
+        await database.init();
+        return await callback(database, new FullImageCache(database));
+      } finally { database.db?.close(); }
+    });
   });
 });
 
@@ -97,28 +98,164 @@ after(async () => {
 });
 
 for (const legacyVersion of [1, 2]) {
-  test(`upgrading URL-keyed database v${legacyVersion} clears both caches and creates ID stores`, async () => {
-    const result = await page.evaluate(version => withCache(async (database, images) => {
-      const schema = ['thumbnails', 'fullImages'].map(name => {
-        const store = database.db.transaction(name, 'readonly').objectStore(name);
-        return { name, keyPath: store.keyPath, indexes: Array.from(store.indexNames) };
+  test(`upgrading URL-keyed database v${legacyVersion} migrates data and retains the newest record per ID`, async () => {
+    const result = await page.evaluate(version => {
+      // URL order puts the newest entry first for one ID, last for the other.
+      const versions = [
+        ['https://a.example/get/newest-first', 'new', 20],
+        ['https://z.example/get/newest-first', 'old', 10],
+        ['https://a.example/get/newest-last', 'old', 10],
+        ['https://z.example/get/newest-last', 'new', 20],
+      ];
+      const stores = [{
+        name: 'thumbnails', keyPath: 'url',
+        records: versions.map(([url, value, cachedAt]) => ({
+          url, thumbnail: new Blob([`${value}-thumb`], { type: 'image/jpeg' }),
+          originalType: 'image/png', cachedAt,
+        })),
+      }];
+      if (version === 2) stores.push({
+        name: 'fullImages', keyPath: 'url',
+        records: versions.map(([url, value, cachedAt]) => ({
+          url, blob: new Blob([`${value}-image`], { type: 'image/png' }),
+          mimeType: 'image/png', size: 9, cachedAt,
+        })),
       });
-      return {
-        version: database.db.version,
-        schema,
-        thumbnails: (await readRecords(database, 'thumbnails')).length,
-        images: (await readRecords(database, 'fullImages')).length,
-        legacyThumb: await database.get('https://new.example/get/legacy'),
-        legacyImage: await images.get('https://new.example/get/legacy'),
-      };
-    }, version), legacyVersion);
+      return withCache(async (database, images) => {
+        const schema = ['thumbnails', 'fullImages'].map(name => {
+          const store = database.db.transaction(name, 'readonly').objectStore(name);
+          return { name, keyPath: store.keyPath, indexes: Array.from(store.indexNames) };
+        });
+        const thumbnails = await Promise.all((await readRecords(database, 'thumbnails')).map(async record => ({
+          ...record, thumbnail: await record.thumbnail.text(), blobType: record.thumbnail.type,
+        })));
+        const fullImages = await Promise.all((await readRecords(database, 'fullImages')).map(async record => ({
+          ...record, blob: await record.blob.text(), blobType: record.blob.type,
+        })));
+        return {
+          version: database.db.version, stores: Array.from(database.db.objectStoreNames), schema, thumbnails, fullImages,
+          thumbByNewHost: await (await database.get('https://changed.example/get/newest-first')).text(),
+          imageByNewHost: version === 2 ? await (await images.get('https://changed.example/get/newest-last')).text() : null,
+          size: await images.getCacheSize(),
+        };
+      }, { version, stores });
+    }, legacyVersion);
     assert.deepEqual(result, {
-      version: 3,
+      version: 3, stores: ['fullImages', 'thumbnails'],
       schema: [
         { name: 'thumbnails', keyPath: 'id', indexes: ['cachedAt'] },
         { name: 'fullImages', keyPath: 'id', indexes: ['cachedAt'] },
       ],
-      thumbnails: 0, images: 0, legacyThumb: null, legacyImage: null,
+      thumbnails: ['newest-first', 'newest-last'].map(id => ({
+        id, thumbnail: 'new-thumb', blobType: 'image/jpeg', originalType: 'image/png', cachedAt: 20,
+      })),
+      fullImages: legacyVersion === 2 ? ['newest-first', 'newest-last'].map(id => ({
+        id, blob: 'new-image', blobType: 'image/png', mimeType: 'image/png', size: 9, cachedAt: 20,
+      })) : [],
+      thumbByNewHost: 'new-thumb', imageByNewHost: legacyVersion === 2 ? 'new-image' : null,
+      size: legacyVersion === 2 ? 18 : 0,
+    });
+  });
+}
+
+for (const scenario of [
+  { name: 'ID-keyed caches at an older database version', version: 2, upgradeVersion: 3, thumbnails: 'id', fullImages: 'id' },
+  { name: 'ID-keyed caches during a future v3 to v4 upgrade', version: 3, upgradeVersion: 4, thumbnails: 'id', fullImages: 'id' },
+  { name: 'ID-keyed caches with missing cachedAt indexes', version: 2, upgradeVersion: 3, thumbnails: 'id', fullImages: 'id', cachedAtIndex: false },
+  { name: 'an ID-keyed image store alongside legacy thumbnails', version: 2, upgradeVersion: 3, thumbnails: 'url', fullImages: 'id' },
+  { name: 'an ID-keyed thumbnail store alongside legacy images', version: 2, upgradeVersion: 3, thumbnails: 'id', fullImages: 'url' },
+  { name: 'an existing image store when thumbnails are missing', version: 2, upgradeVersion: 3, fullImages: 'id' },
+  { name: 'an existing thumbnail store when full images are missing', version: 2, upgradeVersion: 3, thumbnails: 'id' },
+]) {
+  test(`upgrades preserve ${scenario.name}`, async () => {
+    const result = await page.evaluate(fixture => {
+      const stores = [];
+      for (const name of ['thumbnails', 'fullImages']) {
+        const keyPath = fixture[name];
+        if (!keyPath) continue;
+        const key = keyPath === 'id' ? 'kept' : 'https://old.example/get/kept';
+        const record = name === 'thumbnails'
+          ? { thumbnail: new Blob(['kept-thumb'], { type: 'image/jpeg' }), originalType: 'image/png' }
+          : { blob: new Blob(['kept-image'], { type: 'image/png' }), size: 10, mimeType: 'image/png' };
+        stores.push({ name, keyPath, cachedAtIndex: fixture.cachedAtIndex, records: [{ [keyPath]: key, ...record, cachedAt: 123 }] });
+      }
+      return withCache(async (database, images) => {
+        if (fixture.cachedAtIndex === false) {
+          // Writes exercise the repaired cachedAt index used by image eviction.
+          await images.put({ url: 'https://files.example/get/new', type: 'image/png' }, new Blob(['new']));
+          await images.delete('new');
+        }
+        return {
+          version: database.db.version,
+          indexes: ['thumbnails', 'fullImages'].map(name => Array.from(database.db.transaction(name).objectStore(name).indexNames)),
+          stores: Array.from(database.db.objectStoreNames),
+          thumbnails: await Promise.all((await readRecords(database, 'thumbnails')).map(async record => ({
+            ...record, thumbnail: await record.thumbnail.text(), blobType: record.thumbnail.type,
+          }))),
+          fullImages: await Promise.all((await readRecords(database, 'fullImages')).map(async record => ({
+            ...record, blob: await record.blob.text(), blobType: record.blob.type,
+          }))),
+        };
+      }, { ...fixture, stores });
+    }, scenario);
+    assert.deepEqual(result, {
+      version: scenario.upgradeVersion, indexes: [['cachedAt'], ['cachedAt']], stores: ['fullImages', 'thumbnails'],
+      thumbnails: scenario.thumbnails ? [{ id: 'kept', thumbnail: 'kept-thumb', blobType: 'image/jpeg', originalType: 'image/png', cachedAt: 123 }] : [],
+      fullImages: scenario.fullImages ? [{ id: 'kept', blob: 'kept-image', blobType: 'image/png', size: 10, mimeType: 'image/png', cachedAt: 123 }] : [],
+    });
+  });
+}
+
+for (const failure of ['invalid legacy URL', 'unsupported key path', 'destination write failure']) {
+  test(`a migration with ${failure} rolls back both stores and the database version`, async () => {
+    const result = await page.evaluate(reason => withDatabaseName(async name => {
+      const legacyUrl = reason === 'invalid legacy URL' ? 'https://old.example/unsupported/image' : 'https://old.example/get/kept';
+      const fullImageKeyPath = reason === 'unsupported key path' ? 'unsupported' : 'url';
+      await seedDatabase(name, 2, [
+        { name: 'thumbnails', keyPath: 'url', records: [{ url: legacyUrl, thumbnail: new Blob(['kept-thumb']), cachedAt: 123 }] },
+        { name: 'fullImages', keyPath: fullImageKeyPath, records: [{ [fullImageKeyPath]: legacyUrl, blob: new Blob(['kept-image']), size: 10, cachedAt: 123 }] },
+      ]);
+      const originalPut = IDBObjectStore.prototype.put;
+      if (reason === 'destination write failure') {
+        IDBObjectStore.prototype.put = function(record, ...args) {
+          const request = originalPut.call(this, record, ...args);
+          // A real asynchronous ConstraintError aborts the versionchange transaction.
+          if (this.keyPath === 'id' && Object.hasOwn(record, 'blob')) return this.add(record);
+          return request;
+        };
+      }
+      const database = new ThumbnailCache();
+      database.dbName = name;
+      let rejected = false;
+      try {
+        await database.init();
+      } catch { rejected = true; }
+      finally {
+        IDBObjectStore.prototype.put = originalPut;
+        database.db?.close();
+      }
+      const original = await new Promise((resolve, reject) => {
+        const request = indexedDB.open(name);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      try {
+        const thumbnails = await readRecords({ db: original }, 'thumbnails');
+        const images = await readRecords({ db: original }, 'fullImages');
+        return {
+          rejected, version: original.version, stores: Array.from(original.objectStoreNames),
+          keyPaths: ['thumbnails', 'fullImages'].map(store => original.transaction(store).objectStore(store).keyPath),
+          thumbnail: { ...thumbnails[0], thumbnail: await thumbnails[0].thumbnail.text() },
+          image: { ...images[0], blob: await images[0].blob.text() },
+        };
+      } finally { original.close(); }
+    }), failure);
+    const legacyUrl = failure === 'invalid legacy URL' ? 'https://old.example/unsupported/image' : 'https://old.example/get/kept';
+    const fullImageKeyPath = failure === 'unsupported key path' ? 'unsupported' : 'url';
+    assert.deepEqual(result, {
+      rejected: true, version: 2, stores: ['fullImages', 'thumbnails'], keyPaths: ['url', fullImageKeyPath],
+      thumbnail: { url: legacyUrl, thumbnail: 'kept-thumb', cachedAt: 123 },
+      image: { [fullImageKeyPath]: legacyUrl, blob: 'kept-image', size: 10, cachedAt: 123 },
     });
   });
 }
