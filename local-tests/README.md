@@ -1,0 +1,88 @@
+# Offline client regression tests
+
+`client-testing/main` is the permanent integration target. This foundation
+contains **54 Node suites** verified against web-client main `cc0cc31e` and seven
+manual HTML fixtures. Feature-specific tests live on separate draft PR branches.
+See [MIGRATION.md](MIGRATION.md) for source revisions, related merged client PRs,
+and preserved tests not included in this main-compatible set.
+
+## Run against a selected client
+
+Use Node.js 20.19 or newer. From the repository root:
+
+```bash
+export WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2
+node local-tests/run.mjs --list
+node local-tests/run.mjs
+node local-tests/run.mjs dao-timeline.test.mjs
+```
+
+The default command runs every Node suite in this checkout and exits nonzero
+when any file fails. There are no failure exclusions or blanket skips. The
+runner copies the selected tests and fixtures into a temporary overlay and
+links source/assets from `WEB_CLIENT_ROOT`, leaving both checkouts unchanged.
+
+The ten NEAR suites use `fixtures/near-rpc.mjs` for a deterministic contract salt;
+other network requests reject. DAO fixtures use synthetic current-schema data.
+These offline suites require no live account or transaction broadcasts.
+
+For the manual HTML fixtures, start the loopback overlay server:
+
+```bash
+WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs --serve
+```
+
+Open a fixture such as
+`http://127.0.0.1:8765/tests/issue-1656-full-image-cache.browser.test.html`.
+Stop with Ctrl-C. Manual fixtures are not counted as passing automated checks.
+Feature branches may add opt-in `.browser.test.mjs` scripts; run them by filename
+and follow that branch's setup instructions. When Playwright is needed:
+
+```bash
+npm ci --prefix playwright-tests
+cd playwright-tests
+npx playwright install chromium
+```
+
+The existing `playwright-tests/` E2E flows have separate live-account and service
+requirements. Select and authorize an appropriate environment before running
+those flows.
+
+## Add or update relevant coverage
+
+1. Inspect the client/test branches and existing work. Set `WEB_CLIENT_ROOT` to
+   the exact implementation checkout, and record both repository SHAs.
+2. Create a task-specific topic worktree from published `main`. For a genuine
+   test dependency, use its parent test branch and state the intended stack.
+3. Run relevant existing tests before implementation. Add focused coverage only
+   where needed, using synthetic fixtures and observable behavior.
+4. Validate against the matching client PR head and record exact commands,
+   results and prerequisites. Keep test changes separate from client commits.
+5. Publish the topic and open a draft PR targeting `main`, or its parent test
+   branch while stacked. Do not commit, locally merge, cherry-pick or push task
+   changes directly into main.
+6. Link relevant client PRs from the test PR. Add reciprocal links to open client
+   PRs. Coverage for already-merged client PRs only needs their existing links;
+   do not create a new client PR for that historical work.
+7. Wait for required client features to merge, rerun focused tests against the
+   resulting client main SHA, then review/merge the test PR. After a parent test
+   PR merges, retarget/rebase children onto main using its resulting merge or
+   squash commit. Verify the published main contains the final test merge.
+
+Preserve the existing E2E PR stacks and the legacy branch. A full run on a feature
+branch can reveal unrelated client/test incompatibilities; report those with
+the tested pair of SHAs instead of weakening assertions or hiding failures.
+
+## Point implementation agents here
+
+Client agents need a pointer in their own `AGENTS.md` to find this companion
+repository. Prefer an explicit absolute `CLIENT_TESTING_ROOT`, then nearby
+checkouts or the primary client checkout's sibling directory. Clone
+`https://github.com/Liberdus/client-testing.git` when needed; local repositories
+can live anywhere. Select `main`, read this repository's instructions, and use
+a separate topic worktree for relevant test changes.
+
+At client PR creation, create/link the relevant companion PR only if tests need
+changes; otherwise report N/A and the validation performed. Include test/client
+commits, commands/results and any remaining publication, review or dependency
+steps in the handoff.

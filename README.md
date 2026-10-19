@@ -1,5 +1,11 @@
 # Automated Liberdus Web Client Testing
 
+## Offline client regression tests
+
+Reusable source regressions and synthetic fixtures live in [local-tests](local-tests/README.md).
+Select the client checkout with `WEB_CLIENT_ROOT`. New test changes use topic
+PRs targeting `main`; feature-dependent test PRs follow their client PRs.
+
 ## Demo Video
 
 https://drive.google.com/file/d/19oWRpK_AJUo3G3hHYYGN_ZryAT-CSjyd/view?usp=sharing
