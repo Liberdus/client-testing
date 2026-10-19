@@ -47,9 +47,12 @@ request new client PRs for already-merged behavior.
 The MLS audit at client `8e1c86a13af1f82a7df3d31d06cd7a8f9e191559`
 ran all 11 unchanged suites individually under Node 20.19.6. Ten completed;
 `test/leave-effective.mjs` repeatedly aborted after seven checks with a V8
-invalid-size fatal error (SIGTRAP). Full MLS validation remains incomplete;
-the crash cause is unresolved. This failure belongs to existing client coverage,
-not to a test imported by this foundation.
+invalid-size fatal error (SIGTRAP). The cause was an unbounded path traversal
+from the removed member's retained leaf after the tree contracted. Client fix
+[`90398a3d`](https://github.com/Liberdus/web-client-v2/commit/90398a3d4b5505cec22b2518695382e3f85ab05e)
+adds a reproducible tree-path bounds guard. The unchanged leave test and all
+11 suites in `npm run test:mls` pass with that fix. This was existing client
+coverage, not a test imported by this foundation.
 
 The original imports came from ignored client tests and commit
 `861dd8e5260290e1bb6870cf2994d3d58c56a161` (message confirmation); recovered
