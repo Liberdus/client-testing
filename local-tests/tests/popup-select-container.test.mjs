@@ -32,10 +32,14 @@ class ElementFixture {
   get textContent() { return this.children.length ? this.children.map(child => child.textContent).join('') : this.text || ''; }
   set textContent(value) { this.children = []; this.text = value; }
   set innerHTML(html) {
-    this.children = [...html.matchAll(/<span\b([^>]*)>/g)].map(([, attributes]) => {
-      const span = new ElementFixture('span');
-      span.readAttributes(attributes);
-      return span;
+    this.children = [...html.matchAll(/<(span|option)\b([^>]*)>([^<]*)/g)].map(([, tagName, attributes, label]) => {
+      const element = new ElementFixture(tagName);
+      element.readAttributes(attributes);
+      if (tagName === 'option') {
+        element.value = /\bvalue="([^"]*)"/.exec(attributes)?.[1] ?? label;
+        element.textContent = label;
+      }
+      return element;
     });
   }
   readAttributes(attributes) {
@@ -98,9 +102,10 @@ class PopupFixture {
       { id: 'bsc:native', name: 'BNB', symbol: 'BNB' },
     ] } };
     const context = { document: this, window: { addEventListener() {} }, myData: this.myData };
-    runInNewContext(`${popupSelectSource}\n${isLibAssetSource}\n${walletSource}\nglobalThis.PopupSelect = PopupSelect; globalThis.wallet = new WalletScreen();`, context);
+    runInNewContext(`${popupSelectSource}\n${historySource}\nglobalThis.PopupSelect = PopupSelect; globalThis.history = new HistoryModal();`, context);
     this.PopupSelect = context.PopupSelect;
-    this.wallet = context.wallet;
+    this.history = context.history;
+    this.history.assetSelect = this.getElementById('historyAsset');
     this.PopupSelect.load();
   }
   addEventListener() {}
@@ -123,8 +128,7 @@ class PopupFixture {
 
 const popupSelectSource = PopupFixture.source('\nclass PopupSelect', '\nconst FULL_IMAGE_CACHE_MAX_SIZE');
 const addProposalSource = PopupFixture.source('class AddProposalModal', 'const addProposalModal');
-const walletSource = PopupFixture.source('class WalletScreen', 'const walletScreen');
-const isLibAssetSource = PopupFixture.source('function isLibAsset(', 'function getLibUsdPriceFromParameters(');
+const historySource = PopupFixture.source('class HistoryModal', 'const historyModal');
 
 test('shared loading enhances every select present in the client markup', () => {
   const fixture = new PopupFixture();
@@ -176,12 +180,18 @@ test('EVM network option replacement preserves selection and updates the visible
   assert.equal(fixture.PopupSelect.getTrigger(select).querySelector('.popup-select__value').textContent, 'Polygon (POL)');
 });
 
-test('LIB asset option replacement excludes EVM assets and synchronizes all LIB selectors', () => {
+test('history asset option replacement synchronizes its remaining dynamic select', () => {
   const fixture = new PopupFixture();
-  for (const id of ['sendAsset', 'receiveAsset', 'historyAsset']) {
-    const select = fixture.getElementById(id);
-    fixture.wallet.populateAssetSelect(select);
-    assert.deepEqual(select.options.map(option => option.value), ['liberdus']);
-    assert.equal(fixture.PopupSelect.getTrigger(select).querySelector('.popup-select__value').textContent, 'Liberdus (LIB)');
-  }
+  const select = fixture.getElementById('historyAsset');
+  fixture.history.populateAssets();
+  fixture.PopupSelect.sync(select);
+  assert.deepEqual(select.options.map(option => option.value), ['0', '1']);
+  assert.equal(fixture.PopupSelect.getTrigger(select).querySelector('.popup-select__value').textContent, 'Liberdus (LIB)');
+
+  fixture.myData.wallet.assets = [{ id: 'liberdus', name: 'LIB', symbol: 'LIB' }];
+  fixture.history.populateAssets();
+  fixture.PopupSelect.sync(select);
+  assert.deepEqual(select.options.map(option => option.value), ['0']);
+  assert.equal(fixture.PopupSelect.getTrigger(select).querySelector('.popup-select__value').textContent, 'LIB (LIB)');
+  assert.match(historySource, /this\.populateAssets\(\);\s*PopupSelect\.sync\(this\.assetSelect\);/);
 });
