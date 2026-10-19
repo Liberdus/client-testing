@@ -45,11 +45,14 @@ npx playwright install chromium
 ```
 
 `issue-1755-attachment-cache-ids.browser.test.mjs` runs the cache classes against
-real IndexedDB in headless Chromium. It checks URL-to-ID migration, newest-record
-deduplication, schema-based preservation on future upgrades, transactional rollback,
-hostname changes, size eviction and old thumbnail backup imports. It also runs the
-full-image HTML fixture automatically. Only a loopback server and synthetic cache
-records are used; no account or external service is required. Run it with:
+real IndexedDB in headless Chromium. It checks version-by-version ordering in one
+upgrade transaction, asynchronous step completion, URL-to-ID migration, newest-record
+deduplication, schema-based preservation, rollback across multiple version steps,
+unregistered-version rejection, hostname changes, size eviction and old thumbnail
+backup imports. A synthetic registered v4 step verifies future upgrades after v3.
+It also runs the full-image HTML fixture automatically. Only a loopback server
+and synthetic cache records are used; no account or external service is required.
+Run it with:
 
 ```bash
 WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs issue-1755-attachment-cache-ids.browser.test.mjs
