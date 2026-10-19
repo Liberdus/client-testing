@@ -44,6 +44,17 @@ cd playwright-tests
 npx playwright install chromium
 ```
 
+`issue-1755-attachment-cache-ids.browser.test.mjs` runs the cache classes against
+real IndexedDB in headless Chromium. It checks URL-to-ID migration, newest-record
+deduplication, schema-based preservation on future upgrades, transactional rollback,
+hostname changes, size eviction and old thumbnail backup imports. It also runs the
+full-image HTML fixture automatically. Only a loopback server and synthetic cache
+records are used; no account or external service is required. Run it with:
+
+```bash
+WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs issue-1755-attachment-cache-ids.browser.test.mjs
+```
+
 The existing `playwright-tests/` E2E flows have separate live-account and service
 requirements. Select and authorize an appropriate environment before running
 those flows.

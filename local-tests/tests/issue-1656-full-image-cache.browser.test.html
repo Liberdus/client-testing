@@ -87,7 +87,7 @@
         await database.init();
 
         assert(database.db.version === 3, 'thumbnail database should upgrade to version 3');
-        assert(await database.get('https://files.example/get/thumbnail') === null, 'upgrade should discard URL-keyed cache records');
+        assert(await blobText(await database.get('https://new-files.example/get/thumbnail')) === 'thumbnail', 'upgrade should preserve URL-keyed cache records under their attachment ID');
 
         const store = database.db.transaction('fullImages', 'readonly').objectStore('fullImages');
         assert(store.keyPath === 'id', 'attachment ID should be the primary key');
