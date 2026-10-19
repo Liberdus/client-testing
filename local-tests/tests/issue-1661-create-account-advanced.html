@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="../styles.css" />
+    <title>Create account check</title>
+  </head>
+  <body>
+    <div class="container">
+      <div class="modal fixed-header active" id="createAccountModal">
+        <div class="modal-header">
+          <button class="back-button" aria-label="Back"></button>
+          <div class="modal-title">Create Account</div>
+        </div>
+        <div class="modal-content" id="modalContent">
+          <div class="form-container">
+            <form class="form--narrow create-account-form">
+              <div class="form-group">
+                <label for="newUsername">Username</label>
+                <input class="form-control" id="newUsername" placeholder="Choose a username" />
+                <p class="create-account-help">
+                  This is how people find you, and it is permanent — a name cannot be changed once it is taken.
+                </p>
+              </div>
+              <details class="create-account-advanced" id="advancedOptions">
+                <summary>
+                  <span>Advanced</span>
+                  <span class="create-account-chevron" aria-hidden="true"></span>
+                </summary>
+                <div class="create-account-advanced-body">
+                  <div class="create-account-option">
+                    <div class="create-account-option-copy">
+                      <div class="create-account-option-heading">
+                        <label for="privateAccount">Private account</label>
+                        <button type="button" class="toll-info-icon" data-icon="info" aria-label="About private accounts"></button>
+                      </div>
+                      <label class="create-account-option-help" for="privateAccount">
+                        Can only message and pay other private accounts. Cannot be changed later.
+                      </label>
+                    </div>
+                    <label class="create-account-option-toggle" for="privateAccount">
+                      <input type="checkbox" id="privateAccount" />
+                      <span class="create-account-check" aria-hidden="true"></span>
+                    </label>
+                  </div>
+                  <div class="create-account-option">
+                    <div class="create-account-option-copy">
+                      <label class="create-account-option-title" for="ownKey">Use my own private key</label>
+                      <label class="create-account-option-help" for="ownKey">Otherwise one is generated for you.</label>
+                    </div>
+                    <label class="create-account-option-toggle" for="ownKey">
+                      <input type="checkbox" id="ownKey" />
+                      <span class="create-account-check" aria-hidden="true"></span>
+                    </label>
+                  </div>
+                  <div id="privateKeySection" hidden>
+                    <label class="create-account-private-key-label" for="privateKey">Private key</label>
+                    <div class="create-account-private-key">
+                      <input class="form-control" id="privateKey" type="password" placeholder="Your key, in hex" />
+                      <button type="button" class="password-toggle-btn" aria-label="Show private key"></button>
+                    </div>
+                  </div>
+                </div>
+              </details>
+              <div class="form-actions create-account-actions" id="createAccountActions">
+                <button type="submit" class="btn btn--primary btn--pill btn--full">Create Account</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const advanced = document.getElementById('advancedOptions');
+      const ownKey = document.getElementById('ownKey');
+      const privateKeySection = document.getElementById('privateKeySection');
+      if (params.has('expanded')) advanced.open = true;
+      if (params.has('key')) {
+        ownKey.checked = true;
+        privateKeySection.hidden = false;
+      }
+      ownKey.addEventListener('change', () => { privateKeySection.hidden = !ownKey.checked; });
+
+      requestAnimationFrame(() => {
+        const content = document.getElementById('modalContent');
+        const actions = document.getElementById('createAccountActions');
+        const normalFlow = getComputedStyle(actions).position === 'static' && actions.offsetTop > advanced.offsetTop;
+        if (innerHeight < 500) content.scrollTop = content.scrollHeight;
+        requestAnimationFrame(() => {
+          const button = actions.querySelector('button').getBoundingClientRect();
+          const contentRect = content.getBoundingClientRect();
+          const reachable = innerHeight >= 500 || button.bottom <= contentRect.bottom + 1;
+          document.documentElement.dataset.layout = normalFlow && reachable ? 'pass' : 'fail';
+          document.title = `Create account ${document.documentElement.dataset.layout}`;
+        });
+      });
+    </script>
+  </body>
+</html>
