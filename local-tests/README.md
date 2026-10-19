@@ -52,6 +52,14 @@ WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs evm-pay
 WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs lib-send-receive.browser.test.mjs
 ```
 
+`issue-1755-attachment-cache-ids.browser.test.mjs` runs only the attachment cache classes in headless Chromium against real IndexedDB. It checks cache upgrades, storage-host changes, size eviction and thumbnail backup compatibility, and also runs the existing full-image HTML fixture. It starts its own loopback server and needs no account or external service. Run it alongside the focused Node tests with:
+
+```bash
+WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs \
+  issue-1656-full-image-cache.test.mjs issue-1755-attachment-cache-ids.test.mjs \
+  issue-1755-attachment-cache-ids.browser.test.mjs f02-attachment-security.test.mjs
+```
+
 `mock-catalog.test.mjs` verifies the generated mock catalog is current and covers every production modal. `mock-board.browser.test.mjs` serves the mock locally and checks rendered wallet fixtures, separate LIB/EVM transfer forms, contact and direct-address EVM transfers, DAO navigation states, EVM chat statuses and recovery menus, category filters, zoom controls, and canvas panning. It blocks external requests and the production `app.js`; no live account or wallet service runs. These tests require a client branch containing `mock/`. Run both with:
 
 ```bash
