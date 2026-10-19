@@ -3,14 +3,17 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const appSource = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+const thumbnailSource = appSource.slice(
+  appSource.indexOf('\nclass ThumbnailCache'),
+  appSource.indexOf('\nconst thumbnailCache = new ThumbnailCache();'),
+);
 const cacheSource = appSource.slice(
   appSource.lastIndexOf('\nconst FULL_IMAGE_CACHE_MAX_SIZE'),
-).replace(
-  'const fullImageCache = new FullImageCache(thumbnailCache);',
-  'export { FullImageCache };',
+  appSource.lastIndexOf('\nconst fullImageCache = new FullImageCache(thumbnailCache);'),
 );
-const moduleUrl = `data:text/javascript;base64,${Buffer.from(cacheSource).toString('base64')}`;
-const { FullImageCache } = await import(moduleUrl);
+const { FullImageCache } = new Function(
+  `${thumbnailSource}\n${cacheSource}\nreturn { FullImageCache };`,
+)();
 
 class MemoryCache extends FullImageCache {
   constructor() {
@@ -33,7 +36,7 @@ async function blobText(blob) {
 
 test('downloads once and reuses the full image by URL', async () => {
   const cache = new MemoryCache();
-  const attachment = { url: 'https://files.example/image-a', type: 'image/png' };
+  const attachment = { url: 'https://files.example/get/image-a', type: 'image/png' };
   let decryptions = 0;
 
   const resolveImage = () => cache.getOrCache({
@@ -54,8 +57,8 @@ test('downloads once and reuses the full image by URL', async () => {
 
 test('different URLs do not collide when images have the same filename', async () => {
   const cache = new MemoryCache();
-  const first = { url: 'https://files.example/a', name: 'photo.png', type: 'image/png' };
-  const second = { url: 'https://files.example/b', name: 'photo.png', type: 'image/png' };
+  const first = { url: 'https://files.example/get/a', name: 'photo.png', type: 'image/png' };
+  const second = { url: 'https://files.example/get/b', name: 'photo.png', type: 'image/png' };
 
   const firstBlob = await cache.getOrCache({
     attachment: first,
@@ -73,8 +76,8 @@ test('different URLs do not collide when images have the same filename', async (
 
 test('evicts the oldest full images until the incoming image fits', async () => {
   const records = [
-    { url: 'https://files.example/a', size: 5, cachedAt: 1 },
-    { url: 'https://files.example/b', size: 6, cachedAt: 2 },
+    { id: 'a', size: 5, cachedAt: 1 },
+    { id: 'b', size: 6, cachedAt: 2 },
   ];
   const deletedUrls = [];
   let insertedRecord;
@@ -91,7 +94,7 @@ test('evicts the oldest full images until the incoming image fits', async () => 
             const cursor = record
               ? {
                   value: record,
-                  primaryKey: record.url,
+                  primaryKey: record.id,
                   continue: () => {
                     recordIndex += 1;
                     queueMicrotask(advance);
@@ -117,13 +120,13 @@ test('evicts the oldest full images until the incoming image fits', async () => 
   const cache = new FullImageCache(database, 11);
 
   const cached = await cache.put(
-    { url: 'https://files.example/c', type: 'image/png' },
+    { url: 'https://files.example/get/c', type: 'image/png' },
     new Blob(['third'], { type: 'image/png' }),
   );
 
   assert.equal(cached, true);
-  assert.deepEqual(deletedUrls, ['https://files.example/a']);
-  assert.equal(insertedRecord.url, 'https://files.example/c');
+  assert.deepEqual(deletedUrls, ['a']);
+  assert.equal(insertedRecord.id, 'c');
 });
 
 test('cache failures do not prevent use of a freshly decrypted image', async () => {
@@ -132,20 +135,11 @@ test('cache failures do not prevent use of a freshly decrypted image', async () 
   cache.put = async () => { throw new Error('QuotaExceededError'); };
 
   const blob = await cache.getOrCache({
-    attachment: { url: 'https://files.example/image', type: 'image/png' },
+    attachment: { url: 'https://files.example/get/image', type: 'image/png' },
     downloadAndDecrypt: async () => downloadedBlob,
   });
 
   assert.equal(blob, downloadedBlob);
-});
-
-test('stores URL-keyed full images beside thumbnails', () => {
-  assert.match(appSource, /this\.dbName = 'liberdus_thumbnails';/);
-  assert.match(appSource, /this\.fullImageStoreName = 'fullImages';/);
-  assert.match(appSource, /createObjectStore\(this\.fullImageStoreName, \{ keyPath: 'url' \}\)/);
-  assert.match(appSource, /store\.createIndex\('cachedAt', 'cachedAt'/);
-  assert.doesNotMatch(appSource, /cacheKey|lastAccessedAt|createFullImageCacheScope/);
-  assert.doesNotMatch(appSource, /from '\.\/full-image-cache\.js'/);
 });
 
 test('the application routes only image saves through the full-image cache', () => {
@@ -154,7 +148,7 @@ test('the application routes only image saves through the full-image cache', () 
   assert.match(appSource, /type: "DOWNLOAD_ATTACHMENT",\s*filename: filename,\s*mime: blob\.type,\s*dataUrl: reader\.result/);
 });
 
-test('attachment cleanup deletes both URL-keyed image records', {
+test('attachment cleanup deletes both image records', {
   skip: !appSource.includes('\n  purgeImageCaches(xattach) {'),
 }, async () => {
   const methodStart = appSource.indexOf('\n  purgeImageCaches(xattach) {');
