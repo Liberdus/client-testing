@@ -36,7 +36,7 @@ request new client PRs for already-merged behavior.
 | `issue-1755-attachment-cache-ids.*` and ID-keyed full-image fixture changes | Separate tests for [#1811](https://github.com/Liberdus/web-client-v2/pull/1811); this foundation retains the pre-change URL-keyed full-image tests. |
 | `message-confirmation.test.cjs` | Separate coverage for [#1802](https://github.com/Liberdus/web-client-v2/pull/1802). |
 | `evm-payment-explorer.*` | Separate coverage for [#1793](https://github.com/Liberdus/web-client-v2/pull/1793). |
-| `issue-1680-chat-attachment-thumbnails.*` | Dependent coverage for [#1684](https://github.com/Liberdus/web-client-v2/pull/1684) → [#1685](https://github.com/Liberdus/web-client-v2/pull/1685). |
+| `issue-1680-chat-attachment-thumbnails.*` | Independent coverage for [#1685](https://github.com/Liberdus/web-client-v2/pull/1685), which targets client main directly without the deferred reply-quote changes. |
 | `issue-1553-call-links.test.mjs` | New focused companion coverage for [#1553](https://github.com/Liberdus/web-client-v2/pull/1553); 5/5 cases pass at its client head, while the eligible-link regression case fails on current client main. |
 | MLS `test/*.mjs` | Already committed in client [#1655](https://github.com/Liberdus/web-client-v2/pull/1655), including its `npm run test:mls` entry point; retain the 11 suites there without duplicating their implementation dependencies in this repository. |
 | `mock-catalog.test.mjs`, `mock-board.browser.test.mjs` | Preserved in the legacy branch; the mock implementation has no matching open client PR in this migration. |
