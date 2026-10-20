@@ -26,9 +26,17 @@ postAssetTransfer = async () => { window.__broadcasts++; throw Error('Fixture fo
 signObj = async () => { window.__signings++; throw Error('Fixture forbids signing'); };
 let fixtureBalance = 3852338932000000000000n;
 let fixtureBalanceFails = false;
+let fixturePending = null;
+async function fixtureWaitForSource(name) {
+  if (!fixturePending) return;
+  fixturePending.started.push(name);
+  await fixturePending.sources[name].promise;
+  fixturePending.finished.push(name);
+}
 queryNetwork = async (path) => {
   if (path.endsWith('/balance')) {
     window.__balanceQueries++;
+    await fixtureWaitForSource('native');
     if (fixtureBalanceFails) throw Error('Synthetic balance failure');
     return { balance: fixtureBalance };
   }
@@ -46,18 +54,23 @@ window.__fixture = {
     lib.balance = fixtureBalance;
     lib.addresses[0].balance = fixtureBalance;
     myData.wallet.balanceUpdatedAt = getCorrectedTimestamp() - 120000;
+    myData.wallet.overviewUpdatedAt = getCorrectedTimestamp() - 120000;
     myData.wallet.timestamp = getCorrectedTimestamp();
     window.__balanceQueries = 0;
     window.__calls = {};
     isOnline = true;
     walletScreen.firstTimeLoad = false;
     multichain.updateSummary = async () => {
+      await fixtureWaitForSource('multichain');
       document.getElementById('multichainSummaryValue').textContent = '$0.00';
+      return true;
     };
     evmAssets.refresh = async () => {
+      await fixtureWaitForSource('evm');
       document.getElementById('evmAssetsSummaryValue').textContent = '$0.01';
       return [];
     };
+    evmAssets.getStatus = () => 'connected';
     evmAssets.transactions.send = async () => { window.__signings++; throw Error('Fixture forbids EVM signing'); };
     evmAssets.transactions.broadcast = async () => { window.__broadcasts++; throw Error('Fixture forbids EVM broadcast'); };
     chatPaymentPanel.run = async () => { window.__signings++; throw Error('Fixture forbids multichain signing'); };
@@ -82,15 +95,29 @@ window.__fixture = {
     await walletScreen.updateWalletView();
   },
   async ageBalance(milliseconds) {
-    myData.wallet.balanceUpdatedAt = getCorrectedTimestamp() - milliseconds;
+    myData.wallet.overviewUpdatedAt = getCorrectedTimestamp() - milliseconds;
     await walletScreen.updateWalletView();
   },
   prepareRefresh(fail = false) {
     fixtureBalanceFails = fail;
     isOnline = true;
     myData.wallet.timestamp = 0;
+    window.__balanceQueries = 0;
     updateUIForConnectivity();
   },
+  startPendingRefresh() {
+    this.prepareRefresh();
+    fixturePending = { started: [], finished: [], sources: {} };
+    for (const name of ['native', 'multichain', 'evm']) {
+      const source = {};
+      source.promise = new Promise(resolve => { source.resolve = resolve; });
+      fixturePending.sources[name] = source;
+    }
+    window.__pendingRefresh = walletScreen.updateWalletView();
+  },
+  pendingSources() { return { started: fixturePending.started, finished: fixturePending.finished }; },
+  releaseSource(name) { fixturePending.sources[name].resolve(); },
+  async finishPendingRefresh() { await window.__pendingRefresh; fixturePending = null; },
   setOffline() { isOnline = false; updateUIForConnectivity(); },
   installActionCounters() {
     const count = name => () => { window.__calls[name] = (window.__calls[name] || 0) + 1; };
@@ -103,7 +130,7 @@ window.__fixture = {
     evmAssets.assetsModal.open = count('evm');
     window.open = url => { window.__calls[url] = (window.__calls[url] || 0) + 1; return null; };
   },
-  data() { return { timestamp: myData.wallet.timestamp, balanceUpdatedAt: myData.wallet.balanceUpdatedAt }; },
+  data() { return { timestamp: myData.wallet.timestamp, balanceUpdatedAt: myData.wallet.balanceUpdatedAt, overviewUpdatedAt: myData.wallet.overviewUpdatedAt }; },
 };
 `;
 const source = await readFile(resolve(root, 'app.js'), 'utf8');
@@ -134,7 +161,7 @@ async function measureWallet(page, scenario) {
       card: '.wallet-native-balance', name: '#assetsList .asset-name', rate: '#assetsList .asset-symbol',
       info: '#assetsList .asset-info', balance: '#assetsList .asset-balance',
       quantity: '#assetsList .wallet-native-quantity', usd: '#assetsList .wallet-native-usd',
-      actions: '.wallet-actions', trade: '.wallet-text-actions', other: '.wallet-assets',
+      actions: '.wallet-actions', other: '.wallet-assets',
     };
     return {
       boxes: Object.fromEntries(Object.entries(selectors).map(([name, selector]) => [name, rect(selector)])),
@@ -143,6 +170,12 @@ async function measureWallet(page, scenario) {
       usdFont: parseFloat(getComputedStyle(document.querySelector(selectors.usd)).fontSize),
       rateFont: parseFloat(getComputedStyle(document.querySelector(selectors.rate)).fontSize),
       updatedFont: parseFloat(getComputedStyle(document.querySelector(selectors.updated)).fontSize),
+      tiles: [...document.querySelectorAll('#walletScreen .wallet-actions .wallet-action-button')].map(element => {
+        const { left, top, bottom, width, height } = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return { id: element.id, left, top, bottom, width, height, background: style.backgroundColor,
+          fontSize: style.fontSize, radius: style.borderRadius };
+      }),
       controls: [...document.querySelectorAll('#walletScreen button')].map(element => {
         const { width, height, left, right } = element.getBoundingClientRect();
         return { id: element.id, width, height, left, right };
@@ -169,8 +202,20 @@ async function measureWallet(page, scenario) {
   assert.ok(geometry.quantityFont < geometry.usdFont, `${scenario}: LIB balance is smaller than dollars`);
   assert.ok(geometry.rateFont <= 12 && geometry.updatedFont <= 12, `${scenario}: quote and timestamp are compact`);
   assert.ok(boxes.actions.top >= boxes.card.bottom, `${scenario}: native actions follow native card`);
-  assert.ok(boxes.trade.top >= boxes.actions.bottom, `${scenario}: trade links follow native actions`);
-  assert.ok(boxes.other.top >= boxes.trade.bottom, `${scenario}: Other assets follows native actions and links`);
+  assert.ok(boxes.other.top >= boxes.actions.bottom, `${scenario}: Other assets follows native actions`);
+  assert.equal(geometry.tiles.length, 6, `${scenario}: all original native action tiles are present`);
+  const [send, receive, history, buy, sell, faucet] = geometry.tiles;
+  for (const row of [[send, receive, history], [buy, sell, faucet]]) {
+    assert.ok(Math.max(...row.map(tile => tile.top)) - Math.min(...row.map(tile => tile.top)) <= 1, `${scenario}: each action row has three aligned tiles`);
+    assert.ok(row[0].left < row[1].left && row[1].left < row[2].left, `${scenario}: action tiles keep their left-to-right order`);
+  }
+  assert.ok(buy.top >= send.bottom, `${scenario}: Buy, Sell, Faucet occupy the second row`);
+  for (const tile of geometry.tiles) {
+    assert.equal(tile.fontSize, '14px', `${scenario}: ${tile.id} retains original action typography`);
+    assert.equal(tile.radius, '8px', `${scenario}: ${tile.id} retains original tile corners`);
+    assert.equal(tile.background, send.background, `${scenario}: ${tile.id} has the shared tile surface`);
+    assert.notEqual(tile.background, 'rgba(0, 0, 0, 0)', `${scenario}: ${tile.id} has a visible tile surface`);
+  }
   for (const name of ['name', 'rate', 'quantity', 'usd']) {
     const box = boxes[name];
     assert.ok(box.left >= boxes.card.left && box.right <= boxes.card.right + 1, `${scenario}: ${name} remains inside native card`);
@@ -189,12 +234,12 @@ async function verifyInteractions(page) {
   await page.locator('#refreshBalance').click();
   await page.waitForFunction(() => window.__balanceQueries === 1);
   await page.waitForFunction(() => /just now/.test(document.querySelector('#walletBalanceUpdated').textContent));
-  const refreshed = await page.evaluate(() => __fixture.data().balanceUpdatedAt);
+  const refreshed = await page.evaluate(() => __fixture.data().overviewUpdatedAt);
   assert.ok(refreshed > 0);
   assert.equal(await page.locator('#walletBalanceUpdated').getAttribute('datetime'), new Date(refreshed).toISOString());
 
-  const keyboardOrder = ['openSendAssetFormModal', 'openReceiveModal', 'openHistoryModal', 'openFaucetBridgeButton',
-    'openBuyButton', 'openSellButton', 'multichainSummary', 'evmAssetsSummary'];
+  const keyboardOrder = ['openSendAssetFormModal', 'openReceiveModal', 'openHistoryModal', 'openBuyButton',
+    'openSellButton', 'openFaucetBridgeButton', 'multichainSummary', 'evmAssetsSummary'];
   // Redrawing balances must not replace action controls or duplicate listeners.
   await page.evaluate(async () => {
     await __fixture.walletScreen.updateWalletView();
@@ -210,9 +255,6 @@ async function verifyInteractions(page) {
     send: 1, receive: 1, history: 1, faucet: 1,
     'https://liberdus.com/buy': 1, 'https://liberdus.com/sell': 1, multichain: 1, evm: 1,
   });
-  for (const id of ['openBuyButton', 'openSellButton']) {
-    assert.equal(await page.locator(`#${id}`).evaluate(element => getComputedStyle(element).backgroundColor), 'rgba(0, 0, 0, 0)', `${id} looks like a link`);
-  }
   await page.evaluate(() => document.querySelector('#openHistoryModal').classList.add('has-notification'));
   await page.waitForFunction(() => getComputedStyle(document.querySelector('#openHistoryModal'), '::after').opacity === '1');
   await page.locator('#switchToContacts').click();
@@ -225,6 +267,24 @@ async function verifyInteractions(page) {
   assert.equal(await page.locator('#offlineIndicator').isVisible(), false, 'Returning to wallet hides Offline indicator');
   assert.equal(await page.evaluate(() => __fixture.walletScreen.balanceUpdatedTimer !== null), true, 'Returning to wallet restarts timestamp timer');
   assert.equal(await page.locator('#switchToWallet').evaluate(element => element.classList.contains('active')), true);
+}
+
+async function verifyPendingStatus(page) {
+  // Exercise both possible final sources: external assets after LIB, and LIB
+  // after the external summaries. Each source is synthetic and independently held.
+  for (const order of [['native', 'multichain', 'evm'], ['evm', 'multichain', 'native']]) {
+    await page.evaluate(() => __fixture.startPendingRefresh());
+    await page.waitForFunction(() => __fixture.pendingSources().started.length === 3);
+    assert.equal(await page.locator('#walletBalanceUpdated').textContent(), 'Updating…');
+    for (const name of order.slice(0, -1)) {
+      await page.evaluate(name => __fixture.releaseSource(name), name);
+      await page.waitForFunction(name => __fixture.pendingSources().finished.includes(name), name);
+      assert.equal(await page.locator('#walletBalanceUpdated').textContent(), 'Updating…', `${order.join(', ')}: status waits for every wallet source`);
+    }
+    await page.evaluate(name => __fixture.releaseSource(name), order.at(-1));
+    await page.evaluate(() => __fixture.finishPendingRefresh());
+    assert.equal(await page.locator('#walletBalanceUpdated').textContent(), 'Updated just now');
+  }
 }
 
 let browser;
@@ -265,7 +325,7 @@ try {
         assert.equal(await page.locator('.wallet-assets .section-title').textContent(), 'Other assets');
         assert.equal(await page.locator('#openBuyButton').getAttribute('aria-label'), 'Buy LIB (opens in a new tab)');
         assert.equal(await page.locator('#openSellButton').getAttribute('aria-label'), 'Sell LIB (opens in a new tab)');
-        assert.deepEqual(await page.locator('#walletScreen .wallet-actions .action-label').allTextContents(), ['Send', 'Receive', 'History', 'Faucet']);
+        assert.deepEqual(await page.locator('#walletScreen .wallet-actions .action-label').allTextContents(), ['Send', 'Receive', 'History', 'Buy', 'Sell', 'Faucet']);
         const icons = await page.locator('.wallet-asset-group-icon').evaluateAll(elements => elements.map(element => {
           const style = getComputedStyle(element, '::before');
           return [style.maskImage, style.backgroundImage];
@@ -274,6 +334,8 @@ try {
         assert.match(icons[0][0], /^url\("data:image\/svg\+xml/, 'Shared asset icon has a real SVG mask');
         assert.deepEqual(icons[0], icons[1], 'External asset groups share the same icon');
         await measureWallet(page, `${viewport.name}-${colorScheme}`);
+        await verifyPendingStatus(page);
+        await page.evaluate(() => __fixture.setOffline());
         await page.evaluate(() => __fixture.walletScreen.stopBalanceUpdatedTimer());
         await page.clock.install();
         await page.evaluate(() => __fixture.walletScreen.startBalanceUpdatedTimer());
@@ -314,7 +376,7 @@ try {
       assert.equal(await page.evaluate(() => window.__broadcasts), 0);
       assert.deepEqual(external, [], 'No external requests');
       assert.deepEqual(errors, [], 'No uncaught client errors');
-      console.log(`PASS ${captureLabel} ${viewport.name} ${colorScheme}: ${captureOnly ? 'actual client capture' : 'wallet geometry, amounts, timestamp aging/lifecycle, keyboard actions, navigation and responsive fallback'}; zero signing/broadcast/external requests`);
+      console.log(`PASS ${captureLabel} ${viewport.name} ${colorScheme}: ${captureOnly ? 'actual client capture' : 'six action tiles, wallet geometry, combined refresh status, timestamp aging/lifecycle, keyboard actions and navigation'}; zero signing/broadcast/external requests`);
       await context.close();
     }
   }
