@@ -61,7 +61,7 @@
             const store = request.result.createObjectStore('thumbnails', { keyPath: 'url' });
             store.createIndex('cachedAt', 'cachedAt', { unique: false });
             store.put({
-              url: 'https://files.example/thumbnail',
+              url: 'https://files.example/get/thumbnail',
               thumbnail: new Blob(['thumbnail'], { type: 'image/jpeg' }),
               cachedAt: Date.now(),
             });
@@ -77,8 +77,8 @@
       let database;
       let reloadedDatabase;
       try {
-        const firstAttachment = { url: 'https://files.example/a', type: 'image/png' };
-        const secondAttachment = { url: 'https://files.example/b', type: 'image/png' };
+        const firstAttachment = { url: 'https://files.example/get/a', type: 'image/png' };
+        const secondAttachment = { url: 'https://files.example/get/b', type: 'image/png' };
 
         await createVersionOneDatabase(dbName);
         database = new ThumbnailCache();
@@ -86,11 +86,11 @@
         const cache = new FullImageCache(database, 1024);
         await database.init();
 
-        assert(database.db.version === 2, 'thumbnail database should upgrade to version 2');
-        assert(await blobText(await database.get('https://files.example/thumbnail')) === 'thumbnail', 'existing thumbnail should survive');
+        assert(database.db.version === 3, 'thumbnail database should upgrade to version 3');
+        assert(await blobText(await database.get('https://new-files.example/get/thumbnail')) === 'thumbnail', 'upgrade should preserve URL-keyed cache records under their attachment ID');
 
         const store = database.db.transaction('fullImages', 'readonly').objectStore('fullImages');
-        assert(store.keyPath === 'url', 'attachment URL should be the primary key');
+        assert(store.keyPath === 'id', 'attachment ID should be the primary key');
         assert(JSON.stringify(Array.from(store.indexNames)) === '["cachedAt"]', 'cachedAt should be the only index');
 
         await cache.put(firstAttachment, new Blob(['first'], { type: 'image/png' }));
@@ -99,7 +99,8 @@
         assert(await blobText(await cache.get(secondAttachment.url)) === 'second', 'different URLs should not collide');
 
         const firstRecord = await cache.getRecord(firstAttachment.url);
-        assert(firstRecord.url === firstAttachment.url, 'URL should round-trip');
+        assert(firstRecord.id === 'a', 'attachment ID should round-trip');
+        assert(!('url' in firstRecord), 'storage hostname should not be stored');
         assert(firstRecord.mimeType === firstAttachment.type, 'MIME type should round-trip');
         assert(firstRecord.size === 5, 'size should round-trip');
         assert(typeof firstRecord.cachedAt === 'number', 'cache timestamp should be stored');
@@ -116,7 +117,7 @@
         const reloadedCache = new FullImageCache(reloadedDatabase, 1024);
         let decryptions = 0;
         const cachedBlob = await reloadedCache.getOrCache({
-          attachment: firstAttachment,
+          attachment: { ...firstAttachment, url: 'http://new-files.example:8080/get/a?download=1#preview' },
           downloadAndDecrypt: async () => {
             decryptions += 1;
             throw new Error('network disabled');
@@ -128,7 +129,7 @@
 
         reloadedCache.maxCacheSize = 11;
         await reloadedCache.put(secondAttachment, new Blob(['second'], { type: 'image/png' }));
-        const thirdAttachment = { url: 'https://files.example/c', type: 'image/png' };
+        const thirdAttachment = { url: 'https://files.example/get/c', type: 'image/png' };
         await reloadedCache.put(thirdAttachment, new Blob(['third'], { type: 'image/png' }));
 
         assert(await reloadedCache.get(firstAttachment.url) === null, 'FIFO eviction should remove the oldest image');
