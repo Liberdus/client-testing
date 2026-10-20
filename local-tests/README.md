@@ -58,7 +58,7 @@ WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs lib-sen
 WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs wallet-overview.test.mjs
 ```
 
-`issue-1813-wallet-overview.browser.test.mjs` starts the actual client with synthetic balances and checks responsive wallet layout, large amounts, refresh freshness, keyboard actions, navigation, shared chain icons, and Mainnet Bridge behavior. It blocks external requests, signing, and broadcasts. With the pinned Playwright dependencies installed below, run:
+`issue-1813-wallet-overview.browser.test.mjs` starts the actual client with synthetic balances and checks responsive wallet layout, large amounts, refresh freshness, keyboard actions, navigation, shared asset-group icons, and Mainnet Bridge behavior. It blocks external requests, signing, and broadcasts. With the pinned Playwright dependencies installed below, run:
 
 ```bash
 WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs issue-1813-wallet-overview.browser.test.mjs

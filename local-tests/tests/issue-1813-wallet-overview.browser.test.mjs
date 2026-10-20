@@ -271,7 +271,7 @@ try {
           return [style.maskImage, style.backgroundImage];
         }));
         assert.equal(icons.length, 2);
-        assert.match(icons[0][0], /^url\("data:image\/svg\+xml/, 'Shared asset icon has a real chain mask');
+        assert.match(icons[0][0], /^url\("data:image\/svg\+xml/, 'Shared asset icon has a real SVG mask');
         assert.deepEqual(icons[0], icons[1], 'External asset groups share the same icon');
         await measureWallet(page, `${viewport.name}-${colorScheme}`);
         await page.evaluate(() => __fixture.walletScreen.stopBalanceUpdatedTimer());
