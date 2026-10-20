@@ -52,6 +52,20 @@ WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs evm-pay
 WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs lib-send-receive.browser.test.mjs
 ```
 
+`wallet-overview.test.mjs` exercises the actual wallet screen with synthetic account data. It checks successful balance freshness, atomic cache preservation on invalid or partial responses, account switches during asynchronous refreshes, and the relative update label's timer and logout lifecycle. It needs no browser, network, or live account:
+
+```bash
+WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs wallet-overview.test.mjs
+```
+
+`issue-1813-wallet-overview.browser.test.mjs` starts the actual client with synthetic balances and checks responsive wallet layout, large amounts, refresh freshness, keyboard actions, navigation, shared chain icons, and Mainnet Bridge behavior. It blocks external requests, signing, and broadcasts. With the pinned Playwright dependencies installed below, run:
+
+```bash
+WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs issue-1813-wallet-overview.browser.test.mjs
+```
+
+Screenshots and geometry measurements go to `/tmp/wallet-overview-1813`. To capture a previous client revision without requiring the new layout, set `WALLET_CAPTURE_ONLY=1 WALLET_CAPTURE_LABEL=before` and point `WEB_CLIENT_ROOT` at that revision's separate checkout. Both captures use the same online synthetic account; the dark media preference is checked without claiming a separate app theme.
+
 `issue-1755-attachment-cache-ids.browser.test.mjs` runs only the attachment cache classes in headless Chromium against real IndexedDB. It checks cache upgrades, storage-host changes, size eviction and thumbnail backup compatibility, and also runs the existing full-image HTML fixture. It starts its own loopback server and needs no account or external service. Run it alongside the focused Node tests with:
 
 ```bash
