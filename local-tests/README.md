@@ -62,6 +62,19 @@ The existing `playwright-tests/` E2E flows have separate live-account and servic
 requirements. Select and authorize an appropriate environment before running
 those flows.
 
+### Watch message confirmation expire in the browser
+
+With `WEB_CLIENT_ROOT` pointing to the client checkout to test, run:
+
+```bash
+WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 \
+node local-tests/tests/message-confirmation.browser-demo.mjs
+```
+
+Open `http://127.0.0.1:5502/`. Click **Prepare full null**, then the app's Send arrow. Keep the tab visible: the normal checker starts its 30-second window at the first eligible receipt lookup, usually about 10 seconds after Send. Watch the original bubble become failed, then repeat with **Prepare transaction null** for `{ transaction: null }`. The side panel reads the real pending timestamp and message status; it does not change either. Changing visibility resets the window as production does. `RECEIPT_DEMO_PORT` overrides the default port if needed; Ctrl+C stops the server.
+
+This manual fixture serves the selected checkout's full app and appends a synthetic-account bootstrap to the served module in memory. It retains the actual encryption, signing, Send, injection, receipt lookup, checker, failure rendering, and Retry methods. Local HTTP endpoints simulate accepted submission and the selected receipt response; nothing is broadcast. Background network-parameter data is supplied by the fixture, all gateways point to the local server, and its content security policy blocks external requests. Production files are not edited, real accounts are not loaded, and timers are not accelerated. Results and receipt attempts are available at `/__demo/events` on that local server. This is browser coverage with synthetic network responses, not a live-network delivery test.
+
 ## Add or update relevant coverage
 
 1. Inspect the client/test branches and existing work. Set `WEB_CLIENT_ROOT` to
