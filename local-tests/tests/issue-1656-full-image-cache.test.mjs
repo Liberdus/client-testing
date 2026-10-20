@@ -154,10 +154,9 @@ test('the application routes only image saves through the full-image cache', () 
   assert.match(appSource, /type: "DOWNLOAD_ATTACHMENT",\s*filename: filename,\s*mime: blob\.type,\s*dataUrl: reader\.result/);
 });
 
-test('attachment cleanup deletes both URL-keyed image records', {
-  skip: !appSource.includes('\n  purgeImageCaches(xattach) {'),
-}, async () => {
+test('attachment cleanup deletes both URL-keyed image records', async () => {
   const methodStart = appSource.indexOf('\n  purgeImageCaches(xattach) {');
+  assert.ok(methodStart >= 0, 'purgeImageCaches must exist to clean up attachment images');
   const methodEnd = appSource.indexOf('\n  /**', methodStart + 1);
   const methodSource = appSource.slice(methodStart, methodEnd);
   const deletedThumbnails = [];
