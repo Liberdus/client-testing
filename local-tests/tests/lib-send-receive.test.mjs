@@ -227,7 +227,7 @@ test('confirmation validates the wallet replacement received during recipient lo
   await fixture.send.handleSendFormSubmit({ preventDefault() {} });
   assert.deepEqual(fixture.validations.at(-1), { amount: 50n * wei, index: 0 });
   assert.equal(fixture.confirm.isActive(), true);
-  assert.equal(fixture.confirm.confirmAmount.textContent, '50');
+  assert.equal(fixture.confirm.confirmAmount.textContent, '50 LIB');
 });
 
 test('Send max and LIB/USD balances retain the LIB fee and price', async () => {
@@ -370,7 +370,7 @@ for (const { unit, exact, below } of [
     assert.equal(fixture.send.submitButton.disabled, false);
     await fixture.send.handleSendFormSubmit({ preventDefault() {} });
     assert.equal(fixture.confirm.isActive(), true);
-    assert.equal(fixture.confirm.confirmAmount.textContent, '3.333333333333333333');
+    assert.equal(fixture.confirm.confirmAmount.textContent, '3.333333333333333333 LIB');
     fixture.confirm.close();
 
     fixture.send.amountInput.value = below;
@@ -448,18 +448,42 @@ test('confirmation derives the LIB label from wallet data and preserves USD prev
   fixture.send.memoInput.value = 'memo';
   fixture.send.amountInput.value = '10';
   await fixture.send.handleSendFormSubmit({ preventDefault() {} });
-  assert.equal(fixture.confirm.confirmAmount.textContent, '10');
+  assert.equal(fixture.confirm.confirmAmount.textContent, '10 LIB');
   assert.equal(fixture.confirm.confirmAsset.textContent, 'Liberdus (LIB)');
-  assert.equal(fixture.confirm.confirmAmountUSD.textContent, '≈ $2.000000 USD');
+  assert.equal(fixture.confirm.confirmAmountUSD.textContent, '≈ $2.00 USD');
   assert.equal(fixture.confirm.confirmMemo.textContent, 'memo');
 
   fixture.confirm.close();
   fixture.lib.name = 'LIB';
   fixture.send.balanceSymbol.textContent = 'USD';
   await fixture.send.handleSendFormSubmit({ preventDefault() {} });
-  assert.equal(fixture.confirm.confirmAmount.textContent, '50');
+  assert.equal(fixture.confirm.confirmAmount.textContent, '50 LIB');
   assert.equal(fixture.confirm.confirmAsset.textContent, 'LIB');
-  assert.equal(fixture.confirm.confirmAmountUSD.textContent, '≈ $10.000000 USD');
+  assert.equal(fixture.confirm.confirmAmountUSD.textContent, '≈ $10.00 USD');
+});
+
+test('native confirmation keeps small USD estimates readable and clears unavailable estimates', async () => {
+  const fixture = new LibModalFixture();
+  await fixture.send.open();
+  fixture.prepareRecipient();
+  fixture.send.amountInput.value = '5';
+  for (const { price, expected } of [
+    { price: '0.008', expected: '≈ $0.04 USD' },
+    { price: '0.0001', expected: '≈ $0.0005 USD' },
+    { price: '0.2', expected: '≈ $1.00 USD' },
+    { price: undefined, expected: '' },
+    { price: '', expected: '' },
+    { price: 'bad', expected: '' },
+    { price: 'Infinity', expected: '' },
+    { price: '0', expected: '' },
+    { price: '-1', expected: '' },
+  ]) {
+    fixture.context.parameters.current.stabilityFactorStr = price;
+    await fixture.send.handleSendFormSubmit({ preventDefault() {} });
+    assert.equal(fixture.confirm.confirmAmount.textContent, '5 LIB');
+    assert.equal(fixture.confirm.confirmAmountUSD.textContent, expected, String(price));
+    fixture.confirm.close();
+  }
 });
 
 for (const { usd, price, lib, expected } of [
@@ -477,7 +501,8 @@ for (const { usd, price, lib, expected } of [
     assert.equal(fixture.validations.at(-1).amount, expected);
     assert.equal(fixture.send.submitButton.disabled, false);
     await fixture.send.handleSendFormSubmit({ preventDefault() {} });
-    assert.equal(fixture.confirm.confirmAmount.textContent, lib);
+    assert.equal(fixture.confirm.confirmAmount.textContent, `${lib} LIB`);
+    assert.equal(fixture.confirm.confirmAmountUSD.textContent, `≈ $${Number(usd).toFixed(2)} USD`);
     await fixture.confirm.handleSendAsset({ preventDefault() {} });
     assert.equal(fixture.transfers.length, 1);
     assert.equal(fixture.validations.at(-1).amount, expected);
@@ -498,7 +523,7 @@ test('confirmation submits its approved amount when the hidden input and quote c
   fixture.send.amountInput.value = '10';
   fixture.send.memoInput.value = 'approved memo';
   await fixture.send.handleSendFormSubmit({ preventDefault() {} });
-  assert.equal(fixture.confirm.confirmAmount.textContent, '50');
+  assert.equal(fixture.confirm.confirmAmount.textContent, '50 LIB');
   fixture.context.getStabilityFactor = () => 0.5;
   fixture.context.parameters.current.stabilityFactorStr = '0.5';
   fixture.send.amountInput.value = '7';
@@ -555,7 +580,7 @@ test('reopening USD Send clears its old confirmation and preserves its amount un
   assert.deepEqual(fixture.transfers, []);
   fixture.prepareRecipient();
   await fixture.send.handleSendFormSubmit({ preventDefault() {} });
-  assert.equal(fixture.confirm.confirmAmount.textContent, '50');
+  assert.equal(fixture.confirm.confirmAmount.textContent, '50 LIB');
   await fixture.confirm.handleSendAsset({ preventDefault() {} });
   assert.equal(fixture.transfers.length, 1);
   assert.equal(fixture.transfers[0].amount, 50n * wei);
