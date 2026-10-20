@@ -2,19 +2,30 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
+import { big2str, escapeHtml } from '../lib.js';
 
-const [appSource, markup] = await Promise.all([
+const [appSource, markup, nearSource] = await Promise.all([
   readFile(new URL('../app.js', import.meta.url), 'utf8'),
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
+  readFile(new URL('../near-assets.js', import.meta.url), 'utf8'),
 ]);
 const wei = 10n ** 18n;
 
-function sourceBetween(start, end) {
-  const first = appSource.indexOf(start);
-  const last = appSource.indexOf(end, first);
+function sourceBetween(start, end, source = appSource) {
+  const first = source.indexOf(start);
+  const last = source.indexOf(end, first);
   assert.ok(first >= 0 && last > first, `Cannot locate ${start}`);
-  return appSource.slice(first, last);
+  return source.slice(first, last);
 }
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((accept, fail) => { resolve = accept; reject = fail; });
+  return { promise, resolve, reject };
+}
+
+const settleMicrotasks = () => new Promise(setImmediate);
 
 class ElementFixture {
   constructor() {
@@ -59,7 +70,10 @@ class WalletFixture {
       ],
     };
     this.data = {
-      wallet: { assets: [this.lib], timestamp: 0, balanceUpdatedAt: this.now - 120_000, networth: 0.24 },
+      wallet: {
+        assets: [this.lib], timestamp: 0, balanceUpdatedAt: this.now - 120_000,
+        overviewUpdatedAt: this.now - 120_000, networth: 0.24,
+      },
     };
     this.elements = new Map([...markup.matchAll(/\bid="([^"]+)"/g)]
       .map(([, id]) => [id, new ElementFixture()]));
@@ -72,7 +86,7 @@ class WalletFixture {
     this.context = {
       document: this, myAccount: this.account, myData: this.data,
       network: { name: 'Testnet' }, parameters: { current: { stabilityFactorStr: '0.008' } },
-      wei, isOnline: true,
+      wei, big2str, escapeHtml, isOnline: true,
       getCorrectedTimestamp: () => this.now,
       longAddress: address => address,
       updateAssetPricesIfNeeded: async () => {},
@@ -82,8 +96,10 @@ class WalletFixture {
       },
       showToast: (...args) => { this.toasts.push(args); return `toast-${this.toasts.length}`; },
       hideToast() {},
-      multichain: { reset() {}, updateSummary: async () => { this.externalRefreshes.push('multichain'); } },
-      evmAssets: { reset() {}, refresh: async () => { this.externalRefreshes.push('evm'); } },
+      multichain: { reset() {}, updateSummary: async () => { this.externalRefreshes.push('multichain'); return true; } },
+      evmAssets: {
+        reset() {}, refresh: async () => { this.externalRefreshes.push('evm'); }, getStatus: () => 'connected',
+      },
       setInterval: (callback, delay) => {
         const id = ++this.nextTimer;
         this.intervals.set(id, { callback, delay });
@@ -102,6 +118,7 @@ class WalletFixture {
       console: { error() {}, warn() {} },
     };
     runInNewContext([
+      sourceBetween('function formatDisplayAmount(', 'function formatRawAmount(', nearSource),
       sourceBetween('function getStabilityFactor(', 'function getNetworkMinTollLibWei('),
       sourceBetween('function isLibAsset(', 'async function updateAssetPricesIfNeeded('),
       sourceBetween('class WalletScreen', 'const walletScreen'),
@@ -120,6 +137,7 @@ class WalletFixture {
   snapshot(wallet = this.data.wallet) {
     return {
       balanceUpdatedAt: wallet.balanceUpdatedAt,
+      overviewUpdatedAt: wallet.overviewUpdatedAt,
       networth: wallet.networth,
       assets: wallet.assets.map(asset => ({
         balance: asset.balance, networth: asset.networth,
@@ -277,7 +295,7 @@ test('switching the wallet while refreshing the view cannot render the old accou
   deferred.resolve({ balance: 90n * wei });
   await refreshing;
   assert.equal(fixture.wallet.assetsList.innerHTML, 'Current account view');
-  assert.deepEqual(fixture.externalRefreshes, []);
+  assert.deepEqual(fixture.externalRefreshes.sort(), ['evm', 'multichain']);
 });
 
 test('no configured addresses cannot manufacture a successful balance timestamp', async () => {
@@ -308,7 +326,7 @@ test('successful freshness uses the time the balance refresh completes', async (
   deferred.resolve({ balance: 50n * wei });
   await refreshing;
   assert.equal(fixture.data.wallet.balanceUpdatedAt, fixture.now);
-  assert.equal(fixture.elements.get('walletBalanceUpdated').textContent, 'LIB updated just now');
+  assert.equal(fixture.elements.get('walletBalanceUpdated').textContent, 'Updated 2m ago');
 });
 
 test('an older overlapping refresh cannot replace the latest completed balance batch', async () => {
@@ -332,14 +350,14 @@ test('an older overlapping refresh cannot replace the latest completed balance b
 });
 
 for (const [age, expected] of [
-  [0, 'LIB updated just now'],
-  [59_999, 'LIB updated just now'],
-  [60_000, 'LIB updated 1m ago'],
-  [120_000, 'LIB updated 2m ago'],
-  [3_599_999, 'LIB updated 59m ago'],
-  [3_600_000, 'LIB updated 1h ago'],
-  [86_400_000, 'LIB updated 1d ago'],
-  [259_200_000, 'LIB updated 3d ago'],
+  [0, 'Updated just now'],
+  [59_999, 'Updated just now'],
+  [60_000, 'Updated 1m ago'],
+  [120_000, 'Updated 2m ago'],
+  [3_599_999, 'Updated 59m ago'],
+  [3_600_000, 'Updated 1h ago'],
+  [86_400_000, 'Updated 1d ago'],
+  [259_200_000, 'Updated 3d ago'],
 ]) {
   test(`balance freshness formats an age of ${age}ms as ${expected}`, () => {
     const fixture = new WalletFixture();
@@ -356,20 +374,21 @@ for (const timestamp of [undefined, null, 0, -1, NaN, Infinity, 8_640_000_000_00
 
 test('future clock skew does not display a negative balance age', () => {
   const fixture = new WalletFixture();
-  assert.equal(fixture.wallet.getBalanceUpdatedText(fixture.now + 60_000, fixture.now), 'LIB updated just now');
+  assert.equal(fixture.wallet.getBalanceUpdatedText(fixture.now + 60_000, fixture.now), 'Updated just now');
 });
 
-test('the visible freshness label uses only the successful balance timestamp', () => {
+test('the visible freshness label uses only the complete overview timestamp', () => {
   const fixture = new WalletFixture();
   fixture.data.wallet.timestamp = fixture.now;
   fixture.data.wallet.priceTimestamp = fixture.now;
+  fixture.data.wallet.balanceUpdatedAt = fixture.now;
   fixture.wallet.updateBalanceUpdatedAt();
   const label = fixture.elements.get('walletBalanceUpdated');
-  assert.equal(label.textContent, 'LIB updated 2m ago');
-  assert.equal(label.dateTime, new Date(fixture.data.wallet.balanceUpdatedAt).toISOString());
+  assert.equal(label.textContent, 'Updated 2m ago');
+  assert.equal(label.dateTime, new Date(fixture.data.wallet.overviewUpdatedAt).toISOString());
   assert.ok(label.title, 'The exact update time is available');
   const oldTitle = label.title;
-  fixture.data.wallet.balanceUpdatedAt = null;
+  fixture.data.wallet.overviewUpdatedAt = null;
   fixture.wallet.updateBalanceUpdatedAt();
   assert.equal(label.textContent, 'Not updated yet');
   assert.equal(label.dateTime, undefined);
@@ -382,12 +401,12 @@ test('opening the wallet starts one age timer, updates it locally, and closing s
   fixture.wallet.open();
   fixture.wallet.open();
   assert.equal(fixture.intervals.size, 1);
-  assert.equal(label.textContent, 'LIB updated 2m ago');
+  assert.equal(label.textContent, 'Updated 2m ago');
   const [{ callback, delay }] = fixture.intervals.values();
   assert.equal(delay, 30_000);
   fixture.now += 60_000;
   callback();
-  assert.equal(label.textContent, 'LIB updated 3m ago');
+  assert.equal(label.textContent, 'Updated 3m ago');
   assert.deepEqual(fixture.queries, [], 'The age timer does not refresh network balances');
   fixture.wallet.close();
   assert.equal(fixture.intervals.size, 0);
@@ -409,3 +428,180 @@ test('clearing account data stops the wallet timer and clears the old freshness 
   assert.equal(fixture.wallet.firstTimeLoad, true);
   assert.equal(fixture.elements.get('walletBalanceUpdated').textContent, 'Not updated yet');
 });
+
+test('overview freshness waits for all three sources while native balances render immediately', async () => {
+  const fixture = new WalletFixture();
+  const label = fixture.elements.get('walletBalanceUpdated');
+  fixture.wallet.open();
+  const native = await fixture.pauseQuery();
+  const multichain = deferred();
+  const evm = deferred();
+  fixture.context.multichain.updateSummary = () => multichain.promise;
+  fixture.context.evmAssets.refresh = () => evm.promise;
+  const previousUpdatedAt = fixture.data.wallet.overviewUpdatedAt;
+  const refreshing = fixture.wallet.updateWalletView();
+  assert.equal(label.textContent, 'Updating…');
+  assert.equal(label.dateTime, undefined);
+  assert.ok(!label.title, 'The pending label does not retain a stale exact date');
+  await native.reached;
+  native.resolve({ balance: 50n * wei });
+  await settleMicrotasks();
+  assert.equal(fixture.lib.balance, 100n * wei);
+  assert.match(fixture.wallet.assetsList.innerHTML, /100 LIB/);
+  assert.equal(fixture.data.wallet.overviewUpdatedAt, previousUpdatedAt);
+  assert.equal(label.textContent, 'Updating…');
+  for (const { callback } of fixture.intervals.values()) callback();
+  assert.equal(label.textContent, 'Updating…', 'The age timer cannot replace the pending state');
+  multichain.resolve(true);
+  await settleMicrotasks();
+  assert.equal(label.textContent, 'Updating…');
+  fixture.now += 40_000;
+  evm.resolve([]);
+  await refreshing;
+  assert.equal(fixture.data.wallet.overviewUpdatedAt, fixture.now);
+  assert.equal(label.textContent, 'Updated just now');
+  assert.equal(label.dateTime, new Date(fixture.now).toISOString());
+  fixture.wallet.close();
+});
+
+for (const failure of ['native', 'multichain false', 'multichain rejection', 'evm partial', 'evm unavailable', 'evm rejection']) {
+  test(`${failure} does not advance complete overview freshness`, async () => {
+    const fixture = new WalletFixture();
+    if (failure === 'native') fixture.context.queryNetwork = async () => null;
+    if (failure === 'multichain false') fixture.context.multichain.updateSummary = async () => false;
+    if (failure === 'multichain rejection') {
+      fixture.context.multichain.updateSummary = async () => { throw new Error('Synthetic multichain failure'); };
+    }
+    if (failure === 'evm partial') fixture.context.evmAssets.getStatus = () => 'partial';
+    if (failure === 'evm unavailable') fixture.context.evmAssets.getStatus = () => 'unavailable';
+    if (failure === 'evm rejection') {
+      fixture.context.evmAssets.refresh = async () => { throw new Error('Synthetic EVM failure'); };
+    }
+    const previousUpdatedAt = fixture.data.wallet.overviewUpdatedAt;
+    await fixture.wallet.updateWalletView();
+    assert.equal(fixture.data.wallet.overviewUpdatedAt, previousUpdatedAt);
+    assert.equal(fixture.elements.get('walletBalanceUpdated').textContent, 'Updated 2m ago');
+    assert.equal(fixture.wallet.isUpdating, false);
+  });
+}
+
+test('unknown overview freshness remains unknown after a native-only balance refresh', async () => {
+  const fixture = new WalletFixture();
+  delete fixture.data.wallet.overviewUpdatedAt;
+  await fixture.wallet.updateWalletBalances();
+  assert.equal(fixture.data.wallet.balanceUpdatedAt, fixture.now);
+  assert.equal(fixture.data.wallet.overviewUpdatedAt, undefined);
+  assert.equal(fixture.elements.get('walletBalanceUpdated').textContent, 'Not updated yet');
+});
+
+test('an offline overview refresh cannot make cached balances appear fresh', async () => {
+  const fixture = new WalletFixture();
+  fixture.context.isOnline = false;
+  const previousUpdatedAt = fixture.data.wallet.overviewUpdatedAt;
+  await fixture.wallet.updateWalletView();
+  assert.equal(fixture.data.wallet.overviewUpdatedAt, previousUpdatedAt);
+  assert.equal(fixture.elements.get('walletBalanceUpdated').textContent, 'Updated 2m ago');
+  assert.equal(fixture.wallet.isUpdating, false);
+});
+
+test('a recent successful native refresh can complete the overview without repeating its query', async () => {
+  const fixture = new WalletFixture();
+  fixture.data.wallet.timestamp = fixture.now - 2000;
+  fixture.data.wallet.balanceUpdatedAt = fixture.now - 2000;
+  await fixture.wallet.updateWalletView();
+  assert.deepEqual(fixture.queries, []);
+  assert.equal(fixture.data.wallet.overviewUpdatedAt, fixture.now);
+  assert.equal(fixture.elements.get('walletBalanceUpdated').textContent, 'Updated just now');
+});
+
+test('a legacy throttle timestamp without successful native freshness cannot complete the overview', async () => {
+  const fixture = new WalletFixture();
+  fixture.data.wallet.timestamp = fixture.now - 2000;
+  delete fixture.data.wallet.balanceUpdatedAt;
+  const previousUpdatedAt = fixture.data.wallet.overviewUpdatedAt;
+  await fixture.wallet.updateWalletView();
+  assert.deepEqual(fixture.queries, []);
+  assert.equal(fixture.data.wallet.overviewUpdatedAt, previousUpdatedAt);
+  assert.equal(fixture.elements.get('walletBalanceUpdated').textContent, 'Updated 2m ago');
+});
+
+test('an older overview cannot replace the latest completed status', async () => {
+  const fixture = new WalletFixture();
+  const older = deferred();
+  fixture.context.multichain.updateSummary = () => older.promise;
+  const olderRefresh = fixture.wallet.updateWalletView();
+  await settleMicrotasks();
+  fixture.now += 6000;
+  fixture.context.multichain.updateSummary = async () => true;
+  const latestRefresh = fixture.wallet.updateWalletView();
+  await latestRefresh;
+  const latestUpdatedAt = fixture.data.wallet.overviewUpdatedAt;
+  assert.equal(latestUpdatedAt, fixture.now);
+  fixture.now += 60_000;
+  older.resolve(true);
+  await olderRefresh;
+  assert.equal(fixture.data.wallet.overviewUpdatedAt, latestUpdatedAt);
+  assert.equal(fixture.wallet.isUpdating, false);
+  fixture.wallet.updateBalanceUpdatedAt();
+  assert.equal(fixture.elements.get('walletBalanceUpdated').textContent, 'Updated 1m ago');
+});
+
+test('an old overview completing cannot clear a newer overview pending state', async () => {
+  const fixture = new WalletFixture();
+  const older = deferred();
+  fixture.context.multichain.updateSummary = () => older.promise;
+  const olderRefresh = fixture.wallet.updateWalletView();
+  await settleMicrotasks();
+  fixture.now += 6000;
+  const latest = deferred();
+  fixture.context.multichain.updateSummary = () => latest.promise;
+  const latestRefresh = fixture.wallet.updateWalletView();
+  await settleMicrotasks();
+  older.resolve(true);
+  await olderRefresh;
+  assert.equal(fixture.wallet.isUpdating, true);
+  assert.equal(fixture.elements.get('walletBalanceUpdated').textContent, 'Updating…');
+  latest.resolve(true);
+  await latestRefresh;
+  assert.equal(fixture.wallet.isUpdating, false);
+  assert.equal(fixture.elements.get('walletBalanceUpdated').textContent, 'Updated just now');
+});
+
+test('clearing the account during an overview refresh invalidates its pending status and timestamp', async () => {
+  const fixture = new WalletFixture();
+  const external = deferred();
+  fixture.context.multichain.updateSummary = () => external.promise;
+  const refreshing = fixture.wallet.updateWalletView();
+  await settleMicrotasks();
+  const previousUpdatedAt = fixture.data.wallet.overviewUpdatedAt;
+  fixture.context.clearMyData();
+  assert.equal(fixture.wallet.isUpdating, false);
+  assert.equal(fixture.elements.get('walletBalanceUpdated').textContent, 'Not updated yet');
+  external.resolve(true);
+  await refreshing;
+  assert.equal(fixture.data.wallet.overviewUpdatedAt, previousUpdatedAt);
+  assert.equal(fixture.elements.get('walletBalanceUpdated').textContent, 'Not updated yet');
+});
+
+for (const [completedStatus, laterStatus, succeeded] of [
+  ['connected', 'partial', true],
+  ['partial', 'connected', false],
+]) {
+  test(`EVM completion status ${completedStatus} remains authoritative after it later becomes ${laterStatus}`, async () => {
+    const fixture = new WalletFixture();
+    const multichain = deferred();
+    let evmStatus = completedStatus;
+    fixture.context.evmAssets.getStatus = () => evmStatus;
+    fixture.context.multichain.updateSummary = () => multichain.promise;
+    const previousUpdatedAt = fixture.data.wallet.overviewUpdatedAt;
+    const refreshing = fixture.wallet.updateWalletView();
+    await settleMicrotasks();
+    assert.equal(fixture.elements.get('walletBalanceUpdated').textContent, 'Updating…');
+    evmStatus = laterStatus;
+    fixture.now += 30_000;
+    multichain.resolve(true);
+    await refreshing;
+    assert.equal(fixture.data.wallet.overviewUpdatedAt, succeeded ? fixture.now : previousUpdatedAt);
+    assert.equal(fixture.elements.get('walletBalanceUpdated').textContent, succeeded ? 'Updated just now' : 'Updated 2m ago');
+  });
+}

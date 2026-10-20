@@ -52,7 +52,7 @@ WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs evm-pay
 WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs lib-send-receive.browser.test.mjs
 ```
 
-`wallet-overview.test.mjs` exercises the actual wallet screen with synthetic account data. It checks successful balance freshness, atomic cache preservation on invalid or partial responses, account switches during asynchronous refreshes, and the relative update label's timer and logout lifecycle. It needs no browser, network, or live account:
+`wallet-overview.test.mjs` exercises the actual wallet screen with synthetic account data. It checks atomic cache preservation on invalid or partial native responses, complete overview freshness across native, multichain, and EVM refreshes, pending status, account switches and overlapping requests, and the relative update label's timer and logout lifecycle. It needs no browser, network, or live account:
 
 ```bash
 WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs wallet-overview.test.mjs
