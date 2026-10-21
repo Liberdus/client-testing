@@ -174,7 +174,7 @@ try {
     assert.equal(await cards.count(), 10);
     const hosts = { 1: 'etherscan.io', 56: 'bscscan.com', 137: 'polygonscan.com', 42161: 'arbiscan.io', 10: 'optimistic.etherscan.io', 8453: 'basescan.org' };
     for (const [id, host] of Object.entries(hosts)) {
-      const anchor = page.locator(`.evm-payment-message[data-evm-payment^="${id}:"] .evm-payment-transaction a`);
+      const anchor = page.locator(`.evm-payment-message[data-evm-payment^="${id}:"] .evm-payment-details a[href*="/tx/"]`);
       assert.ok(await anchor.count() >= 1);
       for (const link of await anchor.all()) {
         assert.equal(new URL(await link.getAttribute('href')).host, host);
@@ -182,7 +182,7 @@ try {
         assert.ok((await link.getAttribute('aria-label')).includes(await link.getAttribute('title')));
       }
     }
-    assert.equal(await page.locator('.evm-payment-message[data-evm-payment^="99999:"] .evm-payment-transaction a').count(), 0);
+    assert.equal(await page.locator('.evm-payment-message[data-evm-payment^="99999:"] .evm-payment-details a').count(), 0);
     assert.equal(await page.evaluate(() => __fixture.evmAssets.getPayments().length), 0);
     assert.equal(await page.evaluate(() => __fixture.evmAssets.discovery.portfolio), null);
     const beforeQueries = await page.evaluate(() => ({ queries: __fixtureQueries.length, fetches: __displayFetchCalls.length }));
@@ -199,11 +199,24 @@ try {
       const expectedTime = await page.evaluate(timestamp => new Date(timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true }), timestamp);
       assert.equal((await time.textContent()).trim(), expectedTime);
       const summary = card.locator('.evm-payment-details summary');
+      const fullHash = (await card.getAttribute('data-evm-payment')).split(':')[1];
+      const compactHash = `${fullHash.slice(0, 10)}…${fullHash.slice(-8)}`;
+      const transactionCode = card.locator('code').filter({ hasText: fullHash });
+      assert.equal(await transactionCode.count(), 1);
+      assert.equal(await transactionCode.isVisible(), false);
+      assert.ok(!(await card.innerText()).includes(compactHash), 'Collapsed cards must omit the abbreviated hash');
       if (mobile) await summary.tap(); else await summary.click();
       assert.equal(await card.locator('.evm-payment-details').getAttribute('open'), '');
       assert.equal(await page.locator('#messageContextMenu').isVisible(), false);
-      const fullHash = (await card.getAttribute('data-evm-payment')).split(':')[1];
-      assert.ok((await card.locator('.evm-payment-details dl').textContent()).includes(fullHash));
+      assert.equal(await transactionCode.isVisible(), true);
+      assert.equal(await transactionCode.textContent(), fullHash);
+      assert.equal((await card.innerText()).split(fullHash).length - 1, 1, 'Expanded cards must display the full hash exactly once');
+      assert.ok(!(await card.innerText()).includes(compactHash), 'Expanded cards must not repeat an abbreviated hash');
+      const transactionLinks = card.locator('.evm-payment-details a[href*="/tx/"]');
+      const unknownChain = (await card.getAttribute('data-evm-payment')).startsWith('99999:');
+      assert.equal(await transactionLinks.count(), unknownChain ? 0 : 1);
+      const openedOverflow = await card.locator('.evm-payment-details dd').evaluateAll(elements => elements.map(el => ({ client: el.clientWidth, scroll: el.scrollWidth, right: el.getBoundingClientRect().right })));
+      assert.ok(openedOverflow.every(size => size.scroll <= size.client + 1 && size.right <= viewport.width), JSON.stringify(openedOverflow));
       const detailsText = card.locator('.evm-payment-details dt').last();
       if (mobile) await detailsText.tap(); else await detailsText.click();
       assert.equal(await page.locator('#messageContextMenu').isVisible(), false);
@@ -211,7 +224,10 @@ try {
       assert.equal(await card.locator('.evm-payment-details').getAttribute('open'), null);
     }
     for (const chainId of [42161, 56]) {
-      const chatLink = page.locator(`.evm-payment-message[data-evm-payment^="${chainId}:"] .evm-payment-transaction a`).first();
+      const card = page.locator(`.evm-payment-message[data-evm-payment^="${chainId}:"]`).first();
+      const summary = card.locator('.evm-payment-details summary');
+      if (mobile) await summary.tap(); else await summary.click();
+      const chatLink = card.locator('.evm-payment-details a[href*="/tx/"]');
       const expectedChatUrl = await chatLink.getAttribute('href');
       const chatPopupPromise = context.waitForEvent('page');
       if (mobile) await chatLink.tap(); else await chatLink.click();
@@ -220,6 +236,7 @@ try {
       assert.equal(chatPopup.url(), expectedChatUrl);
       await chatPopup.close();
       assert.equal(await page.locator('#messageContextMenu').isVisible(), false);
+      if (mobile) await summary.tap(); else await summary.click();
     }
     const cardBody = page.locator('.evm-payment-message[data-evm-payment^="42161:"] .intents-payment-amount');
     await cardBody.scrollIntoViewIfNeeded();
@@ -228,7 +245,7 @@ try {
     assert.equal(await page.locator('#messageContextMenu').isVisible(), true);
     await page.evaluate(() => __fixture.chatModal.closeAllContextMenus());
     assert.equal(await page.locator('#messageContextMenu').isVisible(), false);
-    const overflow = await cards.locator('.evm-payment-transaction').evaluateAll(elements => elements.map(el => ({ client: el.clientWidth, scroll: el.scrollWidth, right: el.getBoundingClientRect().right })));
+    const overflow = await cards.locator('.evm-payment-footer').evaluateAll(elements => elements.map(el => ({ client: el.clientWidth, scroll: el.scrollWidth, right: el.getBoundingClientRect().right })));
     assert.ok(overflow.every(size => size.scroll <= size.client + 1 && size.right <= viewport.width), JSON.stringify(overflow));
     assert.deepEqual(await page.evaluate(() => ({ queries: __fixtureQueries.length, fetches: __displayFetchCalls.length })), beforeQueries);
     await page.evaluate(() => __fixture.chatModal.appendChatModal(false, true));
@@ -273,7 +290,7 @@ try {
     assert.equal(await page.locator('#messageContextMenu').isVisible(), false);
     await page.screenshot({ path: `/tmp/evm-refined-details-${viewport.name}.png`, fullPage: true });
     assert.deepEqual(errors, []);
-    console.log(`PASS ${viewport.name} ${viewport.width}px: 4 recovery rows, 10 native/ERC-20 chat cards, all 6 outcomes, exact single timestamps, compact/full contract/hash, native details toggle/selection, explorer popups and card menus, 6 chains with no portfolio/recovery, fallback and overflow. Display interactions/rerender added zero queries or fetches. Intercepted external requests: ${external.length}`);
+    console.log(`PASS ${viewport.name} ${viewport.width}px: 4 unchanged recovery rows, 10 native/ERC-20 chat cards, all 6 outcomes, exact single timestamps, full transaction hashes only once inside Payment details, native details toggle/selection, explorer popups and card menus, 6 chains with no portfolio/recovery, fallback and overflow. Display interactions/rerender added zero queries or fetches. Intercepted external requests: ${external.length}`);
     await context.close();
   }
 } finally {

@@ -144,14 +144,33 @@ test('sent and synchronized received chat cards keep links for every outcome wit
   }
 });
 
-test('chat renders unknown-chain hashes as plain text and rejects invalid payment claims', () => {
+test('chat renders unknown-chain hashes as full plain text in details and rejects invalid payment claims', () => {
   const message = { type: EVM_CHAT_MESSAGE_TYPE, payment: { ...PAYMENT, chainId: 999 }, timestamp: 1 };
   const html = chat.renderChatMessageHTML(message, { contact: { messages: [message] }, lastReadTs: 0 });
-  assert.ok(html.includes(`<span title="${HASH}">`));
+  assert.ok(html.includes(`<code>${HASH}</code>`));
   assert.ok(!html.includes('<a '));
   message.payment.transactionHash = 'javascript:alert(1)';
   const invalid = chat.renderChatMessageHTML(message, { contact: { messages: [message] }, lastReadTs: 0 });
-  assert.ok(!invalid.includes('evm-payment-transaction'));
+  assert.ok(!invalid.includes('evm-payment-message'));
+});
+
+test('sent and received chat cards show each full transaction hash once, only in Payment details', () => {
+  for (const my of [true, false]) {
+    for (const chainId of [56, 999]) {
+      const html = chat.renderEvmPaymentMessage({ my, payment: { ...PAYMENT, chainId } }, '');
+      const detailsStart = html.indexOf('<details');
+      assert.ok(detailsStart > 0);
+      const textBeforeDetails = html.slice(0, detailsStart).replace(/<[^>]*>/g, '');
+      const allText = html.replace(/<[^>]*>/g, '');
+      const details = html.slice(detailsStart);
+      assert.ok(!textBeforeDetails.includes(HASH));
+      assert.ok(!allText.includes('0xabcdef12…abcdef12'), 'The abbreviated hash must not remain on the card');
+      assert.equal(allText.split(HASH).length - 1, 1, 'The full hash must appear as text exactly once');
+      assert.ok(details.includes('<summary>Payment details</summary>'));
+      assert.ok(details.includes(`<code>${HASH}</code>`));
+      assert.equal(html.split(`href="https://bscscan.com/tx/${HASH}"`).length - 1, chainId === 56 ? 1 : 0);
+    }
+  }
 });
 
 test('symbol-only ERC-20 cards render locally with a labeled note, contract in details, and one timestamp', (t) => {
