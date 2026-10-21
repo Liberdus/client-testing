@@ -35,6 +35,7 @@ test('sent and received native receipts expose direction, asset, network and one
     assert.ok(text(html).includes('Liberdus'));
     assert.match(html, new RegExp(`<span class="payment-direction">${my ? '-' : '\\+'}</span>`));
     assert.ok(text(html).includes('2.5 LIB'));
+    assert.match(html, /<span class="lib-payment-unit">LIB<\/span>/);
     assert.equal((html.match(/class="message-time"/g) || []).length, 1);
     assert.equal((text(html).match(/12:34 PM/g) || []).length, 1);
     assert.ok(!html.includes('data-verified'));

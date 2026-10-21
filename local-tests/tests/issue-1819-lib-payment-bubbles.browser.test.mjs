@@ -46,7 +46,17 @@ window.__fixture = {
       { my: false, amount: 10000000000000000000000000000000001n },
       { my: true, amount: 5000000000000000000n, message: 'Retry memo', status: 'failed' },
     ].map((message, index) => ({ ...message, timestamp: now - index * 1000, txid: String(index + 1).repeat(64) }));
-    myData.contacts[recipient].messages = this.messages;
+    this.evmMessages = [true, false].map((my, index) => ({
+      type: 'evm_transfer', my, paymentVerified: 'settled', timestamp: now - 10000 - index * 1000,
+      txid: String(index + 7).repeat(64),
+      payment: { type: 'evm_transfer', version: 1, chainId: 56, networkId: 'bsc',
+        transactionHash: '0x' + String(index + 7).repeat(64),
+        from: '0x' + (my ? owner : recipient), to: '0x' + (my ? recipient : owner),
+        assetKind: 'erc20', contractAddress: '0x55d398326f99059ff775485246999027b3197955',
+        rawAmount: '2500000000000000000', decimals: 18, symbol: 'USDT', note: 'Reference note',
+      },
+    }));
+    myData.contacts[recipient].messages = [...this.messages, ...this.evmMessages];
     myData.wallet.history = this.messages.filter(message => message.my).map(message => ({ ...message }));
     isOnline = true;
     updateUIForConnectivity();
@@ -71,6 +81,10 @@ window.__fixture = {
     document.querySelectorAll('.toast').forEach(toast => hideToast(toast.id));
   },
   rerender() { chatModal.appendChatModal(false, true); },
+  showTypographyComparison() {
+    myData.contacts[this.recipient].messages = [this.messages[0], this.evmMessages[0]];
+    chatModal.appendChatModal(false, true);
+  },
 };
 `;
 const app = source.replace('  welcomeScreen.lastItem.focus();', '  welcomeScreen.lastItem.focus(); window.__fixtureReady = true;') + '\n' + fixture;
@@ -115,6 +129,8 @@ try {
     await page.locator('#chatModal.is-transition-complete').waitFor();
     const cards = page.locator('.message.payment-info');
     assert.equal(await cards.count(), 5);
+    assert.equal(await page.locator('.evm-payment-message').count(), 2, 'Use actual sent and received EVM receipts as typography references');
+    assert.equal(await cards.locator('.lib-payment-unit').count(), 5, 'Native ticker remains a separate, smaller text run');
     assert.equal(await cards.locator('.lib-payment-heading img').count(), 5, 'Each native payment has one local logo beside its label');
     await page.waitForFunction(() => [...document.querySelectorAll('.lib-payment-heading img')].every(image => image.complete && image.naturalWidth > 0));
     const assertHeadingGeometry = async () => {
@@ -143,13 +159,61 @@ try {
       }
     };
     const queriesBefore = await page.evaluate(() => __fixtureQueries.length);
+    const typographyPairs = [
+      ['number', '.payment-amount', '.intents-payment-amount', 'number'],
+      ['direction', '.payment-direction', '.intents-payment-amount', 'number'],
+      ['unit', '.lib-payment-unit', '.evm-payment-unit', 'base'],
+      ['note', '.payment-memo', '.intents-payment-note', 'base'],
+      ['label', '.lib-payment-label', '.evm-payment-label', 'meta'],
+      ['note label', '.lib-payment-note .lib-payment-label', '.evm-payment-note .evm-payment-label', 'meta'],
+      ['network', '.lib-payment-network', '.intents-payment-chain', 'meta'],
+      ['timestamp', '.message-time', '.message-time', 'meta'],
+      ['details toggle', '.lib-payment-details summary', '.evm-payment-details summary', 'meta'],
+      ['details label', '.lib-payment-details dt', '.evm-payment-details dt', 'meta'],
+      ['details value', '.lib-payment-details dd', '.evm-payment-details dd', 'meta'],
+      ['transaction', '.lib-payment-details code', '.evm-payment-details dl > div:last-child code', 'meta'],
+    ];
+    const readTypography = async (side, pairs) => page.evaluate(({ side, pairs }) => {
+      const native = document.querySelector(`.message.${side}.payment-info:has(.payment-memo)`);
+      const evm = document.querySelector(`.message.${side}.evm-payment-bubble`);
+      const style = element => {
+        const value = getComputedStyle(element);
+        return { size: parseFloat(value.fontSize), weight: value.fontWeight, family: value.fontFamily, lineHeight: value.lineHeight, spacing: value.letterSpacing };
+      };
+      return pairs.map(([name, nativeSelector, evmSelector, scale]) => ({ name, scale, native: style(native.querySelector(nativeSelector)), evm: style(evm.querySelector(evmSelector)) }));
+    }, { side, pairs });
+    for (const base of [12, 16, 30]) {
+      await page.evaluate(size => __fixture.setFont(size), base);
+      for (const side of ['sent', 'received']) {
+        const measurements = await readTypography(side, typographyPairs);
+        for (const measured of measurements) {
+          const expected = measured.scale === 'number' ? base * 1.5 : measured.scale === 'meta' ? Math.round(base * 0.75) : base;
+          assert.ok(Math.abs(measured.native.size - expected) < 0.1, `${side} ${measured.name} at ${base}px: ${JSON.stringify(measured)}`);
+          for (const field of ['size', 'weight', 'family', 'lineHeight']) {
+            assert.equal(measured.native[field], measured.evm[field], `${side} ${measured.name} ${field} must match EVM at ${base}px`);
+          }
+          if (measured.scale === 'number') {
+            assert.equal(measured.native.weight, '700');
+            assert.ok(Math.abs(parseFloat(measured.native.lineHeight) - expected * 1.2) < 0.1);
+            assert.match(measured.native.family, /Inter/);
+          }
+          if (measured.name === 'unit') {
+            assert.equal(measured.native.weight, '500');
+            assert.equal(measured.native.spacing, 'normal');
+            assert.equal(measured.evm.spacing, 'normal');
+          }
+        }
+      }
+      const status = await readTypography('sent', [['status', '.lib-payment-status', '.intents-payment-verified', 'meta']]);
+      assert.deepEqual(status[0].native, status[0].evm, `Status typography must match EVM at ${base}px`);
+    }
     const fontSize = () => cards.first().locator('.payment-amount').evaluate(element => parseFloat(getComputedStyle(element).fontSize));
     await page.evaluate(() => __fixture.setFont(20));
     const regularFont = await fontSize();
     await page.evaluate(() => __fixture.setFont(30));
     assert.ok(await fontSize() > regularFont, 'Native receipt amount honors the chat font size preference');
     await assertHeadingGeometry();
-    const enlarged = await cards.locator('.lib-payment-message').evaluateAll(elements => elements.map(element => ({ client: element.clientWidth, scroll: element.scrollWidth })));
+    const enlarged = await page.locator('.lib-payment-message, .evm-payment-message, .evm-payment-footer').evaluateAll(elements => elements.map(element => ({ class: element.className, client: element.clientWidth, scroll: element.scrollWidth })));
     assert.ok(enlarged.every(size => size.scroll <= size.client + 1), JSON.stringify(enlarged));
     await page.evaluate(() => __fixture.clearToasts());
     await page.waitForFunction(() => document.querySelectorAll('.toast').length === 0);
@@ -271,10 +335,16 @@ try {
     await page.waitForFunction(() => document.querySelectorAll('.toast').length === 0);
     assert.equal(await page.evaluate(() => __fixtureBroadcasts), 0);
     await page.screenshot({ path: `${output}/collapsed-${viewport.name}.png`, fullPage: true });
+    if (mobile) {
+      await page.evaluate(size => { __fixture.setFont(size); __fixture.showTypographyComparison(); }, viewport.name === 'narrow' ? 30 : 16);
+      await page.setViewportSize({ width: viewport.width, height: viewport.name === 'narrow' ? 1600 : 1100 });
+      await page.locator('.evm-payment-message').scrollIntoViewIfNeeded();
+      await page.screenshot({ path: `${output}/typography-comparison-${viewport.name}.png`, fullPage: true });
+    }
     assert.deepEqual(errors, []);
     assert.deepEqual(external, []);
     assert.equal(explorerNavigations.length, 2);
-    console.log(`PASS ${viewport.name} ${viewport.width}px: 5 native LIB receipts, local 20px heading logos, aligned full-width amount/network/Note panels at 16px and 30px fonts, exact/tiny amounts, safe notes, one timestamp, details toggles/rerender, native full-hash explorer links/popups and plain fallback, Copy/Reply/Edit and failed retry, no broadcasts. Synthetic explorer navigations: ${explorerNavigations.length}; unexpected external requests: ${external.length}`);
+    console.log(`PASS ${viewport.name} ${viewport.width}px: 5 native LIB receipts match 2 actual sent/received EVM reference cards at 12px/16px/30px fonts; local 20px logos and aligned full-width panels, exact/tiny amounts, safe notes, one timestamp, details toggles/rerender, explorer popups/plain fallback, Copy/Reply/Edit and failed retry, no broadcasts. Synthetic explorer navigations: ${explorerNavigations.length}; unexpected external requests: ${external.length}`);
     await context.close();
   }
 } finally {
