@@ -56,6 +56,13 @@ window.__fixture = {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => window.__copied.push(text) } });
   },
   async openChat() { await chatModal.open(this.recipient); },
+  explorerUrl() { return network.explorerUrl; },
+  renderWithoutExplorer() {
+    const explorerUrl = network.explorerUrl;
+    delete network.explorerUrl;
+    chatModal.appendChatModal(false, true);
+    network.explorerUrl = explorerUrl;
+  },
   setFont(size) { chatSettingsModal.savedFontSizePx = size; chatSettingsModal.applyChatFontSize(); },
   clearToasts() { document.querySelectorAll('.toast').forEach(toast => hideToast(toast.id)); },
   clearComposer() {
@@ -85,10 +92,15 @@ try {
   for (const viewport of [{ name: 'desktop', width: 1100, height: 1000 }, { name: 'mobile', width: 390, height: 844 }, { name: 'narrow', width: 320, height: 740 }]) {
     const mobile = viewport.width < 600;
     const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height }, isMobile: mobile, hasTouch: mobile, reducedMotion: 'reduce', locale: 'en-US', timezoneId: 'America/Chicago' });
-    const errors = [], external = [];
+    const errors = [], external = [], explorerNavigations = [];
+    const explorerBase = 'https://dev.liberdus.com:3035';
     await context.route('**/*', route => {
       const url = route.request().url();
       if (url.startsWith(origin + '/')) return route.continue();
+      if (url.startsWith(explorerBase + '/transaction/') && /^[0-9a-f]{64}$/.test(url.slice(url.lastIndexOf('/') + 1))) {
+        explorerNavigations.push(url);
+        return route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Synthetic native explorer</title>' });
+      }
       external.push(url);
       return route.abort();
     });
@@ -98,6 +110,7 @@ try {
     await page.waitForFunction(() => window.__fixtureReady === true);
     await page.locator('#bootSplash.hidden').waitFor({ state: 'attached' });
     await page.evaluate(() => __fixture.configure());
+    assert.equal((await page.evaluate(() => __fixture.explorerUrl()) || '').replace(/\/+$/, ''), explorerBase, 'The selected Devnet configuration provides its native explorer');
     await page.evaluate(() => __fixture.openChat());
     await page.locator('#chatModal.is-transition-complete').waitFor();
     const cards = page.locator('.message.payment-info');
@@ -162,7 +175,23 @@ try {
       assert.equal(await details.getAttribute('open'), '');
       assert.equal(await details.locator('code').textContent(), txid);
       assert.equal(await page.locator('#messageContextMenu').isVisible(), false);
-      assert.equal(await details.locator('a').count(), 0);
+      const transaction = details.locator('a');
+      assert.equal(await transaction.count(), 1);
+      const transactionUrl = `${explorerBase}/transaction/${txid}`;
+      assert.equal(await transaction.getAttribute('href'), transactionUrl);
+      assert.equal(await transaction.getAttribute('target'), '_blank');
+      assert.equal(await transaction.getAttribute('rel'), 'noopener noreferrer');
+      assert.equal(await transaction.getAttribute('aria-label'), `View transaction ${txid} in block explorer`);
+      assert.ok((await transaction.innerText()).includes('↗'));
+      if (txid.startsWith('5') || txid.startsWith('4')) {
+        const popupReady = context.waitForEvent('page');
+        if (mobile) await transaction.tap(); else await transaction.click();
+        const popup = await popupReady;
+        await popup.waitForLoadState('domcontentloaded');
+        assert.equal(popup.url(), transactionUrl);
+        await popup.close();
+        assert.equal(await page.locator('#messageContextMenu').isVisible(), false);
+      }
       await details.locator('dt').last().click();
       assert.equal(await page.locator('#messageContextMenu').isVisible(), false);
       const sizes = await card.locator('.lib-payment-message').evaluate(element => {
@@ -181,6 +210,10 @@ try {
       }
       await details.locator('summary').click();
     }
+    await page.evaluate(() => __fixture.renderWithoutExplorer());
+    assert.equal(await cards.locator('.lib-payment-details a').count(), 0, 'Missing explorer configuration renders a plain full hash');
+    assert.equal(await cards.locator('.lib-payment-details code').count(), 5);
+    await page.evaluate(() => __fixture.rerender());
     const card = digit => page.locator(`.message.payment-info[data-txid="${digit.repeat(64)}"]`);
     const sent = card('1'), incoming = card('2'), tiny = card('3'), huge = card('4'), failed = card('5');
     assert.equal(await sent.locator('.payment-memo').textContent(), 'Lunch <3\nhttps://liberdus.com/');
@@ -196,6 +229,7 @@ try {
     await page.evaluate(() => __fixture.rerender());
     assert.equal(await sent.locator('.lib-payment-details').getAttribute('open'), '');
     assert.equal(await sent.locator('.message-time').count(), 1);
+    await sent.locator('.lib-payment-details code').scrollIntoViewIfNeeded();
     await page.screenshot({ path: `${output}/expanded-${viewport.name}.png`, fullPage: true });
     await sent.locator('.lib-payment-details summary').click();
 
@@ -238,7 +272,9 @@ try {
     assert.equal(await page.evaluate(() => __fixtureBroadcasts), 0);
     await page.screenshot({ path: `${output}/collapsed-${viewport.name}.png`, fullPage: true });
     assert.deepEqual(errors, []);
-    console.log(`PASS ${viewport.name} ${viewport.width}px: 5 native LIB receipts, local 20px heading logos, aligned full-width amount/network/Note panels at 16px and 30px fonts, exact/tiny amounts, safe notes, one timestamp, details toggles/rerender, Copy/Reply/Edit and failed retry, no broadcasts. Blocked external requests: ${external.length}`);
+    assert.deepEqual(external, []);
+    assert.equal(explorerNavigations.length, 2);
+    console.log(`PASS ${viewport.name} ${viewport.width}px: 5 native LIB receipts, local 20px heading logos, aligned full-width amount/network/Note panels at 16px and 30px fonts, exact/tiny amounts, safe notes, one timestamp, details toggles/rerender, native full-hash explorer links/popups and plain fallback, Copy/Reply/Edit and failed retry, no broadcasts. Synthetic explorer navigations: ${explorerNavigations.length}; unexpected external requests: ${external.length}`);
     await context.close();
   }
 } finally {
