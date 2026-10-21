@@ -74,8 +74,10 @@ failure state and edited markers. Its `.browser.test.mjs` companion opens real
 chat DOM at desktop and mobile widths and checks disclosure persistence, font
 scaling, local 20px heading logos and amount/network/Note alignment, overflow,
 native explorer links and plain-text fallback, Copy/Reply/Edit and failed-payment
-retry. The browser fixture uses synthetic local records, intercepts explorer
-navigations, blocks other external requests and prevents broadcasts;
+retry. Actual sent/received EVM reference cards verify matching computed typography
+at 12px, 16px and 30px chat font settings. The browser fixture uses synthetic local
+records, intercepts explorer navigations, blocks other external requests and
+prevents broadcasts;
 screenshots are saved under `/tmp/1819-lib-payment-bubbles`. Run either suite with:
 
 ```bash
