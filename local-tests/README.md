@@ -58,6 +58,16 @@ Run it with:
 WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs issue-1755-attachment-cache-ids.browser.test.mjs
 ```
 
+`issue-1817-hide-send-crypto.browser.test.mjs` opens the actual chat + menu at
+desktop and mobile sizes, checks the remaining attachment actions, and verifies
+the retained payment handler and wallet Multichain Receive screens. It uses
+synthetic account/deposit data, blocks external requests and transactions, and
+saves menu screenshots under `/tmp/1817-hide-send-crypto`. Run it with:
+
+```bash
+WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs issue-1817-hide-send-crypto.browser.test.mjs
+```
+
 The existing `playwright-tests/` E2E flows have separate live-account and service
 requirements. Select and authorize an appropriate environment before running
 those flows.
