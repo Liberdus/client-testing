@@ -56,7 +56,15 @@ window.__fixture = {
         rawAmount: '2500000000000000000', decimals: 18, symbol: 'USDT', note: 'Reference note',
       },
     }));
-    myData.contacts[recipient].messages = [...this.messages, ...this.evmMessages];
+    this.multichainMessages = [true, false].map((my, index) => ({
+      type: 'intents_transfer', my, paymentVerified: 'settled', timestamp: now - 12000 - index * 1000,
+      txid: (index + 9).toString(16).repeat(64),
+      payment: { type: 'intents_transfer', assetId: 'nep141:sol.omft.near', symbol: 'SOL',
+        chainName: 'Solana', amount: '0.01', decimals: 9, note: 'Reference note',
+        intentHash: index ? 'HDEyCMyfubvoVeuZueoSHYzgPc2i4SfksMksakVLV6h7' : '8LKE47o44ybZQR9ozLyDnvMDTh4Ao5ipy2mJWsYByG5Q',
+      },
+    }));
+    myData.contacts[recipient].messages = [...this.messages, ...this.evmMessages, ...this.multichainMessages];
     myData.wallet.history = this.messages.filter(message => message.my).map(message => ({ ...message }));
     isOnline = true;
     updateUIForConnectivity();
@@ -130,6 +138,7 @@ try {
     const cards = page.locator('.message.payment-info');
     assert.equal(await cards.count(), 5);
     assert.equal(await page.locator('.evm-payment-message').count(), 2, 'Use actual sent and received EVM receipts as typography references');
+    assert.equal(await page.locator('.intents-payment-message:not(.evm-payment-message)').count(), 2, 'Use actual sent and received Multichain receipts as width references');
     assert.equal(await cards.locator('.lib-payment-unit').count(), 5, 'Native ticker remains a separate, smaller text run');
     assert.equal(await cards.locator('.lib-payment-heading img').count(), 5, 'Each native payment has one local logo beside its label');
     await page.waitForFunction(() => [...document.querySelectorAll('.lib-payment-heading img')].every(image => image.complete && image.naturalWidth > 0));
@@ -159,6 +168,22 @@ try {
       }
     };
     const queriesBefore = await page.evaluate(() => __fixtureQueries.length);
+    const assertReceiptWidths = async (font, expanded) => {
+      const widths = await page.evaluate(() => ['sent', 'received'].map(side => {
+        const native = document.querySelector(`.message.${side}.payment-info`);
+        const evm = document.querySelector(`.message.${side}.evm-payment-bubble`);
+        const multichain = document.querySelector(`.message.${side}:has(.intents-payment-message:not(.evm-payment-message))`);
+        const measure = element => ({ width: element.getBoundingClientRect().width, maxWidth: getComputedStyle(element).maxWidth });
+        return { side, native: measure(native), evm: measure(evm), multichain: measure(multichain) };
+      }));
+      for (const measured of widths) {
+        const context = `${viewport.name}, ${font}px font, ${expanded ? 'expanded' : 'collapsed'}: ${JSON.stringify(measured)}`;
+        assert.equal(measured.native.maxWidth, measured.evm.maxWidth, 'Native and EVM receipts share a width cap: ' + context);
+        assert.equal(measured.native.maxWidth, measured.multichain.maxWidth, 'Native and Multichain receipts share a width cap: ' + context);
+        assert.ok(Math.abs(measured.native.width - measured.evm.width) < 1, 'Native and EVM receipts have the same outer width: ' + context);
+        assert.ok(measured.multichain.width <= measured.evm.width + 1, 'Short Multichain receipts may use less than the shared maximum: ' + context);
+      }
+    };
     const typographyPairs = [
       ['number', '.payment-amount', '.intents-payment-amount', 'number'],
       ['direction', '.payment-direction', '.intents-payment-amount', 'number'],
@@ -184,6 +209,11 @@ try {
     }, { side, pairs });
     for (const base of [12, 16, 30]) {
       await page.evaluate(size => __fixture.setFont(size), base);
+      for (const expanded of [false, true]) {
+        await page.locator('.lib-payment-details, .evm-payment-details').evaluateAll((details, open) => details.forEach(detail => { detail.open = open; }), expanded);
+        await assertReceiptWidths(base, expanded);
+      }
+      await page.locator('.lib-payment-details, .evm-payment-details').evaluateAll(details => details.forEach(detail => { detail.open = false; }));
       for (const side of ['sent', 'received']) {
         const measurements = await readTypography(side, typographyPairs);
         for (const measured of measurements) {
@@ -344,7 +374,7 @@ try {
     assert.deepEqual(errors, []);
     assert.deepEqual(external, []);
     assert.equal(explorerNavigations.length, 2);
-    console.log(`PASS ${viewport.name} ${viewport.width}px: 5 native LIB receipts match 2 actual sent/received EVM reference cards at 12px/16px/30px fonts; local 20px logos and aligned full-width panels, exact/tiny amounts, safe notes, one timestamp, details toggles/rerender, explorer popups/plain fallback, Copy/Reply/Edit and failed retry, no broadcasts. Synthetic explorer navigations: ${explorerNavigations.length}; unexpected external requests: ${external.length}`);
+    console.log(`PASS ${viewport.name} ${viewport.width}px: native/EVM outer widths match and Multichain shares their width cap, collapsed/expanded at 12px/16px/30px fonts; 5 native LIB receipts match 2 actual sent/received EVM reference cards in typography; local 20px logos and aligned full-width panels, exact/tiny amounts, safe notes, one timestamp, details toggles/rerender, explorer popups/plain fallback, Copy/Reply/Edit and failed retry, no broadcasts. Synthetic explorer navigations: ${explorerNavigations.length}; unexpected external requests: ${external.length}`);
     await context.close();
   }
 } finally {
