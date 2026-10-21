@@ -29,6 +29,7 @@ test('sent and received native receipts expose direction, asset, network and one
     const html = render({ my });
     assert.match(html, new RegExp(`class="message ${my ? 'sent' : 'received'}[^\"]*payment-info`));
     assert.match(html, /class="lib-payment-message"/);
+    assert.match(html, /<img\b[^>]*src="\.\/media\/liberdus_logo_50\.png"/);
     assert.ok(text(html).includes(`Payment ${my ? 'sent' : 'received'}`));
     assert.ok(text(html).includes('Liberdus'));
     assert.match(html, new RegExp(`<span class="payment-direction">${my ? '-' : '\\+'}</span>`));
