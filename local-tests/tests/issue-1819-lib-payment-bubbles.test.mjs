@@ -3,15 +3,16 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 
-import { big2str, escapeHtml, escapeHtmlAttribute, linkifyUrls, normalizeTransactionId } from '../lib.js';
+import { big2str, escapeHtml, escapeHtmlAttribute, linkifyUrls, normalizeHttpsUrl, normalizeTransactionId } from '../lib.js';
 import { formatDisplayAmount } from '../near-assets.js';
 
 const source = await readFile(new URL('../app.js', import.meta.url), 'utf8');
 const start = source.indexOf('class ChatModal {');
 const end = source.indexOf('const chatModal = new ChatModal();', start);
 assert.ok(start >= 0 && end > start, 'Load the actual ChatModal methods');
+const network = {};
 const chat = vm.runInNewContext(`${source.slice(start, end)}; Object.create(ChatModal.prototype)`, {
-  big2str, escapeHtml, escapeHtmlAttribute, linkifyUrls, normalizeTransactionId, formatDisplayAmount,
+  big2str, escapeHtml, escapeHtmlAttribute, linkifyUrls, normalizeHttpsUrl, normalizeTransactionId, formatDisplayAmount, network, URL,
   formatTime: () => '12:34 PM', isDeleted: () => false,
   fetch: () => { throw Error('Rendering a LIB receipt must not request network data'); },
 });
@@ -79,6 +80,44 @@ test('valid native txids appear exactly once in local details and unsafe ids add
     assert.ok(!invalid.includes('<a '));
     if (txid) assert.ok(invalid.includes(`data-txid="${escapeHtmlAttribute(txid)}"`));
   }
+});
+
+test('native transaction links use the configured HTTPS explorer path and normalized full hash', () => {
+  try {
+    for (const [explorerUrl, expected] of [
+      ['https://dev.liberdus.com:3035/', 'https://dev.liberdus.com:3035'],
+      ['https://exp-test.liberdus.com', 'https://exp-test.liberdus.com'],
+      ['https://explorer.example/base/path///', 'https://explorer.example/base/path'],
+      [' https://EXPLORER.example:443/base/path/?old=1#section ', 'https://explorer.example/base/path'],
+    ]) {
+      network.explorerUrl = explorerUrl;
+      for (const my of [true, false]) {
+        const html = render({ my, txid: TXID.toUpperCase() });
+        assert.ok(html.includes(`href="${expected}/transaction/${TXID}"`));
+        assert.ok(html.includes('target="_blank" rel="noopener noreferrer"'));
+        assert.ok(html.includes(`aria-label="View transaction ${TXID} in block explorer"`));
+        assert.ok(html.includes(`<code>${TXID}</code>`));
+        assert.equal(text(html).split(TXID).length - 1, 1);
+        assert.ok(text(html).includes('↗'));
+        assert.ok(!html.includes(`/transaction/0x${TXID}`));
+      }
+    }
+  } finally { delete network.explorerUrl; }
+});
+
+test('missing or unsafe native explorer configuration retains plain full-hash details', () => {
+  try {
+    for (const explorerUrl of [undefined, null, '', {}, 'invalid', '/explorer/', 'http://explorer.example', 'javascript:alert(1)', 'https://user:secret@explorer.example', 'https://explorer.example/' + 'x'.repeat(2050)]) {
+      network.explorerUrl = explorerUrl;
+      const html = render();
+      assert.ok(html.includes('<summary>Payment details</summary>'));
+      assert.ok(html.includes(`<code>${TXID}</code>`));
+      assert.ok(!html.includes('<a '));
+    }
+    network.explorerUrl = 'https://dev.liberdus.com:3035/';
+    assert.ok(!render({ txid: '0x' + TXID }).includes('class="lib-payment-details"'));
+    assert.ok(!render({ txid: '" onclick="alert(1)' }).includes('<a '));
+  } finally { delete network.explorerUrl; }
 });
 
 test('existing pending/failed attributes and edited indicators remain attached to native receipts', () => {
