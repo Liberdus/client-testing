@@ -102,18 +102,47 @@ try {
     await page.locator('#chatModal.is-transition-complete').waitFor();
     const cards = page.locator('.message.payment-info');
     assert.equal(await cards.count(), 5);
+    assert.equal(await cards.locator('.lib-payment-heading img').count(), 5, 'Each native payment has one local logo beside its label');
+    await page.waitForFunction(() => [...document.querySelectorAll('.lib-payment-heading img')].every(image => image.complete && image.naturalWidth > 0));
+    const assertHeadingGeometry = async () => {
+      const geometry = await cards.evaluateAll(elements => elements.map(element => {
+        const receipt = element.querySelector('.lib-payment-message');
+        const heading = receipt.querySelector('.lib-payment-heading');
+        const logo = heading.querySelector('img');
+        const label = heading.querySelector('.lib-payment-label');
+        const amount = receipt.querySelector('.payment-header');
+        const direction = amount.querySelector('.payment-direction');
+        const network = receipt.querySelector('.lib-payment-network');
+        const note = receipt.querySelector('.lib-payment-note');
+        const rect = node => { const { left, top, right, width, height } = node.getBoundingClientRect(); return { left, top, right, width, height }; };
+        return { logo: rect(logo), label: rect(label), amount: rect(amount), direction: rect(direction), network: rect(network), note: note && rect(note), receipt: rect(receipt),
+          source: new URL(logo.currentSrc).pathname };
+      }));
+      for (const measured of geometry) {
+        assert.equal(measured.source, '/media/liberdus_logo_50.png');
+        assert.ok(Math.abs(measured.logo.width - 20) < 0.5 && Math.abs(measured.logo.height - 20) < 0.5, JSON.stringify(measured));
+        assert.ok(measured.logo.right <= measured.label.left, 'The logo sits beside the label');
+        assert.ok(Math.abs(measured.logo.top + measured.logo.height / 2 - measured.label.top - measured.label.height / 2) < 1, 'Logo and label share a centered heading row');
+        for (const block of [measured.amount, measured.direction, measured.network, measured.note].filter(Boolean)) {
+          assert.ok(Math.abs(block.left - measured.receipt.left) < 1, 'Amount, network and Note panel retain the receipt left edge: ' + JSON.stringify(measured));
+        }
+        assert.ok(Math.abs(measured.amount.width - measured.receipt.width) < 1, 'Amount header retains full receipt width');
+      }
+    };
     const queriesBefore = await page.evaluate(() => __fixtureQueries.length);
     const fontSize = () => cards.first().locator('.payment-amount').evaluate(element => parseFloat(getComputedStyle(element).fontSize));
     await page.evaluate(() => __fixture.setFont(20));
     const regularFont = await fontSize();
     await page.evaluate(() => __fixture.setFont(30));
     assert.ok(await fontSize() > regularFont, 'Native receipt amount honors the chat font size preference');
+    await assertHeadingGeometry();
     const enlarged = await cards.locator('.lib-payment-message').evaluateAll(elements => elements.map(element => ({ client: element.clientWidth, scroll: element.scrollWidth })));
     assert.ok(enlarged.every(size => size.scroll <= size.client + 1), JSON.stringify(enlarged));
     await page.evaluate(() => __fixture.clearToasts());
     await page.waitForFunction(() => document.querySelectorAll('.toast').length === 0);
     await page.screenshot({ path: `${output}/largest-font-${viewport.name}.png`, fullPage: true });
     await page.evaluate(() => __fixture.setFont(16));
+    await assertHeadingGeometry();
     for (const card of await cards.all()) {
       const my = (await card.getAttribute('class')).includes('sent');
       assert.equal((await card.locator('.lib-payment-label').first().textContent()).trim(), `Payment ${my ? 'sent' : 'received'}`);
@@ -209,7 +238,7 @@ try {
     assert.equal(await page.evaluate(() => __fixtureBroadcasts), 0);
     await page.screenshot({ path: `${output}/collapsed-${viewport.name}.png`, fullPage: true });
     assert.deepEqual(errors, []);
-    console.log(`PASS ${viewport.name} ${viewport.width}px: 5 native LIB receipts, exact/tiny amounts, safe labeled notes, one timestamp, native details toggles/rerender, Copy/Reply/Edit and failed retry, no broadcasts. Blocked external requests: ${external.length}`);
+    console.log(`PASS ${viewport.name} ${viewport.width}px: 5 native LIB receipts, local 20px heading logos, aligned full-width amount/network/Note panels at 16px and 30px fonts, exact/tiny amounts, safe notes, one timestamp, details toggles/rerender, Copy/Reply/Edit and failed retry, no broadcasts. Blocked external requests: ${external.length}`);
     await context.close();
   }
 } finally {
