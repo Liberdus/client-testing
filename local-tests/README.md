@@ -68,6 +68,18 @@ saves menu screenshots under `/tmp/1817-hide-send-crypto`. Run it with:
 WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs issue-1817-hide-send-crypto.browser.test.mjs
 ```
 
+`issue-1819-lib-payment-bubbles.test.mjs` exercises the native LIB receipt renderer,
+including exact and tiny amounts, note escaping, local transaction details,
+failure state and edited markers. Its `.browser.test.mjs` companion opens real
+chat DOM at desktop and mobile widths and checks disclosure persistence, font
+scaling, overflow, Copy/Reply/Edit and failed-payment retry. The browser fixture
+uses synthetic local records, blocks external requests and prevents broadcasts;
+screenshots are saved under `/tmp/1819-lib-payment-bubbles`. Run either suite with:
+
+```bash
+WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs issue-1819-lib-payment-bubbles.test.mjs issue-1819-lib-payment-bubbles.browser.test.mjs
+```
+
 The existing `playwright-tests/` E2E flows have separate live-account and service
 requirements. Select and authorize an appropriate environment before running
 those flows.
