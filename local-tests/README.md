@@ -75,7 +75,10 @@ chat DOM at desktop and mobile widths and checks disclosure persistence, font
 scaling, local 20px heading logos and amount/network/Note alignment, overflow,
 native explorer links and plain-text fallback, Copy/Reply/Edit and failed-payment
 retry. Actual sent/received EVM reference cards verify matching computed typography
-at 12px, 16px and 30px chat font settings. The browser fixture uses synthetic local
+at 12px, 16px and 30px chat font settings. At each setting, collapsed and expanded
+native/EVM cards have matching outer widths; sent/received Multichain references
+verify the same maximum width while allowing their shorter content to use less space.
+The browser fixture uses synthetic local
 records, intercepts explorer navigations, blocks other external requests and
 prevents broadcasts;
 screenshots are saved under `/tmp/1819-lib-payment-bubbles`. Run either suite with:
