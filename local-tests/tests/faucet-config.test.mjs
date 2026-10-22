@@ -136,7 +136,7 @@ for (const filename of ['network.js', 'network.js_dev', 'network.js_web', 'netwo
     const source = readFileSync(join(clientRoot, filename), 'utf8');
     const network = vm.runInNewContext(`${source}\nnetwork`);
     const expected = filename === 'network.js_test'
-      ? 'https://faucet.liberdus.com/faucet'
+      ? 'https://fac.liberdus.com/faucet'
       : 'https://fac-dev.liberdus.com/faucet';
     assert.equal(network.faucetUrl, expected);
   });
