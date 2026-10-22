@@ -70,6 +70,22 @@ window.__fixture = {
     }));
     await chatModal.open(this.recipient);
   },
+  setChatNotes(note) {
+    myData.contacts[this.recipient].messages.forEach(message => { message.payment = { ...message.payment, note }; });
+    chatModal.appendChatModal(false, true);
+  },
+  getChatPayments() { return myData.contacts[this.recipient].messages.map(message => message.payment); },
+  async showMultichainChat() {
+    myData.contacts[this.recipient].messages = [true, false, true, false].map((my, index) => ({
+      type: INTENTS_CHAT_MESSAGE_TYPE, my, timestamp: Date.now() - index * 1000,
+      txid: String(index + 1).repeat(64), paymentVerified: my ? 'settled' : 'failed',
+      payment: parseTransferMessage({ type: INTENTS_CHAT_MESSAGE_TYPE, amount: '25.5', symbol: 'USDT', chainName: 'BNB Smart Chain',
+        assetId: 'nep245:v2_1.omni.hot.tg:56_0x55d398326f99059ff775485246999027b3197955', decimals: 18,
+        intentHash: '0x' + String(index + 1).repeat(64),
+        note: index < 2 ? 'Lunch <3' : 'Token contract 0x55d398326f99059ff775485246999027b3197955 <keep this note>' }),
+    }));
+    await chatModal.open(this.recipient);
+  },
   async showTokenChat() {
     myData.contacts[this.recipient].messages = myData.contacts[this.recipient].messages.filter(message => message.payment.symbol === 'USDT');
     await chatModal.open(this.recipient);
@@ -259,16 +275,23 @@ try {
       assert.equal((await token.locator('.intents-payment-note').textContent()).trim(), 'Lunch\nThanks <3');
       assert.equal(await token.locator('.evm-payment-contract').count(), 0);
       assert.equal(await token.locator('.evm-payment-note .evm-payment-label').textContent(), 'Note');
-      assert.equal(await token.locator('.evm-payment-details code').first().textContent(), '0x55d398326f99059ff775485246999027b3197955');
+      const fullHash = (await token.getAttribute('data-evm-payment')).split(':')[1];
+      assert.equal(await token.locator('.evm-payment-details code').count(), 1);
+      assert.equal(await token.locator('.evm-payment-details code').textContent(), fullHash);
+      assert.deepEqual(await token.locator('.evm-payment-details dt').allTextContents(), ['Network', 'Transaction']);
+      assert.equal(await token.locator('a[href*="/token/"]').count(), 0);
+      assert.ok(!(await token.innerHTML()).includes('0x55d398326f99059ff775485246999027b3197955'));
       assert.equal(await token.locator('img').count(), 0);
     }
     await page.screenshot({ path: `/tmp/evm-refined-chat-${viewport.name}.png`, fullPage: true });
     const details = tokens.first().locator('.evm-payment-details');
     if (mobile) await details.locator('summary').tap(); else await details.locator('summary').click();
-    assert.equal(await details.locator('code').first().textContent(), '0x55d398326f99059ff775485246999027b3197955');
+    assert.equal(await details.locator('code').textContent(), (await tokens.first().getAttribute('data-evm-payment')).split(':')[1]);
+    assert.equal(await details.locator('a').count(), 1);
     for (const link of await details.locator('a').all()) {
       const url = await link.getAttribute('href');
-      assert.ok(url.startsWith('https://bscscan.com/token/') || url.startsWith('https://bscscan.com/tx/'));
+      assert.ok(url.startsWith('https://bscscan.com/tx/'));
+      assert.ok((await link.getAttribute('aria-label')).includes(await link.getAttribute('title')));
       assert.equal(await link.getAttribute('target'), '_blank');
       assert.equal(await link.getAttribute('rel'), 'noopener noreferrer');
       const detailPopupPromise = context.waitForEvent('page');
@@ -289,8 +312,47 @@ try {
     assert.deepEqual(await page.evaluate(() => ({ queries: __fixtureQueries.length, fetches: __displayFetchCalls.length })), beforeDisclosureRerender);
     assert.equal(await page.locator('#messageContextMenu').isVisible(), false);
     await page.screenshot({ path: `/tmp/evm-refined-details-${viewport.name}.png`, fullPage: true });
+    const contract = '0x55d398326f99059ff775485246999027b3197955';
+    const contractNote = `Token contract ${contract} <keep this note>`;
+    await page.evaluate(note => __fixture.setChatNotes(note), contractNote);
+    for (const token of await tokens.all()) {
+      assert.equal(await token.locator('.intents-payment-note').textContent(), contractNote);
+      assert.equal((await token.textContent()).split(contract).length - 1, 1, 'Only the authored note may show the contract');
+      assert.ok(!(await token.locator('.evm-payment-details').textContent()).includes(contract));
+      assert.deepEqual(await token.locator('.evm-payment-details dt').allTextContents(), ['Network', 'Transaction']);
+      assert.equal(await token.locator('a[href*="/token/"]').count(), 0);
+    }
+    await page.evaluate(() => __fixture.showMultichainChat());
+    const multichain = page.locator('.intents-payment-message[data-intent-hash]');
+    assert.equal(await multichain.count(), 4);
+    for (const card of await multichain.all()) {
+      const message = card.locator('..');
+      const sent = (await message.getAttribute('class')).includes('sent');
+      assert.equal((await card.locator('.intents-payment-amount').textContent()).trim(), `${sent ? '−' : '+'}25.5 USDT`);
+      assert.equal(await card.locator('.intents-payment-chain').textContent(), 'BNB Smart Chain');
+      const txid = await message.getAttribute('data-txid');
+      const expectedNote = ['1', '2'].includes(txid[0]) ? 'Lunch <3' : contractNote;
+      assert.equal(await card.locator('.intents-payment-note').textContent(), expectedNote);
+      assert.equal((await card.textContent()).split(contract).length - 1, expectedNote.includes(contract) ? 1 : 0);
+      assert.equal(await card.getAttribute('data-intent-hash'), '0x' + txid);
+      assert.equal(await card.getAttribute('data-verified'), sent ? 'settled' : 'failed');
+      assert.equal(await card.locator('.intents-payment-verified').textContent(), sent ? 'Confirmed' : 'Not confirmed');
+      assert.equal(await card.locator('a').count(), 0);
+      assert.equal(await card.locator('dt').count(), 0);
+      assert.equal(await card.locator('.evm-payment-contract').count(), 0);
+      assert.equal(await message.locator('.message-time').count(), 1);
+      const timestamp = Number(await message.getAttribute('data-message-timestamp'));
+      const expectedTime = await page.evaluate(timestamp => new Date(timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true }), timestamp);
+      assert.equal(await message.locator('.message-time').textContent(), expectedTime);
+    }
+    assert.ok(await page.evaluate(() => __fixture.getChatPayments().every(payment =>
+      payment.assetId === 'nep245:v2_1.omni.hot.tg:56_0x55d398326f99059ff775485246999027b3197955' && payment.decimals === 18)));
+    const beforeMultichainRerender = await page.evaluate(() => ({ queries: __fixtureQueries.length, fetches: __displayFetchCalls.length }));
+    await page.evaluate(() => __fixture.chatModal.appendChatModal(false, true));
+    assert.equal(await multichain.count(), 4);
+    assert.deepEqual(await page.evaluate(() => ({ queries: __fixtureQueries.length, fetches: __displayFetchCalls.length })), beforeMultichainRerender);
     assert.deepEqual(errors, []);
-    console.log(`PASS ${viewport.name} ${viewport.width}px: 4 unchanged recovery rows, 10 native/ERC-20 chat cards, all 6 outcomes, exact single timestamps, full transaction hashes only once inside Payment details, native details toggle/selection, explorer popups and card menus, 6 chains with no portfolio/recovery, fallback and overflow. Display interactions/rerender added zero queries or fetches. Intercepted external requests: ${external.length}`);
+    console.log(`PASS ${viewport.name} ${viewport.width}px: 4 unchanged recovery rows, 10 native/ERC-20 chat cards, all 6 outcomes, exact single timestamps, full transaction hashes only once inside Payment details, no generated contract row/address/link in either EVM direction, both Multichain directions retain intent identity and contract-like notes, native details toggle/selection, explorer popups and card menus, 6 chains with no portfolio/recovery, fallback and overflow. Display interactions/rerender added zero queries or fetches. Intercepted external requests: ${external.length}`);
     await context.close();
   }
 } finally {

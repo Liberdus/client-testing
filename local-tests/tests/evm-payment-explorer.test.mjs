@@ -5,6 +5,7 @@ import vm from 'node:vm';
 
 import { EVM_CHAT_MESSAGE_TYPE, evmAssets, evmPaymentAmount, evmPaymentId, parseEvmTransferMessage } from '../evm-assets.js';
 import { escapeHtml, escapeHtmlAttribute } from '../lib.js';
+import { formatDisplayAmount, parseTransferMessage } from '../near-assets.js';
 
 const HASH = `0x${'abcdef12'.repeat(8)}`;
 const CONTRACT = '0x55d398326f99059ff775485246999027b3197955';
@@ -68,30 +69,23 @@ test('returns no link for unknown, missing, or unsafe explorer configuration', (
   }
 });
 
-test('resolves token contracts on every configured chain without metadata queries', (t) => {
-  const controller = new evmAssets.constructor();
-  t.mock.method(globalThis, 'fetch', () => { throw new Error('Explorer links must not query'); });
-  for (const [chainId, explorer] of EXPLORERS) {
-    assert.equal(controller.getPaymentTokenExplorerUrl({ chainId, contractAddress: CONTRACT }), `${explorer}/token/${CONTRACT}`);
+test('wallet asset details retain token contract explorer links on configured chains', (t) => {
+  t.mock.method(globalThis, 'fetch', () => { throw new Error('Rendering wallet details must not query'); });
+  const modal = new evmAssets.constructor().assetDetailsModal;
+  for (const field of ['title', 'symbol', 'price', 'updated', 'logo', 'name', 'balanceSymbol',
+    'value', 'amount', 'network', 'chainId', 'type', 'decimals', 'contract', 'marketPrice', 'holdingValue']) {
+    modal[field] = { style: {} };
   }
-  assert.equal(controller.getPaymentTokenExplorerUrl({ chainId: 56, contractAddress: `0x${CONTRACT.slice(2).toUpperCase()}` }), `https://bscscan.com/token/${CONTRACT}`);
-});
-
-test('token links reject invalid claims and unknown or unsafe explorer configuration', () => {
-  const controller = new evmAssets.constructor();
-  for (const contractAddress of [null, '', '0x1234', `${CONTRACT}/../other`, `${CONTRACT}?next=other`, 'javascript:alert(1)']) {
-    assert.equal(controller.getPaymentTokenExplorerUrl({ chainId: 56, contractAddress }), null);
+  const asset = { contractAddress: CONTRACT, tokenSymbol: 'USDT', tokenName: 'Tether',
+    tokenType: 'erc20', tokenAmount: '25.5', tokenDecimals: 18, tokenPriceUsd: '1', tokenValueUsd: '25.5' };
+  for (const [chainId, explorerUrl] of EXPLORERS) {
+    modal.render({ chainId, explorerUrl, name: `Chain ${chainId}`, shortName: 'EVM' }, asset);
+    assert.ok(modal.contract.innerHTML.includes(`href="${explorerUrl}/token/${CONTRACT}"`));
+    assert.ok(modal.contract.innerHTML.includes('target="_blank" rel="noopener noreferrer"'));
+    assert.ok(modal.contract.innerHTML.includes(`>${CONTRACT}</a>`));
   }
-  for (const chainId of [0, -1, '56', 1.5, Number.MAX_SAFE_INTEGER + 1]) {
-    assert.equal(controller.getPaymentTokenExplorerUrl({ chainId, contractAddress: CONTRACT }), null);
-  }
-  assert.equal(controller.getPaymentTokenExplorerUrl({ chainId: 999, contractAddress: CONTRACT, explorerUrl: 'https://untrusted.example' }), null);
-  for (const explorerUrl of ['http://explorer.example', 'javascript:alert(1)', 'https://user:password@explorer.example']) {
-    controller.discovery.portfolio = { chains: [{ chainId: 999, explorerUrl }], tokens: [] };
-    assert.equal(controller.getPaymentTokenExplorerUrl({ chainId: 999, contractAddress: CONTRACT }), null);
-  }
-  controller.discovery.portfolio = { chains: [{ chainId: 999, explorerUrl: 'https://explorer.example/network/' }], tokens: [] };
-  assert.equal(controller.getPaymentTokenExplorerUrl({ chainId: 999, contractAddress: CONTRACT }), `https://explorer.example/network/token/${CONTRACT}`);
+  modal.render({ explorerUrl: 'javascript:alert(1)', shortName: 'EVM' }, asset);
+  assert.equal(modal.contract.innerHTML, CONTRACT, 'Unsafe explorers must leave selectable plain text');
 });
 
 test('recovery rows retain the same hash link for username and raw-address unresolved or failed sends', () => {
@@ -126,7 +120,7 @@ const chat = vm.runInNewContext(`new (class { ${source.slice(renderStart, render
   EVM_CHAT_MESSAGE_TYPE, INTENTS_CHAT_MESSAGE_TYPE: 'intents_transfer',
   evmAssets, parseEvmTransferMessage, evmPaymentId, evmPaymentAmount, escapeHtml, escapeHtmlAttribute,
   formatTime: () => '12:00', isDeleted: () => false, normalizeTransactionId: () => '',
-  paymentStatusLabel: (state) => state,
+  paymentStatusLabel: (state) => state, formatDisplayAmount,
 });
 
 test('sent and synchronized received chat cards keep links for every outcome with no portfolio or recovery record', () => {
@@ -173,7 +167,7 @@ test('sent and received chat cards show each full transaction hash once, only in
   }
 });
 
-test('symbol-only ERC-20 cards render locally with a labeled note, contract in details, and one timestamp', (t) => {
+test('symbol-only ERC-20 cards render locally with a labeled note and one timestamp without a contract row', (t) => {
   let requests = 0;
   t.mock.method(globalThis, 'fetch', () => { requests++; throw new Error('Rendering must not fetch metadata'); });
   const contractAddress = '0x55d398326f99059ff775485246999027b3197955';
@@ -184,10 +178,11 @@ test('symbol-only ERC-20 cards render locally with a labeled note, contract in d
   const html = chat.renderChatMessageHTML(message, { contact: { messages: [message] }, lastReadTs: 0 });
   assert.ok(html.includes('−0.005 <span class="evm-payment-unit">USDT</span>'));
   assert.ok(!html.includes('evm-payment-contract'));
-  assert.ok(html.indexOf(contractAddress) > html.indexOf('<details'));
+  assert.ok(!html.includes(contractAddress));
+  assert.ok(!html.includes('<dt>Token contract</dt>'));
+  assert.ok(!html.includes('/token/'));
   assert.ok(html.includes('<section class="evm-payment-note" aria-label="Payment note"><div class="evm-payment-label">Note</div>'));
   assert.ok(html.includes('<div class="evm-payment-label">Payment sent</div>'));
-  assert.ok(html.includes(`<code>${contractAddress}</code>`));
   assert.ok(html.includes(`<code>${HASH}</code>`));
   assert.ok(html.includes('Lunch\nThanks &lt;3'));
   assert.ok(html.includes('<summary>Payment details</summary>'));
@@ -228,27 +223,73 @@ test('native payment details omit token contracts and generic messages keep time
   }
 });
 
-test('full contract and transaction details use accessible chain-correct links in sent and received cards', () => {
+test('sent and received ERC-20 details omit contracts and retain accessible chain-correct transaction links', () => {
   for (const my of [true, false]) {
     const payment = { ...PAYMENT, assetKind: 'erc20', contractAddress: CONTRACT, networkId: 'ethereum' };
     const html = chat.renderEvmPaymentMessage({ payment, my }, '');
     const details = html.slice(html.indexOf('<details'));
-    assert.ok(details.includes(`href="https://bscscan.com/token/${CONTRACT}"`));
+    assert.ok(!html.includes(CONTRACT));
+    assert.ok(!details.includes('<dt>Token contract</dt>'));
+    assert.ok(!details.includes('/token/'));
+    assert.ok(details.includes('EVM chain 56 · Chain ID 56'));
     assert.ok(details.includes(`href="https://bscscan.com/tx/${HASH}"`));
-    assert.ok(details.includes(`aria-label="View token contract ${CONTRACT} in block explorer"`));
     assert.ok(details.includes(`aria-label="View transaction ${HASH} in block explorer"`));
-    assert.equal((details.match(/target="_blank" rel="noopener noreferrer"/g) || []).length, 2);
-    assert.equal((details.match(/<span aria-hidden="true">↗<\/span>/g) || []).length, 2);
-    assert.ok(details.includes(`<code>${CONTRACT}</code>`));
+    assert.equal((details.match(/target="_blank" rel="noopener noreferrer"/g) || []).length, 1);
+    assert.equal((details.match(/<span aria-hidden="true">↗<\/span>/g) || []).length, 1);
     assert.ok(details.includes(`<code>${HASH}</code>`));
   }
 });
 
-test('unknown-chain token and transaction details remain plain selectable text', () => {
-  const payment = { ...PAYMENT, chainId: 999, assetKind: 'erc20', contractAddress: CONTRACT };
-  const html = chat.renderEvmPaymentMessage({ payment }, '');
-  const details = html.slice(html.indexOf('<details'));
-  assert.ok(details.includes(`<code>${CONTRACT}</code>`));
-  assert.ok(details.includes(`<code>${HASH}</code>`));
-  assert.ok(!details.includes('<a '));
+test('unknown-chain ERC-20 details omit contracts and retain the full plain transaction hash', () => {
+  for (const my of [true, false]) {
+    const payment = { ...PAYMENT, chainId: 999, assetKind: 'erc20', contractAddress: CONTRACT };
+    const html = chat.renderEvmPaymentMessage({ payment, my }, '');
+    const details = html.slice(html.indexOf('<details'));
+    assert.ok(!html.includes(CONTRACT));
+    assert.ok(!details.includes('<dt>Token contract</dt>'));
+    assert.ok(details.includes('EVM chain 999 · Chain ID 999'));
+    assert.ok(details.includes(`<code>${HASH}</code>`));
+    assert.ok(!details.includes('<a '));
+  }
+});
+
+test('contract-like notes survive in both EVM directions without generating contract metadata', () => {
+  for (const my of [true, false]) {
+    const note = `Token contract ${CONTRACT} <keep this note>`;
+    const message = { type: EVM_CHAT_MESSAGE_TYPE, timestamp: 1, my, paymentVerified: 'settled',
+      payment: { ...PAYMENT, assetKind: 'erc20', contractAddress: CONTRACT, symbol: 'USDT', note } };
+    const html = chat.renderChatMessageHTML(message, { contact: { messages: [message] }, lastReadTs: 0 });
+    const details = html.slice(html.indexOf('<details'));
+    assert.ok(html.includes(escapeHtml(note)));
+    assert.equal(html.split(CONTRACT).length - 1, 1, 'The only contract address must be the authored note');
+    assert.ok(!details.includes(CONTRACT) && !details.includes('<dt>Token contract</dt>'));
+    assert.ok(details.includes(`<code>${HASH}</code>`));
+    assert.ok(html.includes('data-verified="settled"'));
+    assert.equal((html.match(/class="message-time"/g) || []).length, 1);
+  }
+});
+
+test('Multichain sent and received cards preserve payment data without generated contract metadata', () => {
+  const assetId = `nep245:v2_1.omni.hot.tg:56_${CONTRACT}`;
+  for (const my of [true, false]) {
+    for (const note of ['Lunch <3', `Token contract ${CONTRACT} <keep this note>`]) {
+      const payment = parseTransferMessage({ type: 'intents_transfer', assetId, decimals: 18,
+        amount: '25.5', symbol: 'USDT', chainName: 'BNB Smart Chain', intentHash: HASH, note });
+      assert.ok(payment, 'The fixture must be accepted as a valid Multichain claim');
+      const message = { type: 'intents_transfer', timestamp: 1, my, paymentVerified: 'pending', payment };
+      const html = chat.renderChatMessageHTML(message, { contact: { messages: [message] }, lastReadTs: 0 });
+      assert.ok(html.includes(`${my ? '−' : '+'}25.5 USDT`));
+      assert.ok(html.includes('BNB Smart Chain'));
+      assert.ok(html.includes(escapeHtml(note)));
+      assert.ok(html.includes(`data-intent-hash="${HASH}"`));
+      assert.ok(html.includes('data-verified="pending"'));
+      assert.ok(html.includes('<div class="intents-payment-verified">pending</div>'));
+      assert.equal(html.split(CONTRACT).length - 1, note.includes(CONTRACT) ? 1 : 0);
+      assert.ok(!html.includes('<dt>Token contract</dt>') && !html.includes('/token/') && !html.includes('<a '));
+      assert.ok(html.includes('<div class="message-time">12:00</div>'));
+      assert.equal((html.match(/class="message-time"/g) || []).length, 1);
+      assert.equal(payment.assetId, assetId);
+      assert.equal(payment.decimals, 18);
+    }
+  }
 });
