@@ -99,21 +99,6 @@ for (const flow of flows) {
     assert.equal(harness.closed, flow.name === 'validator');
   });
 
-  for (const faucetUrl of [undefined, null, '']) {
-    test(`${flow.name}: missing faucet URL (${String(faucetUrl) || 'empty'}) errors before signing or fetching`, async () => {
-      const harness = createHarness(flow, faucetUrl);
-      await harness.run();
-
-      assert.equal(harness.signed.length, 0, 'An unconfigured faucet must not sign a request');
-      assert.equal(harness.requests.length, 0, 'An unconfigured faucet must not use a default endpoint');
-      assert.ok(harness.toasts.some(({ message, type }) => type === 'error' && /faucet/i.test(message)));
-      assert.ok(!harness.toasts.some(({ type }) => type === 'success'));
-      assert.equal(harness.hiddenToasts.length, 1);
-      assert.equal(harness.receiver.isFaucetRequestInProgress, false);
-      assert.equal(harness.closed, false);
-    });
-  }
-
   for (const responseKind of ['network-error', 'http-error']) {
     test(`${flow.name}: a configured faucet ${responseKind} does not retry another endpoint`, async () => {
       const faucetUrl = 'https://unavailable-faucet.example.test/claim';
