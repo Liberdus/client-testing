@@ -115,7 +115,7 @@ try {
     const mobile = viewport.width < 600;
     const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height }, isMobile: mobile, hasTouch: mobile, reducedMotion: 'reduce', locale: 'en-US', timezoneId: 'America/Chicago' });
     const errors = [], external = [], explorerNavigations = [];
-    const explorerBase = 'https://dev.liberdus.com:3035';
+    const explorerBase = 'https://exp-dev.liberdus.com';
     await context.route('**/*', route => {
       const url = route.request().url();
       if (url.startsWith(origin + '/')) return route.continue();

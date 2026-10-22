@@ -86,7 +86,7 @@ test('valid native txids appear exactly once in local details and unsafe ids add
 test('native transaction links use the configured HTTPS explorer path and normalized full hash', () => {
   try {
     for (const [explorerUrl, expected] of [
-      ['https://dev.liberdus.com:3035/', 'https://dev.liberdus.com:3035'],
+      ['https://exp-dev.liberdus.com/', 'https://exp-dev.liberdus.com'],
       ['https://exp-test.liberdus.com', 'https://exp-test.liberdus.com'],
       ['https://explorer.example/base/path///', 'https://explorer.example/base/path'],
       [' https://EXPLORER.example:443/base/path/?old=1#section ', 'https://explorer.example/base/path'],
@@ -115,7 +115,7 @@ test('missing or unsafe native explorer configuration retains plain full-hash de
       assert.ok(html.includes(`<code>${TXID}</code>`));
       assert.ok(!html.includes('<a '));
     }
-    network.explorerUrl = 'https://dev.liberdus.com:3035/';
+    network.explorerUrl = 'https://exp-dev.liberdus.com/';
     assert.ok(!render({ txid: '0x' + TXID }).includes('class="lib-payment-details"'));
     assert.ok(!render({ txid: '" onclick="alert(1)' }).includes('<a '));
   } finally { delete network.explorerUrl; }
