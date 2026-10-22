@@ -99,6 +99,20 @@ for (const flow of flows) {
     assert.equal(harness.closed, flow.name === 'validator');
   });
 
+  for (const faucetUrl of [undefined, null, '']) {
+    test(`${flow.name}: missing faucet URL (${String(faucetUrl) || 'empty'}) shows availability toast without signing or fetching`, async () => {
+      const harness = createHarness(flow, faucetUrl);
+      await harness.run();
+
+      assert.equal(harness.signed.length, 0);
+      assert.equal(harness.requests.length, 0);
+      assert.deepEqual(harness.toasts, [{ message: 'Faucet not available', duration: 0, type: 'error' }]);
+      assert.equal(harness.hiddenToasts.length, 0);
+      assert.equal(harness.receiver.isFaucetRequestInProgress, false);
+      assert.equal(harness.closed, false);
+    });
+  }
+
   for (const responseKind of ['network-error', 'http-error']) {
     test(`${flow.name}: a configured faucet ${responseKind} does not retry another endpoint`, async () => {
       const faucetUrl = 'https://unavailable-faucet.example.test/claim';
