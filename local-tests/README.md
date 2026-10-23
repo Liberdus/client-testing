@@ -176,6 +176,18 @@ include `/tmp/committee-addresses-391-prefilled-row.png`,
 the editor and confirmation; it does not exercise Proposal Info navigation or
 the operating system clipboard.
 
+Review-label alignment follow-up: CSS-only client
+`a1f6227a4cf03a07732565ccd39d8f594206fa50` passes the existing browser suite at
+all four viewport sizes. Fresh review screenshots show the parameter title and
+address lists centered, with Current/New labels left-aligned; editable inputs
+remain left-aligned. Copy controls, keyboard activation, text fit and overflow
+checks continue to pass, with no page errors or external requests. Captures are
+`/tmp/committee-addresses-391-review.png` and
+`/tmp/committee-addresses-1100-review.png`. The selector also scopes Proposal
+Info, but that modal's navigation was not exercised. No reusable tests changed.
+The 31 Node cases were not rerun for this CSS-only adjustment; their previous
+passing client revision remains `547d2c343f54e51f76f9fe2e84345d4332d1b7a5`.
+
 This topic uses the published offline-runner dependency
 [client-testing #90](https://github.com/Liberdus/client-testing/pull/90), branch
 `codex/offline-test-foundation`, recorded parent tip
