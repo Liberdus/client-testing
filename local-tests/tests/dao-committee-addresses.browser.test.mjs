@@ -54,9 +54,20 @@ class CommitteeBrowserFixture {
       const queryNetwork = async () => configUnavailable ? null : { account: structuredClone(account) };
       const getTransactionTimestamp = () => 1700000000000;
       const enterFullscreen = () => {};
-      const showToast = message => { document.getElementById('fixtureToast').textContent = message; };
+      const toasts = [];
+      const showToast = (message, duration, type) => {
+        toasts.push({ message, duration, type });
+        document.getElementById('fixtureToast').textContent = message;
+      };
       const hideToast = () => {};
       const hasPendingDaoProposalCreation = () => false;
+      const clipboard = { attempts: [], fail: false };
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText: async value => {
+        clipboard.attempts.push(value);
+        if (clipboard.fail) throw new Error('Synthetic clipboard failure');
+      } } });
+      const formEvents = { submits: 0 };
+      document.getElementById('addProposalForm').addEventListener('submit', () => formEvents.submits++);
       const captured = [];
       const daoRepo = { createProposal: async options => {
         captured.push(buildDaoProposalCreateTransaction({ ...options, proposalNumber: 7 }));
@@ -70,6 +81,7 @@ class CommitteeBrowserFixture {
       confirmProposalModal.load();
       document.getElementById('openFixture').addEventListener('click', () => addProposalModal.open());
       globalThis.fixture = { addProposalModal, confirmProposalModal, account, captured,
+        clipboard, toasts, formEvents, addressView: DaoCommitteeAddressView,
         setUnavailable: value => { configUnavailable = value; } };
     `;
     this.server = createServer((request, response) => this.serve(request, response));
@@ -145,12 +157,55 @@ class CommitteeBrowserFixture {
       assert.equal(address.length, 40);
       assert.ok(text <= available + 1, `Wallet text needs ${text.toFixed(1)}px, but input has ${available.toFixed(1)}px`);
     }
-    const lines = await group.locator('xpath=ancestor::*[@data-dao-change-row][1]').locator('.dao-committee-address-list [role="listitem"]').evaluateAll(items => items.map(item => {
+    const lines = await group.locator('xpath=ancestor::*[@data-dao-change-row][1]').locator('[data-dao-copy-address]').evaluateAll(items => items.map(item => {
       const range = document.createRange();
       range.selectNodeContents(item);
       return range.getClientRects().length;
     }));
     assert.deepEqual(lines, [1, 1, 1, 1], 'Current wallet addresses must each use one line');
+  }
+
+  static async expectCenteredAddresses(buttons) {
+    const offsets = await buttons.evaluateAll(items => items.flatMap(item => {
+      const container = item.closest('[role="listitem"]').getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(item);
+      return [...range.getClientRects()].map(line => Math.abs(line.x + line.width / 2 - container.x - container.width / 2));
+    }));
+    assert.ok(offsets.length > 0, 'Expected displayed address text');
+    assert.ok(offsets.every(offset => offset < 1.5), `Address text must be centered: ${offsets.join(', ')}`);
+  }
+
+  static async expectAddressCopy(page, button, address, { key, fail = false } = {}) {
+    assert.equal(await button.getAttribute('type'), 'button');
+    assert.equal(await button.getAttribute('title'), 'Copy address');
+    assert.equal(await button.getAttribute('aria-label'), `Copy address ${address}`);
+    assert.equal(await button.textContent(), address);
+    await page.evaluate(value => { fixture.clipboard.fail = value; }, fail);
+    const readState = () => page.evaluate(() => ({
+      attempts: fixture.clipboard.attempts,
+      toasts: fixture.toasts,
+      options: fixture.addProposalModal.options,
+      draft: fixture.confirmProposalModal.currentDraft,
+      submits: fixture.formEvents.submits,
+      transactions: fixture.captured,
+      activeModals: [...document.querySelectorAll('.modal.active')].map(modal => modal.id),
+    }));
+    const before = await readState();
+    if (key) await button.press(key);
+    else await button.click();
+    await page.waitForFunction(count => fixture.toasts.length > count, before.toasts.length);
+    const after = await readState();
+    assert.deepEqual(after.attempts.slice(before.attempts.length), [address], 'One activation must attempt one clipboard write');
+    assert.deepEqual(after.toasts.slice(before.toasts.length), [{
+      message: fail ? 'Failed to copy address' : 'Address copied to clipboard',
+      duration: fail ? 0 : 2000,
+      type: fail ? 'error' : 'success',
+    }]);
+    const { attempts: beforeAttempts, toasts: beforeToasts, ...beforeProposal } = before;
+    const { attempts: afterAttempts, toasts: afterToasts, ...afterProposal } = after;
+    assert.deepEqual(afterProposal, beforeProposal, 'Copying must not submit or mutate the proposal');
+    await page.evaluate(() => { fixture.clipboard.fail = false; });
   }
 
   static async expectRemoveIcons(page) {
@@ -187,13 +242,25 @@ class CommitteeBrowserFixture {
       await CommitteeBrowserFixture.select(page, 'Committee Addresses');
       const first = page.locator('[data-dao-committee-addresses]').first();
       const addresses = first.locator('input');
+      const currentButtons = page.locator('[data-dao-change-row]').first().locator('button[data-dao-copy-address]');
       const displayedCurrent = CommitteeBrowserFixture.wallets;
       assert.deepEqual(await addresses.evaluateAll(inputs => inputs.map(input => input.value)), displayedCurrent);
+      assert.equal(await currentButtons.count(), 4, 'Each Current address must be a copy button');
       assert.deepEqual(await page.locator('[data-dao-change-row]').first().locator('.dao-committee-address-list [role="listitem"]').allTextContents(), displayedCurrent);
       await page.evaluate(() => document.fonts.ready);
       await CommitteeBrowserFixture.expectMonospaceAddresses(addresses);
-      await CommitteeBrowserFixture.expectMonospaceAddresses(page.locator('[data-dao-change-row]').first().locator('.dao-committee-address-list [role="listitem"]'));
+      await CommitteeBrowserFixture.expectMonospaceAddresses(currentButtons);
+      await CommitteeBrowserFixture.expectCenteredAddresses(currentButtons);
+      assert.ok((await addresses.evaluateAll(inputs => inputs.map(input => getComputedStyle(input).textAlign))).every(align => ['left', 'start'].includes(align)), 'Editable addresses stay left-aligned');
       await CommitteeBrowserFixture.expectWalletTextFits(first);
+      await CommitteeBrowserFixture.expectAddressCopy(page, currentButtons.first(), displayedCurrent[0]);
+      await CommitteeBrowserFixture.expectAddressCopy(page, currentButtons.nth(1), displayedCurrent[1], { key: 'Enter' });
+      await CommitteeBrowserFixture.expectAddressCopy(page, currentButtons.nth(2), displayedCurrent[2], { key: 'Space', fail: true });
+      await page.evaluate(() => {
+        fixture.addressView.load(fixture.addProposalModal.modal);
+        fixture.addressView.load(fixture.addProposalModal.modal);
+      });
+      await CommitteeBrowserFixture.expectAddressCopy(page, currentButtons.last(), displayedCurrent[3]);
       await CommitteeBrowserFixture.expectRemoveIcons(page);
       assert.equal(await page.locator('[data-dao-remove-option]').isDisabled(), true);
       assert.equal(await page.locator('[data-dao-remove-change]').isDisabled(), true);
@@ -201,11 +268,15 @@ class CommitteeBrowserFixture {
       await page.waitForFunction(() => document.getAnimations().every(animation => animation.playState !== 'running'));
       await page.locator('[data-dao-change-row]').first().screenshot({ path: `/tmp/committee-addresses-${width}-prefilled-row.png` });
       await page.screenshot({ path: `/tmp/committee-addresses-${width}-prefilled-viewport.png` });
+      const copyAttempts = await page.evaluate(() => fixture.clipboard.attempts.length);
+      await addresses.nth(0).click();
       await addresses.nth(0).fill(' 0X' + 'E'.repeat(40) + ' ');
+      assert.equal(await page.evaluate(() => fixture.clipboard.attempts.length), copyAttempts, 'Editing an input must not copy it');
       await page.locator('#addProposalOptionButton').click();
       assert.equal(await page.locator('[data-dao-committee-addresses]').nth(1).locator('input').first().inputValue(), displayedCurrent[0]);
       assert.equal(await addresses.first().inputValue(), ' 0X' + 'E'.repeat(40) + ' ');
       assert.equal(await page.evaluate(() => fixture.account.current.dao.committeeAddresses[0]), displayedCurrent[0].padEnd(64, '0'));
+      await CommitteeBrowserFixture.expectAddressCopy(page, currentButtons.first(), displayedCurrent[0]);
 
       await CommitteeBrowserFixture.expectRemoveIcons(page);
       const removeOptionLabel = await page.locator('[data-dao-remove-option="1"]').getAttribute('aria-label');
@@ -263,13 +334,17 @@ class CommitteeBrowserFixture {
       await page.locator('#confirmProposalModal.active.is-transition-complete').waitFor();
       const lists = page.locator('#confirmProposalContent .dao-committee-address-list');
       assert.equal(await lists.count(), 4);
-      await CommitteeBrowserFixture.expectMonospaceAddresses(lists.locator('[role="listitem"]'));
+      await CommitteeBrowserFixture.expectMonospaceAddresses(lists.locator('[data-dao-copy-address]'));
+      await CommitteeBrowserFixture.expectCenteredAddresses(lists.locator('[data-dao-copy-address]'));
       const canonical = proposed.map(value => value.trim().replace(/^0x/i, '').toLowerCase().padEnd(64, '0'));
       assert.deepEqual(await lists.nth(0).locator('[role="listitem"]').allTextContents(), displayedCurrent);
       assert.deepEqual(await lists.nth(1).locator('[role="listitem"]').allTextContents(), [
         'a'.repeat(40), 'b'.repeat(40), 'c'.repeat(64), 'd'.repeat(36) + '0000',
       ]);
       assert.doesNotMatch(await lists.allTextContents().then(values => values.join('')), /0x|[A-F]|\[|\]/);
+      await CommitteeBrowserFixture.expectAddressCopy(page, lists.nth(0).locator('[data-dao-copy-address]').first(), displayedCurrent[0]);
+      await CommitteeBrowserFixture.expectAddressCopy(page, lists.nth(1).locator('[data-dao-copy-address]').first(), 'a'.repeat(40), { key: 'Enter' });
+      await CommitteeBrowserFixture.expectAddressCopy(page, lists.nth(1).locator('[data-dao-copy-address]').nth(2), 'c'.repeat(64), { key: 'Space' });
       await CommitteeBrowserFixture.expectNoOverflow(page, '#confirmProposalModal .modal-content');
       const noChange = await page.locator('#confirmProposalContent .proposal-option-section--no-change').boundingBox();
       assert.ok(noChange.height < 200, 'No change must not stretch to the committee list height');
@@ -280,6 +355,7 @@ class CommitteeBrowserFixture {
       assert.deepEqual(await addresses.evaluateAll(inputs => inputs.map(input => input.value)), proposed);
       await page.locator('#addProposalSubmitButton').click();
       await page.locator('#confirmProposalModal.active.is-transition-complete').waitFor();
+      await CommitteeBrowserFixture.expectAddressCopy(page, lists.nth(1).locator('[data-dao-copy-address]').nth(2), 'c'.repeat(64));
       await page.locator('#signConfirmProposal').click();
       await page.waitForFunction(() => fixture.captured.length === 1);
       assert.deepEqual(await page.evaluate(() => JSON.parse(fixture.captured[0].governance.changes[0][0].value)), canonical);
