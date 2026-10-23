@@ -152,7 +152,7 @@ Network/account/submission services are synthetic, and external requests are
 blocked. This does not test full application startup, Menu/DAO navigation, real
 signing, broadcasts or Proposal Info navigation.
 
-Validated client: `83caba73c79d246463bc62bad17d410cfc08fff5`. The four focused Node
+Validated client: `d89a4e8c572b800a34d907c4ed645f11af5fc412`. The four focused Node
 files pass 18 cases, and Chromium passes all three viewport sizes with no page
 errors or external requests. The three existing suites also passed all 10 cases against
 original client `01a232471ca26ddc280064721ca1cec121d719c1`. The new domain file fails
@@ -164,12 +164,12 @@ This topic uses the published offline-runner dependency
 `codex/offline-test-foundation`, recorded parent tip
 `d04fcc1f9dfd6cc47d220002bac0a822cc3ced4d`. Shared main
 `2fc3036c11900073e0616cf9ddcdf3cf233904e3` lacks the runner and instructions.
-A future test PR should temporarily target that parent branch, then rebase only
+The test PR temporarily targets that parent branch; rebase only
 this topic's changes and retarget to main after its integration (use the recorded
 parent tip as the replay boundary for a squash merge). Keep these tests unmerged
 until the committee client implementation reaches main, then rerun against that
-exact client main revision. Topic publication, linked PR creation, review and
-integration are separate pending steps.
+exact client main revision. Publication, linked PRs, review and integration are
+separate steps; publishing this topic does not integrate it into main.
 
 ## Point implementation agents here
 
