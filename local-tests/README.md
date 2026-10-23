@@ -150,12 +150,13 @@ optional prefixes; wallet-length prefill/Current/confirmation display; canonical
 64-character captured transaction values;
 Review → Back; mixed numeric changes; failed submission/retry; unavailable config;
 a scalar-only regression; measured full-wallet input fit; single-line Current
-addresses; equal character widths in monospace inputs/Current/confirmation; and
+addresses; equal character widths in monospace inputs/Current/confirmation;
+centered displayed addresses with mouse/keyboard copy and clipboard feedback; and
 accessible trash icons with option/parameter/committee/milestone
 removal and minimum-count disabled states. Screenshots go to
 `/tmp/committee-addresses-*.png`.
-Network/account/submission services are synthetic, and external requests are
-blocked. This does not test full application startup, Menu/DAO navigation, real
+Network/account/submission services and the clipboard API are synthetic, and
+external requests are blocked. This does not test full application startup, Menu/DAO navigation, real
 signing, broadcasts or Proposal Info navigation.
 
 Before display shortening, client `d89a4e8c572b800a34d907c4ed645f11af5fc412` passed
@@ -212,6 +213,24 @@ page errors or external requests in the final run. Fresh complete parameter-row
 captures are `/tmp/committee-addresses-391-prefilled-row.png` and
 `/tmp/committee-addresses-1100-prefilled-row.png`; the 391×751 viewport capture is
 `/tmp/committee-addresses-391-prefilled-viewport.png`.
+
+Center-and-copy follow-up: client `547d2c343f54e51f76f9fe2e84345d4332d1b7a5`
+passes the same 31 Node cases and Chromium at all four viewport sizes. The new
+browser check first failed on `e5d332ce23af14dcd0a1ff422d9cc654152939ba` because
+Current had zero copy buttons instead of four. The final browser flow measures
+each displayed text line's center against its list item, while inputs remain
+left-aligned, editable and within the existing fit bounds. Mouse, Enter and
+Space activation copy the visible 40-character wallet or unpadded 64-character
+network address exactly through a stubbed `navigator.clipboard.writeText`.
+Assertions check success/error toast text, duration and type; one write per
+activation after repeated listener loading; copying after editor and review
+rerenders; and no form submission, proposal mutation or clipboard calls from
+input editing. There are no page errors or external requests. Fresh captures
+include `/tmp/committee-addresses-391-prefilled-row.png`,
+`/tmp/committee-addresses-391-prefilled-viewport.png` and
+`/tmp/committee-addresses-391-review.png`. This tests the shared display through
+the editor and confirmation; it does not exercise Proposal Info navigation or
+the operating system clipboard.
 
 This topic uses the published offline-runner dependency
 [client-testing #90](https://github.com/Liberdus/client-testing/pull/90), branch
