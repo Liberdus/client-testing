@@ -73,6 +73,48 @@ Preserve the existing E2E PR stacks and the legacy branch. A full run on a featu
 branch can reveal unrelated client/test incompatibilities; report those with
 the tested pair of SHAs instead of weakening assertions or hiding failures.
 
+## Committee address proposals (#1652)
+
+Run the focused domain and actual-modal browser coverage with the implementation
+checkout selected (Playwright/Chromium setup is described above):
+
+```bash
+WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs \
+  dao-committee-addresses.test.mjs dao-parameter-descriptions.test.mjs \
+  dao-proposal-create.test.mjs dao-proposal-option-layout.test.mjs
+WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs \
+  dao-committee-addresses.browser.test.mjs
+```
+
+The browser fixture renders the client's actual proposal editor, PopupSelect,
+confirmation classes, modal markup and CSS at 1100, 390 and 320 pixels. It checks
+prefill and independent option copies; add/remove with 0/3/4/10 rows; validation;
+optional prefixes; canonical confirmation and captured transaction values;
+Review → Back; mixed numeric changes; failed submission/retry; unavailable config;
+and a scalar-only regression. Screenshots go to `/tmp/committee-addresses-*.png`.
+Network/account/submission services are synthetic, and external requests are
+blocked. This does not test full application startup, Menu/DAO navigation, real
+signing, broadcasts or Proposal Info navigation.
+
+Validated client: `83caba73c79d246463bc62bad17d410cfc08fff5`. The four focused Node
+files pass 18 cases, and Chromium passes all three viewport sizes with no page
+errors or external requests. The three existing suites also passed all 10 cases against
+original client `01a232471ca26ddc280064721ca1cec121d719c1`. The new domain file fails
+against that revision because the committee-address export does not exist yet.
+The full inherited suite and live E2E were not run.
+
+This topic uses the published offline-runner dependency
+[client-testing #90](https://github.com/Liberdus/client-testing/pull/90), branch
+`codex/offline-test-foundation`, recorded parent tip
+`d04fcc1f9dfd6cc47d220002bac0a822cc3ced4d`. Shared main
+`2fc3036c11900073e0616cf9ddcdf3cf233904e3` lacks the runner and instructions.
+A future test PR should temporarily target that parent branch, then rebase only
+this topic's changes and retarget to main after its integration (use the recorded
+parent tip as the replay boundary for a squash merge). Keep these tests unmerged
+until the committee client implementation reaches main, then rerun against that
+exact client main revision. Topic publication, linked PR creation, review and
+integration are separate pending steps.
+
 ## Point implementation agents here
 
 Client agents need a pointer in their own `AGENTS.md` to find this companion
