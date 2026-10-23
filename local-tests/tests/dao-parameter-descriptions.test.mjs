@@ -37,7 +37,7 @@ test('separates backend value types from frontend validation rules', () => {
   assert.equal(configOptions.some((option) => option.valueType === 'float' || !option.validation), false);
   assert.deepEqual(
     [...new Set(configOptions.map((option) => `${option.valueType}:${option.validation}`))].sort(),
-    ['boolean:boolean', 'number:decimal', 'number:integer', 'string:decimalString'],
+    ['array:committeeAddresses', 'boolean:boolean', 'number:decimal', 'number:integer', 'string:decimalString'],
   );
 });
 
