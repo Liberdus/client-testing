@@ -125,10 +125,12 @@ class CommitteeBrowserFixture {
       await CommitteeBrowserFixture.select(page, 'Committee Addresses');
       const first = page.locator('[data-dao-committee-addresses]').first();
       const addresses = first.locator('input');
-      assert.deepEqual(await addresses.evaluateAll(inputs => inputs.map(input => input.value)), ['a','b','c','d'].map(char => char.repeat(40).padEnd(64, '0')));
+      const displayedCurrent = ['a','b','c','d'].map(char => char.repeat(40));
+      assert.deepEqual(await addresses.evaluateAll(inputs => inputs.map(input => input.value)), displayedCurrent);
+      assert.deepEqual(await page.locator('[data-dao-change-row]').first().locator('.dao-committee-address-list [role="listitem"]').allTextContents(), displayedCurrent);
       await addresses.nth(0).fill(' 0X' + 'E'.repeat(40) + ' ');
       await page.locator('#addProposalOptionButton').click();
-      assert.equal(await page.locator('[data-dao-committee-addresses]').nth(1).locator('input').first().inputValue(), 'a'.repeat(40).padEnd(64, '0'));
+      assert.equal(await page.locator('[data-dao-committee-addresses]').nth(1).locator('input').first().inputValue(), 'a'.repeat(40));
       assert.equal(await addresses.first().inputValue(), ' 0X' + 'E'.repeat(40) + ' ');
       assert.equal(await page.evaluate(() => fixture.account.current.dao.committeeAddresses[0]), 'a'.repeat(40).padEnd(64, '0'));
 
@@ -156,7 +158,7 @@ class CommitteeBrowserFixture {
       assert.equal(await addresses.count(), 0);
       assert.equal(await first.getByRole('button', { name: 'Add address', exact: true }).evaluate(element => document.activeElement === element), true);
       assert.match(await first.locator('[data-dao-committee-error]').textContent(), /4.*10/);
-      const proposed = [' 0x' + 'A'.repeat(40) + ' ', '0X' + 'B'.repeat(40), 'c'.repeat(64), 'd'.repeat(40)];
+      const proposed = [' 0x' + 'A'.repeat(40) + ' ', '0X' + 'B'.repeat(40), 'c'.repeat(64), 'd'.repeat(36) + '0000'];
       for (let index = 0; index < proposed.length; index++) {
         await first.getByRole('button', { name: 'Add address', exact: true }).click();
         await addresses.nth(index).fill(proposed[index]);
@@ -173,7 +175,10 @@ class CommitteeBrowserFixture {
       const lists = page.locator('#confirmProposalContent .dao-committee-address-list');
       assert.equal(await lists.count(), 4);
       const canonical = proposed.map(value => value.trim().replace(/^0x/i, '').toLowerCase().padEnd(64, '0'));
-      assert.deepEqual(await lists.nth(1).locator('[role="listitem"]').allTextContents(), canonical);
+      assert.deepEqual(await lists.nth(0).locator('[role="listitem"]').allTextContents(), displayedCurrent);
+      assert.deepEqual(await lists.nth(1).locator('[role="listitem"]').allTextContents(), [
+        'a'.repeat(40), 'b'.repeat(40), 'c'.repeat(64), 'd'.repeat(36) + '0000',
+      ]);
       assert.doesNotMatch(await lists.allTextContents().then(values => values.join('')), /0x|[A-F]|\[|\]/);
       await CommitteeBrowserFixture.expectNoOverflow(page, '#confirmProposalModal .modal-content');
       const noChange = await page.locator('#confirmProposalContent .proposal-option-section--no-change').boundingBox();
@@ -188,6 +193,7 @@ class CommitteeBrowserFixture {
       await page.locator('#signConfirmProposal').click();
       await page.waitForFunction(() => fixture.captured.length === 1);
       assert.deepEqual(await page.evaluate(() => JSON.parse(fixture.captured[0].governance.changes[0][0].value)), canonical);
+      assert.deepEqual(await page.evaluate(() => JSON.parse(fixture.captured[0].governance.changes[0][0].current)), displayedCurrent.map(address => address.padEnd(64, '0')));
       assert.deepEqual(await page.evaluate(() => fixture.captured[0].governance.changes.map(changes => changes[1])), [
         { key: 'claimDuration', current: '60000', value: '120000' },
         { key: 'claimDuration', current: '60000', value: '180000' },
