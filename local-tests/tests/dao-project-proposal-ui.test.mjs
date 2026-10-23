@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
-import { longAddress } from '../lib.js';
+import { escapeHtml, escapeHtmlAttribute, longAddress } from '../lib.js';
 
 import {
   DAO_PROJECT_DURATION_MAX_DAYS,
@@ -252,7 +252,19 @@ test('uses accessible inline milestone action icons beside the heading', () => {
   const classEnd = appSource.indexOf('const addProposalModal', classStart);
   const classSource = appSource.slice(classStart, classEnd);
 
-  assert.equal((classSource.match(/class="dao-project-milestone-action-icon"/g) || []).length, 3);
+  const AddProposalModal = vm.runInNewContext(classSource + '\nAddProposalModal', {
+    escapeHtml,
+    escapeDaoFormAttribute: escapeHtmlAttribute,
+    DAO_PROJECT_MILESTONE_TITLE_MAX_LENGTH,
+    DAO_PROJECT_MILESTONE_TEXT_MAX_LENGTH,
+    DAO_PROJECT_DURATION_MAX_DAYS,
+  });
+  const modal = new AddProposalModal();
+  const milestone = createMilestone();
+  modal.projectDraft = { milestones: [milestone] };
+  const rendered = modal.renderProjectMilestone(milestone, 0);
+  assert.equal((rendered.match(/<svg /g) || []).length, 3);
+  assert.match(rendered, /class="dao-form-remove-icon"/);
   assert.match(classSource, /aria-label="Move milestone \$\{milestoneNumber\} up"/);
   assert.match(classSource, /aria-label="Move milestone \$\{milestoneNumber\} down"/);
   assert.match(classSource, /aria-label="Remove milestone \$\{milestoneNumber\}"/);
