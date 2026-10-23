@@ -9,6 +9,13 @@ import { chromium } from 'playwright';
 // Only surrounding account/network/submission services are synthetic; no app startup,
 // live signing, broadcast or Menu/DAO account navigation is claimed by this fixture.
 class CommitteeBrowserFixture {
+  static wallets = [
+    '88888888abcdef012345678988888888abcdef01',
+    'deadbeef0123456789abcdef0123456789abcdef',
+    'fedcba98888888880123456789abcdef01234567',
+    '0123456789abcdefabcdef0198765432abcd0000',
+  ];
+
   static between(source, start, end) {
     const offset = source.indexOf(start);
     assert.notEqual(offset, -1, `Missing source entry point: ${start}`);
@@ -39,7 +46,7 @@ class CommitteeBrowserFixture {
       const myData = { pending: [] };
       const daoModal = { isActive: () => false };
       const account = { current: { dao: {
-        committeeAddresses: ['a','b','c','d'].map(char => char.repeat(40).padEnd(64, '0')),
+        committeeAddresses: ${JSON.stringify(CommitteeBrowserFixture.wallets)}.map(address => address.padEnd(64, '0')),
         claimDuration: 60000, graceDuration: 60000, reviewDuration: 60000, votingDuration: 60000,
         proposalFeeUsdStr: '5', voteExponent: 1,
       } } };
@@ -103,8 +110,45 @@ class CommitteeBrowserFixture {
     assert.equal(await page.locator(selector).evaluate(element => element.scrollWidth <= element.clientWidth + 1), true, `${selector} overflowed`);
   }
 
-  async verify(browser, width) {
-    const page = await browser.newPage({ viewport: { width, height: 900 } });
+  static async expectWalletTextFits(group) {
+    const widths = await group.locator('input').evaluateAll(inputs => inputs.map(input => {
+      const style = getComputedStyle(input);
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      const spacing = parseFloat(style.letterSpacing) || 0;
+      return {
+        address: input.value,
+        text: context.measureText(input.value).width + Math.max(0, input.value.length - 1) * spacing,
+        available: input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+      };
+    }));
+    for (const { address, text, available } of widths) {
+      assert.equal(address.length, 40);
+      assert.ok(text <= available + 1, `Wallet text needs ${text.toFixed(1)}px, but input has ${available.toFixed(1)}px`);
+    }
+    const lines = await group.locator('xpath=ancestor::*[@data-dao-change-row][1]').locator('.dao-committee-address-list [role="listitem"]').evaluateAll(items => items.map(item => {
+      const range = document.createRange();
+      range.selectNodeContents(item);
+      return range.getClientRects().length;
+    }));
+    assert.deepEqual(lines, [1, 1, 1, 1], 'Current wallet addresses must each use one line');
+  }
+
+  static async expectRemoveIcons(page) {
+    for (const button of await page.locator('#addProposalModal button.dao-form-remove-button:visible').all()) {
+      const label = await button.getAttribute('aria-label');
+      assert.match(label, /^Remove /);
+      assert.equal(await button.getAttribute('title'), label);
+      assert.equal((await button.textContent()).trim(), '');
+      assert.equal(await button.locator('svg[aria-hidden="true"]').count(), 1);
+      assert.equal(await button.getByRole('img').count(), 0);
+    }
+  }
+
+  async verify(browser, viewport) {
+    const { width } = viewport;
+    const page = await browser.newPage({ viewport });
     page.setDefaultTimeout(10000);
     const errors = [];
     const external = [];
@@ -125,14 +169,31 @@ class CommitteeBrowserFixture {
       await CommitteeBrowserFixture.select(page, 'Committee Addresses');
       const first = page.locator('[data-dao-committee-addresses]').first();
       const addresses = first.locator('input');
-      const displayedCurrent = ['a','b','c','d'].map(char => char.repeat(40));
+      const displayedCurrent = CommitteeBrowserFixture.wallets;
       assert.deepEqual(await addresses.evaluateAll(inputs => inputs.map(input => input.value)), displayedCurrent);
       assert.deepEqual(await page.locator('[data-dao-change-row]').first().locator('.dao-committee-address-list [role="listitem"]').allTextContents(), displayedCurrent);
+      await page.evaluate(() => document.fonts.ready);
+      await CommitteeBrowserFixture.expectWalletTextFits(first);
+      await CommitteeBrowserFixture.expectRemoveIcons(page);
+      assert.equal(await page.locator('[data-dao-remove-option]').isDisabled(), true);
+      assert.equal(await page.locator('[data-dao-remove-change]').isDisabled(), true);
+      await first.scrollIntoViewIfNeeded();
+      await page.waitForFunction(() => document.getAnimations().every(animation => animation.playState !== 'running'));
+      await page.locator('[data-dao-change-row]').first().screenshot({ path: `/tmp/committee-addresses-${width}-prefilled-row.png` });
+      await page.screenshot({ path: `/tmp/committee-addresses-${width}-prefilled-viewport.png` });
       await addresses.nth(0).fill(' 0X' + 'E'.repeat(40) + ' ');
       await page.locator('#addProposalOptionButton').click();
-      assert.equal(await page.locator('[data-dao-committee-addresses]').nth(1).locator('input').first().inputValue(), 'a'.repeat(40));
+      assert.equal(await page.locator('[data-dao-committee-addresses]').nth(1).locator('input').first().inputValue(), displayedCurrent[0]);
       assert.equal(await addresses.first().inputValue(), ' 0X' + 'E'.repeat(40) + ' ');
-      assert.equal(await page.evaluate(() => fixture.account.current.dao.committeeAddresses[0]), 'a'.repeat(40).padEnd(64, '0'));
+      assert.equal(await page.evaluate(() => fixture.account.current.dao.committeeAddresses[0]), displayedCurrent[0].padEnd(64, '0'));
+
+      await CommitteeBrowserFixture.expectRemoveIcons(page);
+      const removeOptionLabel = await page.locator('[data-dao-remove-option="1"]').getAttribute('aria-label');
+      await page.getByRole('button', { name: removeOptionLabel, exact: true }).click();
+      assert.equal(await page.locator('[data-dao-option]').count(), 1);
+      assert.equal(await page.locator('[data-dao-remove-option]').isDisabled(), true);
+      assert.equal(await addresses.first().inputValue(), ' 0X' + 'E'.repeat(40) + ' ');
+      await page.locator('#addProposalOptionButton').click();
 
       await first.getByRole('button', { name: 'Remove committee address 4', exact: true }).click();
       assert.equal(await addresses.count(), 3);
@@ -164,11 +225,19 @@ class CommitteeBrowserFixture {
         await addresses.nth(index).fill(proposed[index]);
       }
       await page.locator('[data-dao-add-parameter-change]').click();
+      await CommitteeBrowserFixture.expectRemoveIcons(page);
+      const removeChangeLabel = await page.locator('[data-dao-remove-change="0:1"]').getAttribute('aria-label');
+      await page.getByRole('button', { name: removeChangeLabel, exact: true }).click();
+      assert.equal(await page.locator('[data-dao-option="0"] [data-dao-change-row]').count(), 1);
+      assert.equal(await page.locator('[data-dao-option="1"] [data-dao-change-row]').count(), 1);
+      assert.equal(await page.locator('[data-dao-remove-change]').isDisabled(), true);
+      assert.deepEqual(await addresses.evaluateAll(inputs => inputs.map(input => input.value)), proposed);
+      await page.locator('[data-dao-add-parameter-change]').click();
       await page.locator('[data-dao-option="0"] input[data-dao-change-index="1"]').fill('120000');
       await page.locator('[data-dao-option="1"] input[data-dao-change-index="1"]').fill('180000');
       await first.scrollIntoViewIfNeeded();
       await CommitteeBrowserFixture.expectNoOverflow(page, '#addProposalModal .modal-content');
-      await page.evaluate(() => Promise.all(document.getAnimations().map(animation => animation.finished)));
+      await page.waitForFunction(() => document.getAnimations().every(animation => animation.playState !== 'running'));
       await page.screenshot({ path: `/tmp/committee-addresses-${width}-editor.png` });
       await page.locator('#addProposalSubmitButton').click();
       await page.locator('#confirmProposalModal.active.is-transition-complete').waitFor();
@@ -184,7 +253,7 @@ class CommitteeBrowserFixture {
       const noChange = await page.locator('#confirmProposalContent .proposal-option-section--no-change').boundingBox();
       assert.ok(noChange.height < 200, 'No change must not stretch to the committee list height');
       await page.locator('#confirmProposalContent .proposal-change-row').first().scrollIntoViewIfNeeded();
-      await page.evaluate(() => Promise.all(document.getAnimations().map(animation => animation.finished)));
+      await page.waitForFunction(() => document.getAnimations().every(animation => animation.playState !== 'running'));
       await page.screenshot({ path: `/tmp/committee-addresses-${width}-review.png` });
       await page.locator('#backConfirmProposal').click();
       assert.deepEqual(await addresses.evaluateAll(inputs => inputs.map(input => input.value)), proposed);
@@ -223,6 +292,20 @@ class CommitteeBrowserFixture {
       await page.locator('#addProposalSubmitButton').click();
       await page.locator('#confirmProposalModal.active.is-transition-complete').waitFor();
       assert.equal(await page.evaluate(() => fixture.confirmProposalModal.currentDraft.transaction.governance.changes[0][0].value), '120000');
+      await page.locator('#backConfirmProposal').click();
+      const typeTrigger = page.locator('#addProposalType + .popup-select__trigger');
+      await typeTrigger.scrollIntoViewIfNeeded();
+      await page.evaluate(() => new Promise(accept => requestAnimationFrame(() => requestAnimationFrame(accept))));
+      await typeTrigger.click();
+      await page.getByRole('option', { name: 'Project', exact: true }).click();
+      await CommitteeBrowserFixture.expectRemoveIcons(page);
+      assert.equal(await page.getByRole('button', { name: 'Remove milestone 1', exact: true }).isDisabled(), true);
+      await page.locator('#addProposalProjectAddMilestone').click();
+      await CommitteeBrowserFixture.expectRemoveIcons(page);
+      await page.getByRole('button', { name: 'Remove milestone 2', exact: true }).click();
+      assert.equal(await page.locator('[data-dao-remove-milestone]').count(), 1);
+      assert.equal(await page.getByRole('button', { name: 'Remove milestone 1', exact: true }).isDisabled(), true);
+      await CommitteeBrowserFixture.expectNoOverflow(page, '#addProposalModal .modal-content');
       assert.deepEqual(errors, []);
       assert.deepEqual(external, []);
       console.log(`PASS committee editor/review controls at ${width}px`);
@@ -238,7 +321,7 @@ const fixture = new CommitteeBrowserFixture();
 await fixture.start();
 const browser = await chromium.launch({ headless: true });
 try {
-  for (const width of [1100, 390, 320]) await fixture.verify(browser, width);
+  for (const viewport of [{ width: 391, height: 751 }, { width: 1100, height: 900 }, { width: 390, height: 900 }, { width: 320, height: 900 }]) await fixture.verify(browser, viewport);
 } finally {
   await browser.close();
   await new Promise(accept => fixture.server.close(accept));

@@ -81,18 +81,22 @@ checkout selected (Playwright/Chromium setup is described above):
 ```bash
 WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs \
   dao-committee-addresses.test.mjs dao-parameter-descriptions.test.mjs \
-  dao-proposal-create.test.mjs dao-proposal-option-layout.test.mjs
+  dao-proposal-create.test.mjs dao-proposal-option-layout.test.mjs \
+  dao-project-proposal-ui.test.mjs
 WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs \
   dao-committee-addresses.browser.test.mjs
 ```
 
 The browser fixture renders the client's actual proposal editor, PopupSelect,
-confirmation classes, modal markup and CSS at 1100, 390 and 320 pixels. It checks
-prefill and independent option copies; add/remove with 0/3/4/10 rows; validation;
+confirmation classes, modal markup and CSS at 1100×900, 390×900, 320×900 and
+391×751 pixels. It checks prefill and independent option copies; add/remove with 0/3/4/10 rows; validation;
 optional prefixes; wallet-length prefill/Current/confirmation display; canonical
 64-character captured transaction values;
 Review → Back; mixed numeric changes; failed submission/retry; unavailable config;
-and a scalar-only regression. Screenshots go to `/tmp/committee-addresses-*.png`.
+a scalar-only regression; measured full-wallet input fit; single-line Current
+addresses; and accessible trash icons with option/parameter/committee/milestone
+removal and minimum-count disabled states. Screenshots go to
+`/tmp/committee-addresses-*.png`.
 Network/account/submission services are synthetic, and external requests are
 blocked. This does not test full application startup, Menu/DAO navigation, real
 signing, broadcasts or Proposal Info navigation.
@@ -117,6 +121,25 @@ Fresh complete initial-prefill modal captures are
 `/tmp/committee-addresses-1100-prefilled-modal.png` and
 `/tmp/committee-addresses-390-prefilled-modal.png`; generated images are not
 committed. The same synthetic-service and navigation limitations above apply.
+
+Compact-text and trash-icon follow-up: client
+`ba2225acdbeabebb840005b00e4e6ada711543a0` passes all 31 focused Node cases
+(the unchanged 20 committee/scalar cases plus 11 project UI cases) and Chromium
+at all four viewport sizes above. The browser measures actual wallet text with
+Canvas against each input's content width and counts Current text lines with
+Range; it does not infer fit from an input's scroll width. Before this change,
+the new check failed at 391×751 on client
+`38f039bb2bf13d454c99d9440c10d748d3e6a991`: the varied 40-character wallet text
+needed 337.0px while its input had 180.0px. All four viewports now fit those
+addresses on one line with no form overflow, page errors or external requests.
+The browser also checks icon-only removal controls and exercises accessible
+option, parameter, committee-row and project-milestone removal, preserving
+one-item disabled states. Project icon coverage now inspects rendered milestone
+markup rather than counting inline SVG literals in source. Screenshot waits
+check that no animations are running, so legitimate transition cancellation
+does not reject a capture. Fresh 391×751 captures are
+`/tmp/committee-addresses-391-prefilled-viewport.png` and the complete parameter
+row `/tmp/committee-addresses-391-prefilled-row.png`.
 
 This topic uses the published offline-runner dependency
 [client-testing #90](https://github.com/Liberdus/client-testing/pull/90), branch
