@@ -89,19 +89,34 @@ WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 node local-tests/run.mjs \
 The browser fixture renders the client's actual proposal editor, PopupSelect,
 confirmation classes, modal markup and CSS at 1100, 390 and 320 pixels. It checks
 prefill and independent option copies; add/remove with 0/3/4/10 rows; validation;
-optional prefixes; canonical confirmation and captured transaction values;
+optional prefixes; wallet-length prefill/Current/confirmation display; canonical
+64-character captured transaction values;
 Review → Back; mixed numeric changes; failed submission/retry; unavailable config;
 and a scalar-only regression. Screenshots go to `/tmp/committee-addresses-*.png`.
 Network/account/submission services are synthetic, and external requests are
 blocked. This does not test full application startup, Menu/DAO navigation, real
 signing, broadcasts or Proposal Info navigation.
 
-Validated client: `d89a4e8c572b800a34d907c4ed645f11af5fc412`. The four focused Node
-files pass 18 cases, and Chromium passes all three viewport sizes with no page
+Before display shortening, client `d89a4e8c572b800a34d907c4ed645f11af5fc412` passed
+18 focused Node cases and Chromium at all three viewport sizes with no page
 errors or external requests. The three existing suites also passed all 10 cases against
 original client `01a232471ca26ddc280064721ca1cec121d719c1`. The new domain file fails
 against that revision because the committee-address export does not exist yet.
 The full inherited suite and live E2E were not run.
+
+Display-shortening follow-up: client
+`38f039bb2bf13d454c99d9440c10d748d3e6a991` passes all 20 focused Node cases and
+Chromium at 1100/390/320 pixels, with no page errors or external requests. Two
+new display cases first failed on `d89a4e8c572b800a34d907c4ed645f11af5fc412`
+(8 passed, 2 failed because `toDisplayAddress` was absent). They verify that
+only the 24 network-padding zeros are removed, preserving meaningful trailing
+wallet zeros and full network addresses without that padding. Browser checks
+verify shortened Current/prefilled/review lists while both transaction JSON
+strings remain canonical 64-character addresses, and Back retains raw edits.
+Fresh complete initial-prefill modal captures are
+`/tmp/committee-addresses-1100-prefilled-modal.png` and
+`/tmp/committee-addresses-390-prefilled-modal.png`; generated images are not
+committed. The same synthetic-service and navigation limitations above apply.
 
 This topic uses the published offline-runner dependency
 [client-testing #90](https://github.com/Liberdus/client-testing/pull/90), branch

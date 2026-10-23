@@ -44,6 +44,19 @@ test('normalizes optional prefixes and case without changing the input list or a
   assert.deepEqual(input, original);
 });
 
+test('shows wallet addresses without network padding while preserving meaningful trailing zeros', () => {
+  const wallet = 'a'.repeat(36) + '0000';
+  assert.equal(DaoCommitteeAddresses.toDisplayAddress(wallet.padEnd(64, '0')), wallet);
+  assert.equal(DaoCommitteeAddresses.toDisplayAddress(wallet), wallet);
+  assert.equal(DaoCommitteeAddresses.toDisplayAddress('0'.repeat(64)), '0'.repeat(40));
+});
+
+test('preserves full network addresses that do not end with exactly the wallet padding', () => {
+  for (const address of ['b'.repeat(64), 'c'.repeat(41) + '0'.repeat(23), 'd'.repeat(40) + '0'.repeat(23) + '1']) {
+    assert.equal(DaoCommitteeAddresses.toDisplayAddress(address), address);
+  }
+});
+
 test('accepts both membership limits and rejects lists below four or above ten', () => {
   for (const count of [4, 10]) assert.equal(DaoCommitteeAddresses.normalize(CommitteeFixture.addresses(count)).length, count);
   for (const count of [0, 3, 11]) assert.throws(() => DaoCommitteeAddresses.normalize(CommitteeFixture.addresses(count)), /4.*10/);
