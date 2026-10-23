@@ -94,7 +94,8 @@ optional prefixes; wallet-length prefill/Current/confirmation display; canonical
 64-character captured transaction values;
 Review → Back; mixed numeric changes; failed submission/retry; unavailable config;
 a scalar-only regression; measured full-wallet input fit; single-line Current
-addresses; and accessible trash icons with option/parameter/committee/milestone
+addresses; equal character widths in monospace inputs/Current/confirmation; and
+accessible trash icons with option/parameter/committee/milestone
 removal and minimum-count disabled states. Screenshots go to
 `/tmp/committee-addresses-*.png`.
 Network/account/submission services are synthetic, and external requests are
@@ -140,6 +141,21 @@ check that no animations are running, so legitimate transition cancellation
 does not reject a capture. Fresh 391×751 captures are
 `/tmp/committee-addresses-391-prefilled-viewport.png` and the complete parameter
 row `/tmp/committee-addresses-391-prefilled-row.png`.
+
+Monospace follow-up: client `e5d332ce23af14dcd0a1ff422d9cc654152939ba`
+passes the same 31 Node cases and Chromium at all four viewport sizes, including
+the existing text-fit and overflow checks. The browser measures 40 `8` characters
+and 40 `f` characters with each input or display element's actual computed font
+style, weight, size and family; their advances must match within that element's
+style. It checks inputs, Current lists and confirmation lists separately, so
+their intentionally different font sizes need not produce the same physical
+width across controls. Before this change, the new check failed at 391×751 on
+client `ba2225acdbeabebb840005b00e4e6ada711543a0`: the input's Inter font stack
+produced 280.0px for the `8` string and 160.0px for the `f` string. There were no
+page errors or external requests in the final run. Fresh complete parameter-row
+captures are `/tmp/committee-addresses-391-prefilled-row.png` and
+`/tmp/committee-addresses-1100-prefilled-row.png`; the 391×751 viewport capture is
+`/tmp/committee-addresses-391-prefilled-viewport.png`.
 
 This topic uses the published offline-runner dependency
 [client-testing #90](https://github.com/Liberdus/client-testing/pull/90), branch

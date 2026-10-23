@@ -110,6 +110,24 @@ class CommitteeBrowserFixture {
     assert.equal(await page.locator(selector).evaluate(element => element.scrollWidth <= element.clientWidth + 1), true, `${selector} overflowed`);
   }
 
+  static async expectMonospaceAddresses(elements) {
+    const measurements = await elements.evaluateAll(items => items.map(item => {
+      const style = getComputedStyle(item);
+      const context = document.createElement('canvas').getContext('2d');
+      context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      return {
+        family: style.fontFamily,
+        wide: context.measureText('8'.repeat(40)).width,
+        narrow: context.measureText('f'.repeat(40)).width,
+      };
+    }));
+    assert.ok(measurements.length > 0, 'Expected visible committee address text');
+    for (const { family, wide, narrow } of measurements) {
+      assert.ok(Math.abs(wide - narrow) < 0.1, `Equal-length addresses differ in ${family}: ${wide.toFixed(1)}px vs ${narrow.toFixed(1)}px`);
+      assert.match(family, /monospace/i);
+    }
+  }
+
   static async expectWalletTextFits(group) {
     const widths = await group.locator('input').evaluateAll(inputs => inputs.map(input => {
       const style = getComputedStyle(input);
@@ -173,6 +191,8 @@ class CommitteeBrowserFixture {
       assert.deepEqual(await addresses.evaluateAll(inputs => inputs.map(input => input.value)), displayedCurrent);
       assert.deepEqual(await page.locator('[data-dao-change-row]').first().locator('.dao-committee-address-list [role="listitem"]').allTextContents(), displayedCurrent);
       await page.evaluate(() => document.fonts.ready);
+      await CommitteeBrowserFixture.expectMonospaceAddresses(addresses);
+      await CommitteeBrowserFixture.expectMonospaceAddresses(page.locator('[data-dao-change-row]').first().locator('.dao-committee-address-list [role="listitem"]'));
       await CommitteeBrowserFixture.expectWalletTextFits(first);
       await CommitteeBrowserFixture.expectRemoveIcons(page);
       assert.equal(await page.locator('[data-dao-remove-option]').isDisabled(), true);
@@ -243,6 +263,7 @@ class CommitteeBrowserFixture {
       await page.locator('#confirmProposalModal.active.is-transition-complete').waitFor();
       const lists = page.locator('#confirmProposalContent .dao-committee-address-list');
       assert.equal(await lists.count(), 4);
+      await CommitteeBrowserFixture.expectMonospaceAddresses(lists.locator('[role="listitem"]'));
       const canonical = proposed.map(value => value.trim().replace(/^0x/i, '').toLowerCase().padEnd(64, '0'));
       assert.deepEqual(await lists.nth(0).locator('[role="listitem"]').allTextContents(), displayedCurrent);
       assert.deepEqual(await lists.nth(1).locator('[role="listitem"]').allTextContents(), [
