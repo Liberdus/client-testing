@@ -262,6 +262,13 @@ Node cases and Chromium at all four viewport sizes, with no page errors or
 external requests. The same pinned browser setup and synthetic-service limits
 above apply.
 
+Instance-method follow-up: client `4256bf77578454b9a1d600b151b13645703bc11b`
+keeps the committee UI helpers as ordinary `AddProposalModal` instance methods,
+grouped beside the committee editor methods. The fixture uses the existing modal
+instance and retains all assertions. All 31 focused Node cases and four Chromium
+viewports pass, including one clipboard write per activation after repeated
+listener binding, with no page errors or external requests.
+
 This topic uses the published offline-runner dependency
 [client-testing #90](https://github.com/Liberdus/client-testing/pull/90), branch
 `codex/offline-test-foundation`, recorded parent tip

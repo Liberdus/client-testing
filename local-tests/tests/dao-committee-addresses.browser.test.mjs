@@ -81,7 +81,7 @@ class CommitteeBrowserFixture {
       confirmProposalModal.load();
       document.getElementById('openFixture').addEventListener('click', () => addProposalModal.open());
       globalThis.fixture = { addProposalModal, confirmProposalModal, account, captured,
-        clipboard, toasts, formEvents, AddProposalModal,
+        clipboard, toasts, formEvents,
         setUnavailable: value => { configUnavailable = value; } };
     `;
     this.server = createServer((request, response) => this.serve(request, response));
@@ -257,8 +257,8 @@ class CommitteeBrowserFixture {
       await CommitteeBrowserFixture.expectAddressCopy(page, currentButtons.nth(1), displayedCurrent[1], { key: 'Enter' });
       await CommitteeBrowserFixture.expectAddressCopy(page, currentButtons.nth(2), displayedCurrent[2], { key: 'Space', fail: true });
       await page.evaluate(() => {
-        fixture.AddProposalModal.bindCommitteeAddressCopy(fixture.addProposalModal.modal);
-        fixture.AddProposalModal.bindCommitteeAddressCopy(fixture.addProposalModal.modal);
+        fixture.addProposalModal.bindCommitteeAddressCopy(fixture.addProposalModal.modal);
+        fixture.addProposalModal.bindCommitteeAddressCopy(fixture.addProposalModal.modal);
       });
       await CommitteeBrowserFixture.expectAddressCopy(page, currentButtons.last(), displayedCurrent[3]);
       await CommitteeBrowserFixture.expectRemoveIcons(page);
