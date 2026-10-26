@@ -198,6 +198,14 @@ are unchanged; there are no page errors or external requests. Verification used
 Node 20.19.6, the pinned Playwright 1.52.0 and cached Chromium, with loopback/browser
 permissions enabled for the synthetic browser fixture.
 
+UI ownership follow-up: client `8a0329fe324859fd28857a904553e445f28b5f37`
+moves the committee display and copy helpers into the existing `AddProposalModal`
+class. The browser fixture uses that class directly for repeated listener binding;
+all behavior assertions are unchanged. The focused commands above pass all 31
+Node cases and Chromium at all four viewport sizes, with no page errors or
+external requests. The same pinned browser setup and synthetic-service limits
+above apply.
+
 This topic uses the published offline-runner dependency
 [client-testing #90](https://github.com/Liberdus/client-testing/pull/90), branch
 `codex/offline-test-foundation`, recorded parent tip
