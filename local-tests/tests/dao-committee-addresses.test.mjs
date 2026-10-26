@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   DAO_CONFIG_CHANGE_OPTIONS,
-  DaoCommitteeAddresses,
+  daoRepo,
   buildDaoProposalCreateDraft,
   buildDaoProposalCreateTransaction,
 } from '../dao.js';
@@ -38,7 +38,7 @@ test('offers the committee array under Governance', () => {
 test('normalizes optional prefixes and case without changing the input list or address order', () => {
   const input = [' 0x' + 'A'.repeat(40) + ' ', '0X' + 'B'.repeat(40), 'C'.repeat(64), 'd'.repeat(64)];
   const original = [...input];
-  assert.deepEqual(DaoCommitteeAddresses.normalize(input), [
+  assert.deepEqual(daoRepo.normalizeCommitteeAddresses(input), [
     'a'.repeat(40) + '0'.repeat(24), 'b'.repeat(40) + '0'.repeat(24), 'c'.repeat(64), 'd'.repeat(64),
   ]);
   assert.deepEqual(input, original);
@@ -46,41 +46,41 @@ test('normalizes optional prefixes and case without changing the input list or a
 
 test('shows wallet addresses without network padding while preserving meaningful trailing zeros', () => {
   const wallet = 'a'.repeat(36) + '0000';
-  assert.equal(DaoCommitteeAddresses.toDisplayAddress(wallet.padEnd(64, '0')), wallet);
-  assert.equal(DaoCommitteeAddresses.toDisplayAddress(wallet), wallet);
-  assert.equal(DaoCommitteeAddresses.toDisplayAddress('0'.repeat(64)), '0'.repeat(40));
+  assert.equal(daoRepo.toCommitteeDisplayAddress(wallet.padEnd(64, '0')), wallet);
+  assert.equal(daoRepo.toCommitteeDisplayAddress(wallet), wallet);
+  assert.equal(daoRepo.toCommitteeDisplayAddress('0'.repeat(64)), '0'.repeat(40));
 });
 
 test('preserves full network addresses that do not end with exactly the wallet padding', () => {
   for (const address of ['b'.repeat(64), 'c'.repeat(41) + '0'.repeat(23), 'd'.repeat(40) + '0'.repeat(23) + '1']) {
-    assert.equal(DaoCommitteeAddresses.toDisplayAddress(address), address);
+    assert.equal(daoRepo.toCommitteeDisplayAddress(address), address);
   }
 });
 
 test('accepts both membership limits and rejects lists below four or above ten', () => {
-  for (const count of [4, 10]) assert.equal(DaoCommitteeAddresses.normalize(CommitteeFixture.addresses(count)).length, count);
-  for (const count of [0, 3, 11]) assert.throws(() => DaoCommitteeAddresses.normalize(CommitteeFixture.addresses(count)), /4.*10/);
+  for (const count of [4, 10]) assert.equal(daoRepo.normalizeCommitteeAddresses(CommitteeFixture.addresses(count)).length, count);
+  for (const count of [0, 3, 11]) assert.throws(() => daoRepo.normalizeCommitteeAddresses(CommitteeFixture.addresses(count)), /4.*10/);
 });
 
 test('rejects blank, non-string, non-hex and wrong-length entries with their row index', () => {
   for (const value of ['', ' ', null, 42, 'g'.repeat(40), 'a'.repeat(39), 'a'.repeat(41), 'a'.repeat(63), 'a'.repeat(65), '0x0x' + 'a'.repeat(40)]) {
     const input = CommitteeFixture.addresses();
     input[2] = value;
-    assert.throws(() => DaoCommitteeAddresses.normalize(input), error => error.addressIndex === 2);
+    assert.throws(() => daoRepo.normalizeCommitteeAddresses(input), error => error.addressIndex === 2);
   }
 });
 
 test('detects duplicates after padding, prefix removal and lowercasing', () => {
   const input = CommitteeFixture.addresses();
   input[1] = ' 0X' + input[0].toUpperCase().padEnd(64, '0') + ' ';
-  assert.throws(() => DaoCommitteeAddresses.normalize(input), error => /duplicate/.test(error.message) && error.addressIndex === 1);
+  assert.throws(() => daoRepo.normalizeCommitteeAddresses(input), error => /duplicate/.test(error.message) && error.addressIndex === 1);
 });
 
 test('requires serialized JSON arrays and rejects malformed or non-array JSON', () => {
   for (const value of [CommitteeFixture.addresses(), undefined, '', 'bad json', '{}', 'null', '"text"']) {
-    assert.throws(() => DaoCommitteeAddresses.parse(value));
+    assert.throws(() => daoRepo.parseCommitteeAddresses(value));
   }
-  assert.deepEqual(DaoCommitteeAddresses.parse(JSON.stringify(CommitteeFixture.addresses())), DaoCommitteeAddresses.normalize(CommitteeFixture.addresses()));
+  assert.deepEqual(daoRepo.parseCommitteeAddresses(JSON.stringify(CommitteeFixture.addresses())), daoRepo.normalizeCommitteeAddresses(CommitteeFixture.addresses()));
 });
 
 test('builds draft and transaction changes as canonical JSON strings', () => {
@@ -94,7 +94,7 @@ test('builds draft and transaction changes as canonical JSON strings', () => {
   for (const change of [draft.transaction.governance.changes[0][0], transaction.governance.changes[0][0]]) {
     for (const property of ['current', 'value']) {
       assert.equal(typeof change[property], 'string');
-      assert.deepEqual(JSON.parse(change[property]), DaoCommitteeAddresses.normalize(input));
+      assert.deepEqual(JSON.parse(change[property]), daoRepo.normalizeCommitteeAddresses(input));
       assert.doesNotMatch(change[property], /0x|[A-F]/);
     }
   }

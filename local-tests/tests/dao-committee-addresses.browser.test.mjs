@@ -69,7 +69,7 @@ class CommitteeBrowserFixture {
       const formEvents = { submits: 0 };
       document.getElementById('addProposalForm').addEventListener('submit', () => formEvents.submits++);
       const captured = [];
-      const daoRepo = { createProposal: async options => {
+      const daoRepo = { ...dao.daoRepo, createProposal: async options => {
         captured.push(buildDaoProposalCreateTransaction({ ...options, proposalNumber: 7 }));
         return { ok: false, error: 'Synthetic submission failure' };
       } };
