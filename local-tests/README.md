@@ -244,6 +244,16 @@ Info, but that modal's navigation was not exercised. No reusable tests changed.
 The 31 Node cases were not rerun for this CSS-only adjustment; their previous
 passing client revision remains `547d2c343f54e51f76f9fe2e84345d4332d1b7a5`.
 
+DAO ownership follow-up: the committee domain tests now use the existing
+`daoRepo` methods, and the browser fixture preserves those methods while
+substituting synthetic proposal submission. Against client
+`e685d1437d6f071345cf8e60abb5a4c55ce7d379`,
+the focused commands above pass all 31 Node cases and Chromium at all four
+viewport sizes. Existing validation, display and captured-transaction assertions
+are unchanged; there are no page errors or external requests. Verification used
+Node 20.19.6, the pinned Playwright 1.52.0 and cached Chromium, with loopback/browser
+permissions enabled for the synthetic browser fixture.
+
 This topic uses the published offline-runner dependency
 [client-testing #90](https://github.com/Liberdus/client-testing/pull/90), branch
 `codex/offline-test-foundation`, recorded parent tip
