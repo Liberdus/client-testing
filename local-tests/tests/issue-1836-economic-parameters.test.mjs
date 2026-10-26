@@ -278,6 +278,63 @@ test('retains existing decimal-string bounds for new USD values and stability fa
   }
 });
 
+const ZERO_STABILITY_VALUES = ['0', '0.0', '0.000000000000000000', ' 0 ', '\t0.000000000000000000\n'];
+
+test('rejects every zero stability-factor representation with a meaningful field error', async () => {
+  const { modal } = await modalFixture(['stabilityFactorStr']);
+  const valueInput = modal.optionsList.querySelector().querySelector();
+  for (const value of ZERO_STABILITY_VALUES) {
+    modal.options[0].changes[0].value = value;
+    assert.throws(() => modal.getValidatedOptions(), error => {
+      assert.equal(error.validationTarget, valueInput);
+      assert.match(error.message, /stability factor/i);
+      assert.match(error.message, /greater than (?:zero|0)|positive/i);
+      return true;
+    }, `Zero stability factor must be rejected: ${JSON.stringify(value)}`);
+  }
+});
+
+test('does not open proposal confirmation for a zero stability factor', async () => {
+  const { modal } = await modalFixture(['stabilityFactorStr']);
+  const errors = [];
+  Object.assign(modal, {
+    titleInput: { value: 'Update stability factor' }, descriptionInput: { value: 'Synthetic proposal.' },
+    proposalFeeUsdStr: '5', gracePeriodMs: 0, maxGracePeriodMs: 60000,
+    clearValidationErrors() {}, getReviewStartTimeMs: () => 0,
+    showValidationError: error => errors.push(error),
+  });
+  for (const value of ZERO_STABILITY_VALUES) {
+    modal.options[0].changes[0].value = value;
+    const previousConfirmations = confirmedDrafts.length;
+    const previousErrors = errors.length;
+    await modal.handleCreate();
+    assert.equal(confirmedDrafts.length, previousConfirmations, `Rejected zero opened confirmation: ${JSON.stringify(value)}`);
+    assert.equal(errors.length, previousErrors + 1);
+    assert.ok(errors.at(-1).validationTarget);
+    assert.match(errors.at(-1).message, /stability factor/i);
+  }
+});
+
+test('preserves exact positive stability-factor strings including the smallest supported fraction', async () => {
+  const { modal } = await modalFixture(['stabilityFactorStr']);
+  for (const value of ['0.000000000000000001', '0.25', '1', '1.500', '999999999999999.999999999999999999']) {
+    const input = inputFixture(value);
+    modal.handleOptionsInput({ target: input });
+    assert.equal(input.value, value);
+    assert.equal(modal.getValidatedOptions().changes[0][0].value, value);
+  }
+});
+
+test('continues to allow zero transaction fees and minimum tolls', async () => {
+  for (const key of ['transactionFeeUsdStr', 'minTollUsdStr']) {
+    const { modal } = await modalFixture([key]);
+    for (const value of ZERO_STABILITY_VALUES) {
+      modal.options[0].changes[0].value = value;
+      assert.equal(modal.getValidatedOptions().changes[0][0].value, value.trim(), key);
+    }
+  }
+});
+
 test('requires nonempty text while allowing server version labels beyond semver', async () => {
   for (const key of ['activeVersion', 'minVersion', 'latestVersion', 'title', 'description']) {
     const { modal } = await modalFixture([key]);
