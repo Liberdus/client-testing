@@ -26,10 +26,11 @@ const fixtureMarkup = `<!doctype html><html><head><meta name="viewport" content=
 const expectedValues = {
   archiver: { minVersion: 'old-release', activeVersion: '12345678901234567890.2.3-beta+build', latestVersion: 'release-next' },
   maintenanceFee: '123456789012345678901234567890123456789012345678901234567890',
-  description: '12345678901234567890.1.2 Synthetic network description <with text>.',
   goldenTicketServerUrl: 'https://tickets.example.test/path?version=1.2.3',
   activeVersion: '12345678901234567890.2.3-beta+build',
 };
+const proposalTitle = 'Synthetic economic update';
+const proposalDescription = 'Describe this proposal <without changing network metadata>.';
 const fixtureScript = `
   import * as dao from '/dao.js';
   import * as lib from '/lib.js';
@@ -44,7 +45,8 @@ const fixtureScript = `
   ${between(appSource, 'function getPathValue(', 'const addProposalModal')}
   const account = { current: {
     archiver: { minVersion: '1.0.0', activeVersion: '1.1.0', latestVersion: '1.2.0' },
-    maintenanceFee: 90071992547409931234567890n, description: 'Current network description',
+    maintenanceFee: 90071992547409931234567890n,
+    title: 'Current network title', description: 'Current network description',
     goldenTicketServerUrl: 'http://tickets.example.test', activeVersion: '1.1.0',
   } };
   const modal = new AddProposalModal();
@@ -119,6 +121,12 @@ for (const width of [390, 1280]) {
       await page.waitForFunction(() => Math.abs(
         fixture.modal.modal.getBoundingClientRect().left - document.querySelector('.container').getBoundingClientRect().left,
       ) < 0.5);
+      const selectableKeys = await page.locator('[data-dao-change-key] option').evaluateAll(options => options.map(option => option.value));
+      for (const key of ['title', 'description']) {
+        assert.ok(!selectableKeys.includes(key), `Network ${key} must not be a parameter choice`);
+      }
+      await page.locator('#addProposalTitle').fill(proposalTitle);
+      await page.locator('#addProposalDescription').fill(proposalDescription);
       const proposed = index => page.locator(`#addProposalOption1Proposed${index + 1}`);
       const currentArchiver = page.locator('#addProposalOption1Current1 input');
       assert.equal(await currentArchiver.count(), 3);
@@ -130,8 +138,8 @@ for (const width of [390, 1280]) {
         if (key !== 'archiver') await proposed(index).fill(expectedValues[key]);
       }
       assert.equal(await proposed(1).getAttribute('type'), 'text');
-      assert.equal(await proposed(2).evaluate(element => element.tagName), 'TEXTAREA');
-      assert.equal(await proposed(3).getAttribute('type'), 'url');
+      assert.equal(await proposed(2).getAttribute('type'), 'url');
+      assert.equal(await proposed(3).getAttribute('type'), 'text');
 
       const geometry = await page.evaluate(() => {
         const modal = fixture.modal.modal;
@@ -167,6 +175,8 @@ for (const width of [390, 1280]) {
         return {
           draftChanges: confirmed.at(-1).transaction.economic.changes,
           transactionChanges: transaction.economic.changes, changes: validated.changes[0],
+          draftTitle: confirmed.at(-1).transaction.title, draftDescription: confirmed.at(-1).transaction.description,
+          transactionTitle: transaction.title, transactionDescription: transaction.description,
           currentArchiver: account.current.archiver,
         };
       });
@@ -181,6 +191,10 @@ for (const width of [390, 1280]) {
       }
       assert.deepEqual(result.draftChanges, [result.changes]);
       assert.deepEqual(result.transactionChanges, [result.changes]);
+      assert.equal(result.draftTitle, proposalTitle);
+      assert.equal(result.transactionTitle, proposalTitle);
+      assert.equal(result.draftDescription, proposalDescription);
+      assert.equal(result.transactionDescription, proposalDescription);
       assert.deepEqual(result.currentArchiver, { minVersion: '1.0.0', activeVersion: '1.1.0', latestVersion: '1.2.0' });
       assert.deepEqual(pageErrors, []);
       assert.deepEqual(blockedRequests, []);
