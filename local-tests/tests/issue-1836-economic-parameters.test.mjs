@@ -21,7 +21,7 @@ const GOVERNANCE_KEYS = [
 ];
 const ECONOMIC_TYPES = {
   activeVersion: 'string:text', archiver: 'object:archiverVersions', certCycleDuration: 'number:integer',
-  defaultTollUsdStr: 'string:decimalString', description: 'string:text', enableNodeSlashing: 'boolean:boolean',
+  defaultTollUsdStr: 'string:decimalString', enableNodeSlashing: 'boolean:boolean',
   goldenTicketServerUrl: 'string:url', latestVersion: 'string:text', maintenanceFee: 'bigint:integer',
   maintenanceInterval: 'number:integer', messageMaxLength: 'number:integer', messageRetentionDays: 'number:integer',
   minTollUsdStr: 'string:decimalString', minVersion: 'string:text', nodePenaltyUsdStr: 'string:decimalString',
@@ -30,7 +30,7 @@ const ECONOMIC_TYPES = {
   enableSyncTimeoutSlashing: 'boolean:boolean', leftNetworkEarlyPenaltyPercent: 'number:decimal',
   nodeRefutedPenaltyPercent: 'number:decimal', syncTimeoutPenaltyPercent: 'number:decimal',
   stabilityFactorStr: 'string:decimalString', stabilityScaleDiv: 'number:integer', stabilityScaleMul: 'number:integer',
-  stakeLockTime: 'number:integer', stakeRequiredUsdStr: 'string:decimalString', title: 'string:text',
+  stakeLockTime: 'number:integer', stakeRequiredUsdStr: 'string:decimalString',
   tollNetworkTaxPercent: 'number:integer', tollTimeout: 'number:integer', transactionFeeUsdStr: 'string:decimalString',
   txPause: 'boolean:boolean',
 };
@@ -47,12 +47,10 @@ const NEW_VALUES = {
   activeVersion: '12345678901234567890.2.3-beta+build',
   archiver: { minVersion: '1.0.0', activeVersion: '2.0.0-rc.1+test', latestVersion: 'release-next' },
   defaultTollUsdStr: '0.000000000000000001',
-  description: '12345678901234567890.123.456 <network> "description"',
   goldenTicketServerUrl: 'https://12345678901234567890.example.test/ticket?version=1.2.3',
   latestVersion: 'release-next', maintenanceFee: '123456789012345678901234567890123456789012345678901234567890',
   minTollUsdStr: '0', minVersion: '1.2.3', nodePenaltyUsdStr: '1.25', nodeRewardAmountUsdStr: '2.50',
   stabilityFactorStr: '0.0001', stakeRequiredUsdStr: '999999999999999.999999999999999999',
-  title: '12345678901234567890.123.456',
 };
 const json = value => JSON.parse(JSON.stringify(value));
 
@@ -134,7 +132,7 @@ function requireOption(modal, key) {
   return option;
 }
 
-test('offers all governance/economic fields and keeps the existing protocol and slashing leaves', () => {
+test('offers supported governance/economic controls and keeps the existing protocol and slashing leaves', () => {
   assert.deepEqual(dao.DAO_CONFIG_CHANGE_OPTIONS.governance.map(option => option.key).sort(), [...GOVERNANCE_KEYS].sort());
   assert.deepEqual(dao.DAO_CONFIG_CHANGE_OPTIONS.economic.map(option => option.key).sort(), Object.keys(ECONOMIC_TYPES).sort());
   assert.deepEqual(dao.DAO_CONFIG_CHANGE_OPTIONS.protocol.map(option => option.key), PROTOCOL_KEYS);
@@ -159,6 +157,36 @@ test('fetches every available current value from a synthetic network account wit
   assert.equal(governance.find(option => option.key === 'committeeAddresses').current.length, 4);
 });
 
+test('excludes network title and description from parameter choices even when the account contains them', async () => {
+  const { modal, account } = await modalFixture();
+  for (const key of ['title', 'description']) {
+    assert.ok(account.current[key], `Fixture must include network ${key}`);
+    assert.equal(modal.getConfigOption(key), null, `Network ${key} must not be selectable`);
+    const markup = modal.renderOptionChange(0, modal.options[0].changes[0], 0, 1, modal.getConfigOptions(), true);
+    assert.doesNotMatch(markup, new RegExp(`<option\\b[^>]*value="${key}"`));
+  }
+});
+
+test('rejects injected network metadata changes before proposal confirmation', async () => {
+  for (const key of ['title', 'description']) {
+    const { modal } = await modalFixture([key]);
+    modal.options[0].changes[0].value = 'Replacement network metadata';
+    const errors = [];
+    Object.assign(modal, {
+      titleInput: { value: 'Update economic configuration' }, descriptionInput: { value: 'Synthetic proposal.' },
+      proposalFeeUsdStr: '5', gracePeriodMs: 0, maxGracePeriodMs: 60000,
+      clearValidationErrors() {}, getReviewStartTimeMs: () => 0,
+      showValidationError: error => errors.push(error),
+    });
+    assert.throws(() => modal.getValidatedOptions(), error => Boolean(error.validationTarget), key);
+    const previousConfirmations = confirmedDrafts.length;
+    await modal.handleCreate();
+    assert.equal(confirmedDrafts.length, previousConfirmations, `Network ${key} must not reach confirmation`);
+    assert.equal(errors.length, 1, key);
+    assert.ok(errors[0].validationTarget, key);
+  }
+});
+
 test('renders usable string, decimal, bigint and structured archiver controls with current values', async () => {
   const { modal } = await modalFixture();
   for (const [key, value] of Object.entries(NEW_VALUES)) {
@@ -180,7 +208,8 @@ test('renders usable string, decimal, bigint and structured archiver controls wi
       }
       assert.doesNotMatch(proposed, /<textarea/);
     } else {
-      assert.match(proposed, /<(?:input|textarea)\b/);
+      assert.match(proposed, /<input\b/);
+      if (option.validation === 'text') assert.match(proposed, /type="text"/);
       assert.match(proposed, /required/);
       if (key === 'maintenanceFee') {
         assert.match(proposed, /type="text"/);
@@ -262,6 +291,8 @@ test('validates and serializes every added parameter through the real form, draf
   });
   for (const payload of [draft.transaction, transaction]) {
     assert.equal(payload.proposalType, 'economic');
+    assert.equal(payload.title, 'Update economic configuration');
+    assert.equal(payload.description, 'Synthetic proposal.');
     assert.deepEqual(json(payload.economic.changes), json(validated.changes));
   }
 });
@@ -335,8 +366,8 @@ test('continues to allow zero transaction fees and minimum tolls', async () => {
   }
 });
 
-test('requires nonempty text while allowing server version labels beyond semver', async () => {
-  for (const key of ['activeVersion', 'minVersion', 'latestVersion', 'title', 'description']) {
+test('requires nonempty version text while allowing server labels beyond semver', async () => {
+  for (const key of ['activeVersion', 'minVersion', 'latestVersion']) {
     const { modal } = await modalFixture([key]);
     requireOption(modal, key);
     for (const value of ['', '   ']) {
