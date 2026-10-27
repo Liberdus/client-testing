@@ -28,6 +28,13 @@ const expectedValues = {
   maintenanceFee: '123456789012345678901234567890123456789012345678901234567890',
   goldenTicketServerUrl: 'https://tickets.example.test/path?version=1.2.3',
   activeVersion: '12345678901234567890.2.3-beta+build',
+  syncTimeoutPenaltyPercent: '0.375', transactionFeeUsdStr: '0.000000000000000001', enableNodeSlashing: 'true',
+};
+const expectedMetadata = {
+  archiver: 'current.archiver · object', maintenanceFee: 'current.maintenanceFee · bigint in LIB base units',
+  goldenTicketServerUrl: 'current.goldenTicketServerUrl · string', activeVersion: 'current.activeVersion · string',
+  syncTimeoutPenaltyPercent: 'current.slashing.syncTimeoutPenaltyPercent · number in percent (0.2 = 20%)',
+  transactionFeeUsdStr: 'current.transactionFeeUsdStr · string in USD', enableNodeSlashing: 'current.enableNodeSlashing · boolean',
 };
 const proposalTitle = 'Synthetic economic update';
 const proposalDescription = 'Describe this proposal <without changing network metadata>.';
@@ -48,6 +55,7 @@ const fixtureScript = `
     maintenanceFee: 90071992547409931234567890n,
     title: 'Current network title', description: 'Current network description',
     goldenTicketServerUrl: 'http://tickets.example.test', activeVersion: '1.1.0',
+    slashing: { syncTimeoutPenaltyPercent: 0.3 }, transactionFeeUsdStr: '0.0100', enableNodeSlashing: false,
   } };
   const modal = new AddProposalModal();
   modal.resetConfigCache();
@@ -135,7 +143,9 @@ for (const width of [390, 1280]) {
         await proposed(0).locator(`[data-dao-archiver-field="${field}"]`).fill(value);
       }
       for (const [index, key] of Object.keys(expectedValues).entries()) {
-        if (key !== 'archiver') await proposed(index).fill(expectedValues[key]);
+        if (key === 'enableNodeSlashing') await proposed(index).selectOption(expectedValues[key]);
+        else if (key !== 'archiver') await proposed(index).fill(expectedValues[key]);
+        assert.equal(await page.locator('[data-dao-change-row]').nth(index).locator('.dao-form-meta').textContent(), expectedMetadata[key]);
       }
       assert.equal(await proposed(1).getAttribute('type'), 'text');
       assert.equal(await proposed(2).getAttribute('type'), 'url');
