@@ -26,6 +26,7 @@ const AddProposalModal = vm.runInNewContext(
 const json = value => JSON.parse(JSON.stringify(value));
 const proposedValues = {
   activeVersion: 'release-2.3.4+build', goldenTicketServerUrl: 'https://tickets.example.test/v1.2.3',
+  maintenanceFee: '123456789012345678901234567890123456789012345678901234567890',
   enableNodeSlashing: 'true', syncTimeoutPenaltyPercent: '0.375', transactionFeeUsdStr: '0.000000000000000001',
 };
 // Key order is the pre-feature catalog order; units reflect the server consumers.
@@ -38,7 +39,7 @@ const expectedUnits = {
   economic: {
     activeVersion: undefined, archiver: undefined, certCycleDuration: 'cycles', defaultTollUsdStr: 'USD',
     enableNodeSlashing: undefined, goldenTicketServerUrl: undefined, latestVersion: undefined,
-    maintenanceFee: 'LIB base units', maintenanceInterval: 'milliseconds', messageMaxLength: 'messages',
+    maintenanceFee: undefined, maintenanceInterval: 'milliseconds', messageMaxLength: 'messages',
     messageRetentionDays: 'days', minTollUsdStr: 'USD', minVersion: undefined, nodePenaltyUsdStr: 'USD',
     nodeRewardAmountUsdStr: 'USD', nodeRewardInterval: 'milliseconds', restakeCooldown: 'milliseconds',
     enableLeftNetworkEarlySlashing: undefined, enableNodeRefutedSlashing: undefined, enableSyncTimeoutSlashing: undefined,
@@ -69,6 +70,7 @@ test('catalog units match server quantities while retaining catalog order and un
 async function modalFixture() {
   const source = { current: {
     activeVersion: '1.2.3', goldenTicketServerUrl: 'http://tickets.example.test', enableNodeSlashing: false,
+    maintenanceFee: 90071992547409931234567890n,
     slashing: { syncTimeoutPenaltyPercent: 0.3 }, transactionFeeUsdStr: '0.0100',
   } };
   const modal = new AddProposalModal();
@@ -87,6 +89,7 @@ async function modalFixture() {
 for (const [key, expected] of [
   ['syncTimeoutPenaltyPercent', 'current.slashing.syncTimeoutPenaltyPercent · number in percent (0.2 = 20%)'],
   ['transactionFeeUsdStr', 'current.transactionFeeUsdStr · string in USD'],
+  ['maintenanceFee', 'current.maintenanceFee · bigint'],
   ['enableNodeSlashing', 'current.enableNodeSlashing · boolean'],
   ['activeVersion', 'current.activeVersion · string'],
   ['goldenTicketServerUrl', 'current.goldenTicketServerUrl · string'],
@@ -118,7 +121,7 @@ test('rendering units leaves current values, edits, order and serialized changes
   const { modal, source } = await modalFixture();
   const originalSource = structuredClone(source);
   const originalOptions = json(modal.options);
-  const originalConfig = json(modal.getConfigOptions());
+  const originalConfig = structuredClone(modal.getConfigOptions());
   const expectedChanges = modal.getConfigOptions().map(option => ({
     key: option.key, value: proposedValues[option.key], current: String(option.current),
   }));
@@ -129,7 +132,7 @@ test('rendering units leaves current values, edits, order and serialized changes
   assert.deepEqual(after.changes, [expectedChanges]);
   assert.deepEqual(source, originalSource);
   assert.deepEqual(json(modal.options), originalOptions);
-  assert.deepEqual(json(modal.getConfigOptions()), originalConfig);
+  assert.deepEqual(structuredClone(modal.getConfigOptions()), originalConfig);
   const draft = dao.buildDaoProposalCreateDraft({
     from: 'a'.repeat(64), displayTitle: 'Synthetic units check', description: 'Display metadata only.',
     proposalType: 'economic', emergency: false, ...after, proposalFeeUsdStr: '5',

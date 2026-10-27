@@ -31,7 +31,7 @@ const expectedValues = {
   syncTimeoutPenaltyPercent: '0.375', transactionFeeUsdStr: '0.000000000000000001', enableNodeSlashing: 'true',
 };
 const expectedMetadata = {
-  archiver: 'current.archiver · object', maintenanceFee: 'current.maintenanceFee · bigint in LIB base units',
+  archiver: 'current.archiver · object', maintenanceFee: 'current.maintenanceFee · bigint',
   goldenTicketServerUrl: 'current.goldenTicketServerUrl · string', activeVersion: 'current.activeVersion · string',
   syncTimeoutPenaltyPercent: 'current.slashing.syncTimeoutPenaltyPercent · number in percent (0.2 = 20%)',
   transactionFeeUsdStr: 'current.transactionFeeUsdStr · string in USD', enableNodeSlashing: 'current.enableNodeSlashing · boolean',
