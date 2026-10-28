@@ -90,7 +90,7 @@ window.__receiptFixture = {
         ...sent.payment, transactionHash: '0x' + '3'.repeat(64), from: sent.payment.to, to: sent.payment.from,
       } };
       delete received.payment.note;
-      Object.assign(sent.payment, { assetKind: 'erc20', contractAddress: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', rawAmount: '25500000', decimals: 6, symbol: 'USDC', note: 'Lunch reimbursement.\nReceipt: https://example.com/receipts/team-lunch' });
+      Object.assign(sent.payment, { rawAmount: '50000000000000000', note: 'Lunch reimbursement.\nReceipt: https://example.com/receipts/team-lunch' });
       messages = [sent, received];
     }
     myData.contacts[this.address] = {
@@ -329,10 +329,9 @@ test('Receipt headers load decorative local NEAR logos and native ETH logos on E
     if (variant === 'ethereum' || variant === 'base') await fixture.assertLogo(evm, 'ethereum_logo.png');
     else assert.equal(await evm.locator('.payment-receipt-logo').count(), 0, 'ERC20 USDC and native BNB do not use the ETH asset logo');
   }
-  if (process.env.RECEIPT_ICON_SCREENSHOTS) {
-    const evmPair = await fixture.open(t, { evmPair: true });
-    await fixture.assertLogo(evmPair.locator('.message.received .evm-payment-message'), 'ethereum_logo.png');
-    assert.equal(await evmPair.locator('.message.sent .evm-payment-message .payment-receipt-logo').count(), 0);
-    await fixture.screenshot(evmPair, 'evm-after.png');
+  const evmPair = await fixture.open(t, { evmPair: true });
+  for (const direction of ['received', 'sent']) {
+    await fixture.assertLogo(evmPair.locator(`.message.${direction} .evm-payment-message`), 'ethereum_logo.png');
   }
+  if (process.env.RECEIPT_ICON_SCREENSHOTS) await fixture.screenshot(evmPair, 'evm-after.png');
 });
