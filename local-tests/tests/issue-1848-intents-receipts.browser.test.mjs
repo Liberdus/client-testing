@@ -67,7 +67,7 @@ window.__receiptFixture = {
     });
     let messages = [payment(false, 0), payment(true, 1)].reverse();
     if (options.legacy) Object.assign(messages[0].payment, { chainName: '', assetId: '', intentHash: '', transactionHash: '' });
-    if (options.knownTypes) messages = [
+    if (options.knownTypes || options.evmVariant || options.evmPair) messages = [
       { type: 'transfer', my: false, amount: 1000000000000000000n, symbol: 'LIB', message: 'Native note', timestamp: at, txid: '3'.repeat(64) },
       { type: EVM_CHAT_MESSAGE_TYPE, my: true, message: '', timestamp: at + 60000, txid: '4'.repeat(64), paymentVerified: 'settled', payment: {
         type: EVM_CHAT_MESSAGE_TYPE, version: 1, chainId: 1, networkId: 'ethereum', transactionHash: '0x' + '5'.repeat(64),
@@ -75,6 +75,24 @@ window.__receiptFixture = {
         rawAmount: '25000000000000000', decimals: 18, symbol: 'ETH', note: 'EVM note',
       } },
     ].reverse();
+    if (options.evmVariant) {
+      const variants = {
+        base: { chainId: 8453, networkId: 'base' },
+        bnb: { chainId: 56, networkId: 'bsc', symbol: 'BNB' },
+        usdc: { assetKind: 'erc20', contractAddress: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', rawAmount: '25500000', decimals: 6, symbol: 'USDC' },
+      };
+      if (!variants[options.evmVariant]) throw Error('Unknown synthetic EVM variant');
+      Object.assign(messages[0].payment, variants[options.evmVariant]);
+    }
+    if (options.evmPair) {
+      const sent = messages[0];
+      const received = { ...sent, my: false, timestamp: at, txid: '3'.repeat(64), payment: {
+        ...sent.payment, transactionHash: '0x' + '3'.repeat(64), from: sent.payment.to, to: sent.payment.from,
+      } };
+      delete received.payment.note;
+      Object.assign(sent.payment, { assetKind: 'erc20', contractAddress: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', rawAmount: '25500000', decimals: 6, symbol: 'USDC', note: 'Lunch reimbursement.\nReceipt: https://example.com/receipts/team-lunch' });
+      messages = [sent, received];
+    }
     myData.contacts[this.address] = {
       address: this.address, username: 'alice', name: 'Alice Morgan', messages,
       toll: 0n, tollUnit: 'LIB', tollRequiredToSend: 0, tollRequiredToReceive: 0,
@@ -146,6 +164,35 @@ window.__receiptFixture = {
   async close() {
     await this.browser?.close();
     if (this.server?.listening) await new Promise(done => this.server.close(done));
+  }
+
+  async assertLogo(container, filename) {
+    const logo = container.locator('.payment-receipt-heading .payment-receipt-logo');
+    assert.equal(await logo.count(), 1);
+    await logo.evaluate(image => image.decode());
+    const image = await logo.evaluate(image => {
+      const box = image.getBoundingClientRect();
+      return { source: image.src, alt: image.getAttribute('alt'), width: image.width, height: image.height, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight, renderedWidth: box.width, renderedHeight: box.height };
+    });
+    assert.equal(image.source, `${this.origin}/media/${filename}`);
+    assert.equal(image.alt, '', 'Receipt icons are decorative beside the payment heading');
+    assert.equal(image.width, 20);
+    assert.equal(image.height, 20);
+    assert.equal(image.renderedWidth, 20);
+    assert.equal(image.renderedHeight, 20);
+    assert.ok(image.naturalWidth > 0 && image.naturalHeight > 0, 'The local asset loaded');
+  }
+
+  async screenshot(page, filename) {
+    await mkdir(process.env.RECEIPT_ICON_SCREENSHOTS, { recursive: true });
+    await page.waitForFunction(() => !document.querySelector('.toast'));
+    const visible = await page.locator('#chatModal .message').evaluateAll(messages => messages.every(message => {
+      const box = message.getBoundingClientRect();
+      const container = message.closest('.messages-container').getBoundingClientRect();
+      return box.top >= container.top && box.bottom <= container.bottom;
+    }));
+    assert.equal(visible, true, 'Both screenshot receipts must be fully visible');
+    await page.screenshot({ path: resolve(process.env.RECEIPT_ICON_SCREENSHOTS, filename), animations: 'disabled' });
   }
 }
 
@@ -267,16 +314,25 @@ test('Native LIB and EVM receipts retain their separate headings, notes, details
   assert.equal(await evm.locator('.evm-payment-details summary').textContent(), 'Payment details');
   assert.equal(await evm.locator('.message-time').count(), 1);
   assert.equal(await page.locator('.intents-payment-receipt').count(), 0);
-  if (process.env.INTENTS_RECEIPT_SCREENSHOTS) {
-    await mkdir(process.env.INTENTS_RECEIPT_SCREENSHOTS, { recursive: true });
-    const capturePage = await fixture.open(t, { screenshot: true, note: 'Project expenses.\nReceipt: https://example.com/receipts/project-2026-10-28' });
-    await capturePage.waitForFunction(() => !document.querySelector('.toast'));
-    const visible = await capturePage.locator('#chatModal .message').evaluateAll(messages => messages.every(message => {
-      const box = message.getBoundingClientRect();
-      const container = message.closest('.messages-container').getBoundingClientRect();
-      return box.top >= container.top && box.bottom <= container.bottom;
-    }));
-    assert.equal(visible, true, 'Both screenshot receipts must be fully visible');
-    await capturePage.screenshot({ path: resolve(process.env.INTENTS_RECEIPT_SCREENSHOTS, 'intents-receipts-after-mobile-final.png'), animations: 'disabled' });
+});
+
+test('Receipt headers load decorative local NEAR logos and native ETH logos on Ethereum and Base', async t => {
+  const near = await fixture.open(t, { screenshot: true, note: 'Project expenses.\nReceipt: https://example.com/receipts/project-2026-10-28' });
+  for (const direction of ['received', 'sent']) {
+    await fixture.assertLogo(near.locator(`#chatModal .message.${direction} .intents-payment-receipt`), 'near_logo.png');
+  }
+  if (process.env.RECEIPT_ICON_SCREENSHOTS) await fixture.screenshot(near, 'near-after.png');
+
+  for (const variant of ['ethereum', 'base', 'usdc', 'bnb']) {
+    const page = await fixture.open(t, variant === 'ethereum' ? { knownTypes: true } : { evmVariant: variant });
+    const evm = page.locator('.evm-payment-message');
+    if (variant === 'ethereum' || variant === 'base') await fixture.assertLogo(evm, 'ethereum_logo.png');
+    else assert.equal(await evm.locator('.payment-receipt-logo').count(), 0, 'ERC20 USDC and native BNB do not use the ETH asset logo');
+  }
+  if (process.env.RECEIPT_ICON_SCREENSHOTS) {
+    const evmPair = await fixture.open(t, { evmPair: true });
+    await fixture.assertLogo(evmPair.locator('.message.received .evm-payment-message'), 'ethereum_logo.png');
+    assert.equal(await evmPair.locator('.message.sent .evm-payment-message .payment-receipt-logo').count(), 0);
+    await fixture.screenshot(evmPair, 'evm-after.png');
   }
 });
