@@ -20,10 +20,12 @@ function cacheClass(name, instance) {
 }
 
 const cacheSource = [
-  'let myAccount = null; const network = { netid: "net1" };',
+  'let myAccount = null, myData = null; const network = { netid: "net1" };',
   'let contactAvatarCache, thumbnailCache, removeAccountModal;',
   'const SIGN_IN_USERNAME_ORDER_KEY = "signInUsernameOrder";',
   'const parse = JSON.parse, stringify = JSON.stringify;',
+  'const normalizeAddress = address => address.toLowerCase();',
+  'const openModal = modal => modal.classList.add("active"), enterFullscreen = () => {};',
   'const showToast = (message, duration, type) => window.toasts.push({ message, type });',
   'const clearMyData = () => { window.clearCount++; };',
   'const FULL_IMAGE_CACHE_MAX_SIZE = 250 * 1024 * 1024;',
@@ -33,11 +35,13 @@ const cacheSource = [
   cacheClass('ContactAvatarCache', 'contactAvatarCache'),
   cacheClass('ThumbnailCache', 'thumbnailCache'),
   cacheClass('FullImageCache', 'fullImageCache'),
+  cacheClass('AvatarEditModal', 'avatarEditModal'),
   // Only adapt the browser reload endpoint so assertions can observe ordering without navigating away.
   cacheClass('RemoveAccountModal', 'removeAccountModal').replaceAll('window.location.reload()', 'window.recordReload()'),
   cacheClass('RemoveAccountsModal', 'removeAccountsModal').replaceAll('window.location.reload()', 'window.recordReload()'),
-  'Object.assign(window, { ContactAvatarCache, ThumbnailCache, FullImageCache, RemoveAccountModal, RemoveAccountsModal });',
+  'Object.assign(window, { MediaCacheOwnership, ContactAvatarCache, ThumbnailCache, FullImageCache, AvatarEditModal, RemoveAccountModal, RemoveAccountsModal });',
   'window.useAccount = (username, netid = "net1") => { myAccount = username ? { username, netid } : null; network.netid = netid; };',
+  'window.useData = data => { myData = data; myAccount = data?.account || null; };',
 ].join('\n');
 
 let server;
@@ -608,4 +612,118 @@ test('a removed owner cannot evict a surviving account thumbnail before its late
     return { saved, rows, bytes: await thumbnails.getCacheSize() };
   }));
   assert.deepEqual(result, { saved: false, rows: [{ id: 'bob-only', ownerKeys: ['bob_net1'] }], bytes: 10 });
+});
+
+test('owner capture failures resolve an unavailable context without an unhandled rejection', async () => {
+  const result = await page.evaluate(() => withCaches(async caches => {
+    const unhandled = [];
+    const onUnhandled = event => { unhandled.push(event.reason?.message || String(event.reason)); event.preventDefault(); };
+    window.addEventListener('unhandledrejection', onUnhandled);
+    const originals = [caches.avatars, caches.thumbnails].map(cache => [cache, cache.init]);
+    for (const [cache] of originals) cache.init = async () => { throw new Error('Synthetic capture storage failure'); };
+    try {
+      const pending = [caches.avatars, caches.thumbnails, caches.images].map(cache =>
+        cache.captureOwner({ username: 'alice', netid: 'net1' }));
+      await new Promise(resolve => setTimeout(resolve, 0));
+      const settled = await Promise.allSettled(pending);
+      return {
+        unavailableIsDistinct: MediaCacheOwnership.unavailableOwner !== null && MediaCacheOwnership.unavailableOwner !== undefined,
+        statuses: settled.map(item => item.status),
+        contextsMatch: settled.every(item => item.status === 'fulfilled' && item.value === MediaCacheOwnership.unavailableOwner),
+        unhandled,
+      };
+    } finally {
+      for (const [cache, init] of originals) cache.init = init;
+      window.removeEventListener('unhandledrejection', onUnhandled);
+    }
+  }));
+  assert.deepEqual(result, { unavailableIsDistinct: true, statuses: ['fulfilled', 'fulfilled', 'fulfilled'], contextsMatch: true, unhandled: [] });
+});
+
+test('an unavailable context stays unavailable after account switches without reads, writes or eviction', async () => {
+  const result = await page.evaluate(() => withCaches(async caches => {
+    const { avatars, thumbnails, images } = caches;
+    useAccount('bob');
+    const bob = await captureEverywhere(caches, 'bob');
+    await avatars.save('bob-only', imageBlob('0123456789'), bob[0]);
+    await thumbnails.save('bob-only', imageBlob('0123456789'), 'image/png', bob[1]);
+    await images.put(photo('bob-only'), imageBlob('0123456789'), undefined, bob[2]);
+    thumbnails.maxCacheSize = images.maxCacheSize = 10;
+    useAccount('alice');
+    const originals = [avatars, thumbnails].map(cache => [cache, cache.init]);
+    for (const [cache] of originals) cache.init = async () => { throw new Error('Synthetic capture storage failure'); };
+    let unavailable;
+    try { unavailable = await captureEverywhere(caches, 'alice'); }
+    finally { for (const [cache, init] of originals) cache.init = init; }
+    useAccount('bob');
+    const reads = await Promise.all([
+      avatars.get('bob-only', unavailable[0]), avatars.getBlobUrl('bob-only', unavailable[0]),
+      thumbnails.get('bob-only', unavailable[1]), images.get('bob-only', unavailable[2]),
+    ]);
+    const saves = await Promise.all([
+      avatars.save('late', imageBlob('x'), unavailable[0]),
+      thumbnails.save('late', imageBlob('x'), 'image/png', unavailable[1]),
+      images.put(photo('late'), imageBlob('x'), undefined, unavailable[2]),
+    ]);
+    let downloads = 0;
+    const downloaded = await images.getOrCache({
+      attachment: photo('downloaded'), owner: unavailable[2],
+      downloadAndDecrypt: async () => { downloads++; return imageBlob('fallback'); },
+    });
+    return { reads, saves, downloads, downloaded: await downloaded.text(), rows: await snapshot(caches), bytes: await thumbnails.getCacheSize() };
+  }));
+  assert.deepEqual(result.reads, [null, null, null, null]);
+  assert.deepEqual(result.saves, [false, false, false]);
+  assert.equal(result.downloads, 1);
+  assert.equal(result.downloaded, 'fallback');
+  assert.deepEqual(result.rows, Array(3).fill([{ id: 'bob-only', ownerKeys: ['bob_net1'] }]));
+  assert.equal(result.bytes, 10);
+});
+
+test('explicit null ownership still permits untracked records while an account is active', async () => {
+  const result = await page.evaluate(() => withCaches(async caches => {
+    const { avatars, thumbnails, images } = caches;
+    useAccount('bob');
+    await avatars.save('untracked', imageBlob('avatar'), null);
+    await thumbnails.save('untracked', imageBlob('thumbnail'), 'image/png', null);
+    await images.put(photo('untracked'), imageBlob('full'), undefined, null);
+    await removeEverywhere(caches, ['alice_net1', 'bob_net1']);
+    return {
+      rows: await snapshot(caches),
+      contents: [
+        await (await avatars.get('untracked', null)).text(),
+        await (await thumbnails.get('untracked', null)).text(),
+        await (await images.get('untracked', null)).text(),
+      ],
+    };
+  }));
+  assert.deepEqual(result.rows, Array(3).fill([{ id: 'untracked', ownerKeys: undefined }]));
+  assert.deepEqual(result.contents, ['avatar', 'thumbnail', 'full']);
+});
+
+test('opening the avatar editor passes one data and owner context across awaited helpers', async () => {
+  const result = await page.evaluate(async () => {
+    const alice = { account: { username: 'alice', netid: 'net1' }, contacts: { contact: { mineAvatarId: 'alice-avatar' } } };
+    const bob = { account: { username: 'bob', netid: 'net1' }, contacts: { contact: { mineAvatarId: 'bob-avatar' } } };
+    const owner = Promise.resolve(Object.freeze({ key: 'alice_net1', generation: 1 }));
+    const captured = [];
+    contactAvatarCache = { captureOwner: account => { captured.push(account); return owner; } };
+    useData(alice);
+    const modal = new AvatarEditModal();
+    modal.modal = document.createElement('div');
+    const contexts = [];
+    modal.refreshPreview = async context => { contexts.push(context); await Promise.resolve(); useData(bob); };
+    modal.populateOptions = async context => { contexts.push(context); };
+    await modal.open('CONTACT');
+    return {
+      captures: captured.map(account => `${account.username}_${account.netid}`),
+      sameContext: contexts[0] === contexts[1],
+      sameData: contexts.every(context => context.data === alice),
+      sameOwner: contexts.every(context => context.owner === owner),
+      currentUsername: myData.account.username,
+      address: modal.currentAddress,
+      opened: modal.modal.classList.contains('active'),
+    };
+  });
+  assert.deepEqual(result, { captures: ['alice_net1'], sameContext: true, sameData: true, sameOwner: true, currentUsername: 'bob', address: 'contact', opened: true });
 });
