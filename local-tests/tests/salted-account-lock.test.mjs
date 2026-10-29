@@ -81,7 +81,7 @@ function fixture(initial = {}) {
     between('class UnlockModal {', 'const unlockModal = new UnlockModal();'),
     between('class BackupAccountModal {', 'const backupModal = new BackupAccountModal();'),
     between('class RestoreAccountModal {', 'const importModal = new RestoreAccountModal();'),
-    '({ LockModal, UnlockModal, BackupAccountModal, RestoreAccountModal, lockModal })',
+    '({ UnlockModal, BackupAccountModal, RestoreAccountModal, lockModal })',
   ].join('\n'), context);
   const lock = classes.lockModal;
   lock.oldPasswordInput = element();
@@ -138,9 +138,9 @@ test('optional salt changes password derivation while an empty salt preserves le
 });
 
 test('new locks store independent random salts and verify with their own saved salt', async () => {
-  const { LockModal } = fixture();
-  const first = await LockModal.createLock(password);
-  const second = await LockModal.createLock(password);
+  const { lock } = fixture();
+  const first = await lock.createLock(password);
+  const second = await lock.createLock(password);
   assert.match(first, recordPattern);
   assert.match(second, recordPattern);
   assert.notEqual(first.slice(0, 32), second.slice(0, 32));
@@ -148,16 +148,16 @@ test('new locks store independent random salts and verify with their own saved s
     const recordSalt = record.slice(0, 32);
     const verifier = record.slice(32);
     assert.equal(verifier, await crypto.passwordToKey(password, recordSalt));
-    assert.equal(await LockModal.verifyPassword(password, record), true);
-    assert.equal(await LockModal.verifyPassword('wrong-password', record), false);
+    assert.equal(await lock.verifyPassword(password, record), true);
+    assert.equal(await lock.verifyPassword('wrong-password', record), false);
   }
 });
 
 test('verification accepts legacy records and fails closed for damaged or unsupported records', async () => {
-  const { LockModal } = fixture();
-  assert.equal(await LockModal.verifyPassword(password, legacyVerifier), true);
-  assert.equal(await LockModal.verifyPassword('wrong-password', legacyVerifier), false);
-  assert.equal(await LockModal.verifyPassword(password, saltedLock), true);
+  const { lock } = fixture();
+  assert.equal(await lock.verifyPassword(password, legacyVerifier), true);
+  assert.equal(await lock.verifyPassword('wrong-password', legacyVerifier), false);
+  assert.equal(await lock.verifyPassword(password, saltedLock), true);
   const invalid = [
     '', null, undefined, 42, {}, '0'.repeat(63), 'g'.repeat(64),
     '0'.repeat(65), '0'.repeat(95), '0'.repeat(97), 'g'.repeat(96),
@@ -165,10 +165,10 @@ test('verification accepts legacy records and fails closed for damaged or unsupp
     ` ${saltedLock}`, `${saltedLock}\n`, salt + '0'.repeat(64),
   ];
   for (const record of invalid) {
-    assert.equal(await LockModal.verifyPassword(password, record), false, String(record));
+    assert.equal(await lock.verifyPassword(password, record), false, String(record));
   }
-  assert.equal(await LockModal.verifyPassword('', legacyVerifier), false);
-  assert.equal(await LockModal.verifyPassword('', saltedLock), false);
+  assert.equal(await lock.verifyPassword('', legacyVerifier), false);
+  assert.equal(await lock.verifyPassword('', saltedLock), false);
 });
 
 test('legacy accounts unlock without changing their lock record or encrypted data', async () => {
@@ -189,7 +189,7 @@ test('setting a lock saves a salted record and keeps the established account enc
   lockInputs(f, 'set', '', password);
   await f.lock.handleSubmit(submit);
   assert.match(f.storage.lock, recordPattern);
-  assert.equal(await f.LockModal.verifyPassword(password, f.storage.lock), true);
+  assert.equal(await f.lock.verifyPassword(password, f.storage.lock), true);
   assert.equal(f.lock.encKey, legacyEncryptionKey);
   assert.notEqual(f.storage[accountKey], plaintext);
   assert.equal(crypto.decryptData(f.storage[accountKey], legacyEncryptionKey, true), plaintext);
@@ -227,8 +227,8 @@ test('changing either legacy or salted locks creates a fresh salt and re-encrypt
     assert.match(f.storage.lock, recordPattern);
     assert.notEqual(f.storage.lock, record);
     assert.notEqual(f.storage.lock.slice(0, 32), salt);
-    assert.equal(await f.LockModal.verifyPassword('new-pass', f.storage.lock), true);
-    assert.equal(await f.LockModal.verifyPassword(password, f.storage.lock), false);
+    assert.equal(await f.lock.verifyPassword('new-pass', f.storage.lock), true);
+    assert.equal(await f.lock.verifyPassword(password, f.storage.lock), false);
     assert.equal(f.lock.encKey, newEncryptionKey);
     assert.equal(crypto.decryptData(f.storage[accountKey], newEncryptionKey, true), plaintext);
   }
