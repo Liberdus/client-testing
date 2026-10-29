@@ -123,3 +123,26 @@ reply-quote and call-link test PRs stay preserved and excluded. The #81–#87 E2
 stack is separate and unchanged. `playwright-tests/` live flows require an
 explicitly selected environment and authorization for accounts/transactions;
 they are not part of this offline audit.
+
+## Account media ownership and removal
+
+These focused tests exercise the production cache classes in headless Chromium with real IndexedDB. No application startup, live account, signing, broadcast, or external service is used.
+
+Install the repository's locked Playwright dependencies and Chromium:
+
+```bash
+npm ci --prefix playwright-tests
+cd playwright-tests
+npx playwright install chromium
+```
+
+Run from the repository root with Node.js 20.19 or newer:
+
+```bash
+WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 \
+  node --test local-tests/tests/issue-1853-media-ownership.browser.test.mjs
+```
+
+Set `WEB_CLIENT_ROOT` to the exact implementation checkout, including when it is a worktree. Each test uses temporary database names and closes and removes them afterward. Tests load the client's actual cache classes without running the full app; they read persisted records and indexes to check observable IndexedDB behavior.
+
+The 19 issue #1853 cases cover indexed media ownership, cache-hit registration, concurrent readers, preservation of legacy records, shared and selected-account removal, transaction aborts and action failures, delayed writes and eviction after removal and recreation, account switches, backup imports and exports, attachment identity and eviction, download fallbacks, and validation before storage access. They require the unmerged issue #1853 client implementation and must remain on their companion topic branch until that implementation is on client `main` and the cases have passed against it.
