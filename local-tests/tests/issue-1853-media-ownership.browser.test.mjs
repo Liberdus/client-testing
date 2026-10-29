@@ -727,3 +727,27 @@ test('opening the avatar editor passes one data and owner context across awaited
   });
   assert.deepEqual(result, { captures: ['alice_net1'], sameContext: true, sameData: true, sameOwner: true, currentUsername: 'bob', address: 'contact', opened: true });
 });
+
+test('replacing a legacy full image without cachedAt keeps it untracked through account removal', async () => {
+  const result = await page.evaluate(() => withCaches(async caches => {
+    const { thumbnails, images } = caches;
+    await writeRows(thumbnails, 'fullImages', [{ id: 'legacy-no-time', blob: imageBlob('old'), size: 3 }]);
+    const [legacy] = await readRows(thumbnails, 'fullImages');
+    const owner = await images.captureOwner({ username: 'alice', netid: 'net1' });
+    const saved = await images.put(photo('legacy-no-time'), imageBlob('replacement'), undefined, owner);
+    const [replaced] = await readRows(thumbnails, 'fullImages');
+    await removeEverywhere(caches, ['alice_net1']);
+    const remaining = await readRows(thumbnails, 'fullImages');
+    return {
+      startedWithoutTimestamp: !Object.hasOwn(legacy, 'cachedAt'),
+      saved, trackedAfterReplacement: Object.hasOwn(replaced, 'ownerKeys'), timestamp: typeof replaced.cachedAt,
+      remaining: await Promise.all(remaining.map(async record => ({
+        id: record.id, tracked: Object.hasOwn(record, 'ownerKeys'), size: record.size, contents: await record.blob.text(),
+      }))),
+    };
+  }));
+  assert.deepEqual(result, {
+    startedWithoutTimestamp: true, saved: true, trackedAfterReplacement: false, timestamp: 'number',
+    remaining: [{ id: 'legacy-no-time', tracked: false, size: 11, contents: 'replacement' }],
+  });
+});
