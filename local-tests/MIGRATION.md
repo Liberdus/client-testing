@@ -1,17 +1,20 @@
-# Foundation provenance and feature split
+# Regression test provenance
 
-This main-compatible foundation is based on `client-testing/main` at
-`2fc3036c11900073e0616cf9ddcdf3cf233904e3`. It imports tests, fixtures and the
-runner from repaired snapshot `f0f2c07d6df5b08f8f5c96850391bb16fe317262`, with
-test source unchanged. The default run passes **54/54 files** against web-client
-main `cc0cc31e0063751bfe68875ab9a07ae6cfda18da`.
+The current consolidation is described in [CONSOLIDATION.md](CONSOLIDATION.md).
+It builds a new topic directly on companion main, collects coverage only for
+merged client work, and leaves open-feature tests stacked above that topic.
+The source PR and commit map is preserved there and in cherry-pick trailers.
 
-The legacy branch remains preserved at
-[`d1ac844`](https://github.com/Liberdus/client-testing/tree/d1ac844db0523e2c68ecbaccf60e8e1ab402de5c).
-Its full historical audits and all omitted test versions remain recoverable
-there. The old 54/62 and newer 53/66 results describe different mixed revisions,
-not this foundation. No test assertions were weakened or skipped to obtain this
-foundation's passing baseline: feature files are assigned to separate branches.
+## Historical foundation import
+
+The original foundation started from companion main
+`2fc3036c11900073e0616cf9ddcdf3cf233904e3`. It imported tests and synthetic fixtures
+from repaired snapshot `f0f2c07d6df5b08f8f5c96850391bb16fe317262` and passed
+54/54 files against client `cc0cc31e0063751bfe68875ab9a07ae6cfda18da`.
+Those counts and that client SHA are historical, not current validation.
+Later feature commits, current-main fixture repairs and the consolidated
+validation are recorded separately. The legacy branch and original feature
+topics remain preserved; old mixed-revision results are not a current baseline.
 
 ## Related client work already on main
 
@@ -28,21 +31,25 @@ request new client PRs for already-merged behavior.
 | Full-image caching | [#1671](https://github.com/Liberdus/web-client-v2/pull/1671), [#1677](https://github.com/Liberdus/web-client-v2/pull/1677) |
 | Popup selects, fonts, sign-in icons, welcome footer, Advanced options and launch icons | [#1631](https://github.com/Liberdus/web-client-v2/pull/1631), [#1663](https://github.com/Liberdus/web-client-v2/pull/1663), [#1664](https://github.com/Liberdus/web-client-v2/pull/1664), [#1665](https://github.com/Liberdus/web-client-v2/pull/1665), [#1667](https://github.com/Liberdus/web-client-v2/pull/1667), [#1669](https://github.com/Liberdus/web-client-v2/pull/1669) |
 
-## Feature-specific and preserved suites
+## Consolidated and preserved suites
+
+Merged client features formerly split across source test PRs are now collected
+in the consolidated review topic: native LIB Send/Receive and USD conversion,
+attachment-ID caches/migrations, message confirmation and its browser demo,
+EVM/Intents receipts, thumbnails, receive copy controls, faucet configuration,
+committee/economic parameters and metadata, composer size and restored drafts,
+and salted account locks. See CONSOLIDATION.md for the exact client/source PRs.
 
 | Files or group | Disposition |
 | --- | --- |
-| `lib-send-receive.*`, `usd-lib-conversion.test.mjs` and related updates | Separate layers matching [#1806](https://github.com/Liberdus/web-client-v2/pull/1806) → [#1807](https://github.com/Liberdus/web-client-v2/pull/1807) → [#1810](https://github.com/Liberdus/web-client-v2/pull/1810), using each layer's compatible historical version. |
-| `issue-1755-attachment-cache-ids.*` and ID-keyed full-image fixture changes | Separate tests for [#1811](https://github.com/Liberdus/web-client-v2/pull/1811); this foundation retains the pre-change URL-keyed full-image tests. |
-| `message-confirmation.test.cjs` | Separate coverage for [#1802](https://github.com/Liberdus/web-client-v2/pull/1802). |
-| `evm-payment-explorer.*` | Separate coverage for [#1793](https://github.com/Liberdus/web-client-v2/pull/1793). |
-| `issue-1680-chat-attachment-thumbnails.*` | Independent coverage for [#1685](https://github.com/Liberdus/web-client-v2/pull/1685), which targets client main directly without the deferred reply-quote changes. |
-| `issue-1553-call-links.test.mjs` | New focused companion coverage for [#1553](https://github.com/Liberdus/web-client-v2/pull/1553); 5/5 cases pass at its client head, while the eligible-link regression case fails on current client main. |
-| MLS `test/*.mjs` | Already committed in client [#1655](https://github.com/Liberdus/web-client-v2/pull/1655), including its `npm run test:mls` entry point; retain the 11 suites there without duplicating their implementation dependencies in this repository. |
-| `mock-catalog.test.mjs`, `mock-board.browser.test.mjs` | Preserved in the legacy branch; the mock implementation has no matching open client PR in this migration. |
-| `evm-note-editing*`, `registration-confirmation.test.cjs` | Preserve until closed/unmerged client features resume: [#1800](https://github.com/Liberdus/web-client-v2/pull/1800), [#1744](https://github.com/Liberdus/web-client-v2/pull/1744). |
-| `dao-backend-fetcher.test.mjs`, `dao-user-vote-summary.test.mjs` | Preserve historical/prototype contracts; no compatible current-main implementation is established. |
-| `evm-send-fee-usd.browser.test.mjs` | Preserve the historical browser harness pending adaptation from shared-modal selectors; the repaired numerical/lifecycle Node suite is in this foundation. |
+| Signed-in vote summary, media ownership/removal, Delete for all feedback, video preview and immersive controls | Open-feature topics #120 → #121 → #122 → #123 → #124 above the consolidated branch; validate against their matching client heads. |
+| `reply-quotes.*` | Closed test #97 stays excluded; no reply-quote commits or fixtures are imported. |
+| `issue-1553-call-links.test.mjs` | Closed test #99 stays preserved and excluded. |
+| MLS `test/*.mjs` | Retain the implementation-dependent suites in client #1655; do not duplicate them here. |
+| `mock-catalog.test.mjs`, `mock-board.browser.test.mjs` | Preserved in legacy history; no selected current client PR. |
+| `evm-note-editing*`, `registration-confirmation.test.cjs` | Preserve historical closed/unmerged feature coverage until its client work resumes. |
+| `dao-backend-fetcher.test.mjs`, `dao-user-vote-summary.test.mjs` | Preserve prototype contracts; the open vote-summary PR has its own focused current tests. |
+| `evm-send-fee-usd.browser.test.mjs` | Historical harness remains preserved; numerical/lifecycle Node coverage is included. |
 
 The MLS audit at client `8e1c86a13af1f82a7df3d31d06cd7a8f9e191559`
 ran all 11 unchanged suites individually under Node 20.19.6. Ten completed;
