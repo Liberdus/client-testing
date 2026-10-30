@@ -163,7 +163,7 @@ const server = createServer(async (request, response) => {
         console.log('RECEIPT', JSON.stringify({ mode, at: Date.now(), path: path + url.search, response: receipt }));
         return json(receipt);
       }
-      if (path.endsWith('/balance')) return json({ balance: '1000000000000000000000' });
+      if (path.endsWith('/balance')) return json({ balance: { dataType: 'bi', value: (1000n * 10n ** 18n).toString(16) } });
       if (path.includes('/toll')) return json({ toll: { required: [0, 0], payOnRead: [0, 0], payOnReply: [0, 0] } });
       if (path.startsWith('/account/')) return json({ account: { private: false, data: { toll: '0', tollUnit: 'LIB' } } });
       if (path.includes('/chats/')) return json({ chats: {} });
