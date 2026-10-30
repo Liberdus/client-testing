@@ -278,13 +278,18 @@ test('Multichain sent and received cards preserve payment data without generated
       assert.ok(payment, 'The fixture must be accepted as a valid Multichain claim');
       const message = { type: 'intents_transfer', timestamp: 1, my, paymentVerified: 'pending', payment };
       const html = chat.renderChatMessageHTML(message, { contact: { messages: [message] }, lastReadTs: 0 });
-      assert.ok(html.includes(`${my ? '−' : '+'}25.5 USDT`));
+      const amount = html.match(/<div class="intents-payment-amount"[^>]*>([\s\S]*?)<\/div>/)?.[1];
+      assert.ok(amount, 'The receipt must render its amount');
+      assert.equal(amount.replace(/<[^>]*>/g, ''), `${my ? '−' : '+'}25.5 USDT`);
+      assert.ok(amount.includes('<span class="intents-payment-unit">USDT</span>'));
       assert.ok(html.includes('BNB Smart Chain'));
       assert.ok(html.includes(escapeHtml(note)));
       assert.ok(html.includes(`data-intent-hash="${HASH}"`));
       assert.ok(html.includes('data-verified="pending"'));
       assert.ok(html.includes('<div class="intents-payment-verified">pending</div>'));
-      assert.equal(html.split(CONTRACT).length - 1, note.includes(CONTRACT) ? 1 : 0);
+      assert.ok(html.includes(`<dt>Asset</dt><dd><code>${assetId}</code></dd>`));
+      assert.equal(html.split(CONTRACT).length - 1, note.includes(CONTRACT) ? 2 : 1,
+        'Only the original asset ID and authored note may contain the contract');
       assert.ok(!html.includes('<dt>Token contract</dt>') && !html.includes('/token/') && !html.includes('<a '));
       assert.ok(html.includes('<div class="message-time">12:00</div>'));
       assert.equal((html.match(/class="message-time"/g) || []).length, 1);
