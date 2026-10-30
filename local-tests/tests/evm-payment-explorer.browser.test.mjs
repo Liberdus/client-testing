@@ -333,12 +333,18 @@ try {
       const txid = await message.getAttribute('data-txid');
       const expectedNote = ['1', '2'].includes(txid[0]) ? 'Lunch <3' : contractNote;
       assert.equal(await card.locator('.intents-payment-note').textContent(), expectedNote);
-      assert.equal((await card.textContent()).split(contract).length - 1, expectedNote.includes(contract) ? 1 : 0);
+      const multichainDetails = card.locator('.intents-payment-details');
+      assert.deepEqual(await multichainDetails.locator('dt').allTextContents(), ['Amount', 'Network', 'Asset', 'Intent']);
+      assert.deepEqual(await multichainDetails.locator('dd').allTextContents(), [
+        '25.5 USDT', 'BNB Smart Chain',
+        `nep245:v2_1.omni.hot.tg:56_${contract}`, '0x' + txid,
+      ]);
+      // The signed asset ID retains its contract; authored notes remain unchanged.
+      assert.equal((await card.textContent()).split(contract).length - 1, expectedNote.includes(contract) ? 2 : 1);
       assert.equal(await card.getAttribute('data-intent-hash'), '0x' + txid);
       assert.equal(await card.getAttribute('data-verified'), sent ? 'settled' : 'failed');
       assert.equal(await card.locator('.intents-payment-verified').textContent(), sent ? 'Confirmed' : 'Not confirmed');
       assert.equal(await card.locator('a').count(), 0);
-      assert.equal(await card.locator('dt').count(), 0);
       assert.equal(await card.locator('.evm-payment-contract').count(), 0);
       assert.equal(await message.locator('.message-time').count(), 1);
       const timestamp = Number(await message.getAttribute('data-message-timestamp'));
