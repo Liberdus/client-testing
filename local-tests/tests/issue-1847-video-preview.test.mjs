@@ -158,6 +158,9 @@ class PreviewHarness {
   }
 
   video(type = 'video/mp4') {
+    if (type === 'video/quicktime') {
+      return new Blob([Uint8Array.of(0, 0, 0, 20), 'ftypqt  ', Uint8Array.of(0, 0, 0, 0), 'qt  '], { type });
+    }
     const bytes = type === 'video/webm'
       ? Uint8Array.from([0x1a, 0x45, 0xdf, 0xa3])
       : type === 'video/ogg' ? new TextEncoder().encode('OggS') : new TextEncoder().encode('0000ftypisom');
@@ -187,11 +190,13 @@ class PreviewHarness {
 test('only eligible declared video formats expose Open; filenames cannot enable preview', () => {
   const h = new PreviewHarness();
   const chat = h.chat();
-  for (const type of ['video/mp4', 'video/webm', 'video/ogg', ' Video/MP4 ']) {
+  for (const type of ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime', ' Video/MP4 ']) {
     assert.equal(chat.getAttachmentPreviewKind(h.row(type)), 'video', type);
   }
-  for (const type of ['', 'text/html', 'audio/ogg', 'video/quicktime', 'video/x-msvideo']) {
-    assert.equal(chat.getAttachmentPreviewKind(h.row(type, 'pretend.mp4')), null, type);
+  for (const type of ['', 'text/html', 'audio/ogg', 'video/x-msvideo']) {
+    for (const name of ['pretend.mp4', 'pretend.MOV']) {
+      assert.equal(chat.getAttachmentPreviewKind(h.row(type, name)), null, `${type} ${name}`);
+    }
   }
   assert.equal(chat.getAttachmentPreviewKind(h.row('image/png', 'photo.png')), 'image');
 });
@@ -229,12 +234,50 @@ test('Open displays loading immediately, then a verified video using native inli
   assert.equal(h.cacheCalls.length, 0, 'full-video caching remains outside this change');
 });
 
-test('MP4, WebM and Ogg pass byte signature validation before media is attached', async () => {
-  for (const type of ['video/mp4', 'video/webm', 'video/ogg']) {
+test('eligible video formats pass byte signature validation before media is attached', async () => {
+  for (const type of ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime']) {
     const h = new PreviewHarness();
     h.videoBlob = h.video(type);
     await h.chat().openMediaAttachment(h.row(type));
     assert.equal([...h.created.values()][0]?.type, type, type);
+  }
+});
+
+test('QuickTime MOV preview attempts verified playback despite an inconclusive native support hint', async () => {
+  for (const support of ['probably', '']) {
+    const h = new PreviewHarness();
+    const chat = h.chat();
+    h.videoBlob = h.video('video/quicktime');
+    h.modal.video.support = support;
+    const row = h.row('video/quicktime', 'phone-video.MOV');
+    assert.equal(chat.getAttachmentPreviewKind(row), 'video');
+    await chat.openMediaAttachment(row);
+    assert.equal(h.decryptCalls.length, 1);
+    assert.equal([...h.created.values()][0]?.type, 'video/quicktime');
+    assert.equal(h.modal.video.src, 'blob:preview-1');
+    assert.equal(h.modal.title.textContent, 'phone-video.MOV');
+    assert.equal(h.modal.video.hidden, false);
+    assert.equal(h.modal.video.autoplay, false);
+    assert.equal(h.modal.video.playCount, 0, 'wait for the user to press Play');
+    h.readyVideo();
+    assert.equal(h.modal.loading.hidden, true);
+    assert.equal(h.modal.error.hidden, true);
+  }
+});
+
+test('sender-declared QuickTime cannot preview markup or bytes without a valid container signature', async () => {
+  for (const content of [
+    '<!doctype html><script>parent.pwned=true</script>',
+    'not a video container',
+    Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  ]) {
+    const h = new PreviewHarness();
+    h.videoBlob = new Blob([content], { type: 'video/quicktime' });
+    await h.chat().openMediaAttachment(h.row('video/quicktime', 'spoofed.MOV'));
+    assert.equal(h.created.size, 0);
+    assert.equal(h.modal.video.src, '');
+    assert.equal(h.modal.error.hidden, false);
+    assert.match(h.modal.error.textContent, /safely.*Save/i);
   }
 });
 
@@ -357,19 +400,21 @@ test('attachment replacement releases playing video and ignores stale media call
   assert.equal(h.modal.isCurrentRequest(next), true);
 });
 
-test('unsupported codecs and playback errors release media and leave a useful Save fallback', () => {
-  for (const unsupported of [false, true]) {
+test('native playback errors release media and leave a useful Save fallback regardless of support hints', () => {
+  for (const support of ['probably', '']) {
     const h = new PreviewHarness();
-    h.modal.video.support = unsupported ? '' : 'probably';
+    h.modal.video.support = support;
     const request = h.modal.openLoading('clip.mp4', 'video');
     h.modal.showVideo(h.video(), request);
     const url = [...h.created.keys()][0];
-    if (!unsupported) h.modal.video.dispatch('error');
+    assert.equal(h.modal.video.src, url, 'attempt verified playback before relying on the native error event');
+    assert.ok(url);
+    h.modal.video.dispatch('error');
     assert.equal(h.modal.loading.hidden, true);
     assert.equal(h.modal.video.src, '');
     assert.equal(h.modal.error.hidden, false);
     assert.match(h.modal.error.textContent, /save/i);
-    if (url) h.assertReleased(url);
+    h.assertReleased(url);
   }
 });
 

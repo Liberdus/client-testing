@@ -23,18 +23,25 @@ const start = app.indexOf('\nclass FullImageModal {');
 const end = app.indexOf('\nconst fullImageModal = new FullImageModal();', start);
 assert.ok(start >= 0 && end > start, 'Find the production media modal class');
 const classSource = app.slice(start, end);
+const chatStart = app.indexOf('\nclass ChatModal {');
+const chatEnd = app.indexOf('\nconst chatModal = new ChatModal();', chatStart);
+assert.ok(chatStart >= 0 && chatEnd > chatStart, 'Find the production chat modal class');
+const chatClassSource = app.slice(chatStart, chatEnd);
 const index = (await readFile(resolve(root, 'index.html'), 'utf8')).replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
 const temporary = await mkdtemp(resolve(tmpdir(), 'issue-1847-browser-'));
 const captures = resolve(process.env.MEDIA_PREVIEW_CAPTURES || resolve(tmpdir(), 'issue-1847-browser-captures'));
 await mkdir(captures, { recursive: true });
 const mime = { '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2' };
+const videoMime = { mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime' };
 const fixtures = new Map();
 let browser;
 let server;
 
 try {
   // Native decoders receive real, deterministic media, including an audio track.
-  for (const [name, videoCodec, audioCodec] of [['clip.mp4', 'libx264', 'aac'], ['clip.webm', 'libvpx', 'libvorbis']]) {
+  for (const [name, videoCodec, audioCodec] of [
+    ['clip.mp4', 'libx264', 'aac'], ['clip.webm', 'libvpx', 'libvorbis'], ['clip.mov', 'libx264', 'aac'],
+  ]) {
     const target = resolve(temporary, name);
     execFileSync('ffmpeg', ['-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=24',
       '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '4', '-c:v', videoCodec,
@@ -45,7 +52,7 @@ try {
     try {
       const path = new URL(request.url, 'http://localhost').pathname;
       if (path === '/') return response.writeHead(200, { 'Content-Type': 'text/html' }).end(index);
-      if (fixtures.has(path)) return response.writeHead(200, { 'Content-Type': path.endsWith('.mp4') ? 'video/mp4' : 'video/webm' }).end(fixtures.get(path));
+      if (fixtures.has(path)) return response.writeHead(200, { 'Content-Type': videoMime[extname(path).slice(1)] }).end(fixtures.get(path));
       const file = resolve(root, '.' + decodeURIComponent(path));
       assert.ok(file.startsWith(root + sep));
       response.writeHead(200, { 'Content-Type': mime[extname(file)] || 'application/octet-stream' }).end(await readFile(file));
@@ -68,9 +75,12 @@ try {
     const page = await context.newPage();
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(origin);
+    await page.evaluate(async () => { window.__normalizeMimeType = (await import('/lib.js')).normalizeMimeType; });
     await page.addScriptTag({ content: `
       const assert = (condition, message) => { if (!condition) throw new Error(message); };
       const openModal = modal => { modal.classList.add('active'); return true; };
+      const normalizeMimeType = window.__normalizeMimeType;
+      ${chatClassSource}
       ${classSource}
       window.__modal = new FullImageModal();
       window.__modal.load();
@@ -89,8 +99,50 @@ try {
     assert.equal(await video.getAttribute('controls'), '', 'Use native playback controls');
     assert.equal(await video.getAttribute('playsinline'), '', 'Keep mobile playback inline');
 
+    // Exercise production menu rendering with a synthetic message, without account setup.
+    await page.evaluate(() => {
+      const menu = document.querySelector('#imageAttachmentContextMenu');
+      const chat = Object.create(ChatModal.prototype);
+      chat.imageAttachmentContextMenu = menu;
+      chat.imageAttachmentContextMenuReactions = menu.querySelector('.message-context-reactions');
+      chat.closeAllContextMenus = () => { menu.style.display = 'none'; };
+      chat.canDeleteMessageForAll = () => false;
+      chat.getMessageRecordFromElement = () => ({ xattach: [{ url: '/clip.mov', type: 'video/quicktime' }] });
+      for (const method of ['syncContextReactionTrayDisplay', 'syncReactionPickerActiveState', 'syncDeleteContextMenuDisabledState']) {
+        chat[method] = () => {};
+      }
+      const message = document.createElement('div');
+      message.className = 'message received';
+      message.innerHTML = '<div class="message-content">Synthetic QuickTime</div><div class="attachment-row attachment-row--media" data-type="video/quicktime" data-name="Synthetic%20QuickTime.mov" data-url="/clip.mov">Synthetic QuickTime.mov</div>';
+      document.querySelector('#chatModal .messages-list').append(message);
+      document.querySelector('#chatModal').classList.add('active');
+      window.__menuRow = message.querySelector('.attachment-row');
+      window.__chat = chat;
+    });
+    await page.locator('#chatModal').evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));
+    await page.evaluate(() => __chat.showAttachmentContextMenu(new MouseEvent('contextmenu', { cancelable: true }), __menuRow));
+    const openOption = page.locator('#imageAttachmentContextMenu [data-action="open"]');
+    const saveOption = page.locator('#imageAttachmentContextMenu [data-action="save"]');
+    assert.equal(await openOption.isVisible(), true, 'QuickTime attachment menu exposes Open');
+    assert.equal(await saveOption.isVisible(), true, 'QuickTime attachment menu retains Save');
+    await page.locator('#imageAttachmentContextMenu').evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));
+    const menuBox = await page.locator('#imageAttachmentContextMenu').boundingBox();
+    assert.ok(menuBox.x >= 0 && menuBox.x + menuBox.width <= viewport.width && menuBox.y >= 0 && menuBox.y + menuBox.height <= viewport.height,
+      'QuickTime attachment menu stays in the viewport');
+    if (viewport.name === 'mobile') await page.screenshot({ path: resolve(captures, 'mobile-quicktime-menu.png') });
+    await page.evaluate(() => {
+      __menuRow.dataset.type = 'application/octet-stream';
+      __chat.showAttachmentContextMenu(new MouseEvent('contextmenu', { cancelable: true }), __menuRow);
+    });
+    assert.equal(await openOption.isVisible(), false, 'MOV filename alone does not expose Open for an unsupported MIME');
+    assert.equal(await saveOption.isVisible(), true, 'Unsupported attachments retain Save');
+    await page.evaluate(() => {
+      __chat.imageAttachmentContextMenu.style.display = 'none';
+      document.querySelector('#chatModal').classList.remove('active');
+    });
+
     const played = [];
-    for (const format of ['mp4', 'webm']) {
+    for (const format of ['mp4', 'webm', 'mov']) {
       // A separate raw <video> distinguishes host codec availability from app behavior.
       const decoder = await page.evaluate(async format => {
         const raw = document.createElement('video');
@@ -100,8 +152,9 @@ try {
         try {
           return await new Promise((resolve, reject) => {
             timeout = setTimeout(() => reject(new Error(`Raw ${format} decoder did not settle`)), 5000);
-            raw.onloadeddata = () => resolve({ supported: true });
-            raw.onerror = () => resolve({ supported: false, code: raw.error?.code, message: raw.error?.message });
+            raw.onloadeddata = () => resolve({ supported: true, canPlayType: raw.canPlayType(blob.type), mime: blob.type });
+            raw.onerror = () => resolve({ supported: false, canPlayType: raw.canPlayType(blob.type), mime: blob.type,
+              code: raw.error?.code, message: raw.error?.message });
             raw.src = url;
             raw.load();
           });
@@ -110,6 +163,7 @@ try {
           raw.removeAttribute('src'); raw.load(); URL.revokeObjectURL(url);
         }
       }, format);
+      assert.equal(decoder.mime, videoMime[format], 'Use the original container MIME for native playback');
       await page.evaluate(format => { window.__request = __modal.openLoading(`Synthetic ${format}`, 'video'); }, format);
       assert.equal(await page.locator('#fullImageLoading').isVisible(), true, 'Show loading before media fetch');
       assert.equal(await page.locator('#fullImageViewer').getAttribute('aria-busy'), 'true');
@@ -119,11 +173,13 @@ try {
         const blob = await (await fetch(`/clip.${format}`)).blob();
         __modal.showVideo(blob, __request);
       }, format);
+      if (format === 'mov') console.log(`MOV ${viewport.name}: ${JSON.stringify(decoder)}`);
       if (!decoder.supported) {
         await page.locator('#fullImageError').waitFor({ state: 'visible' });
         assert.match(await page.locator('#fullImageError').textContent(), /save/i);
         assert.equal(await page.evaluate(() => __urls.size), 0, 'Unsupported decoder releases media URL');
-        console.log(`SKIP ${viewport.name} ${format} playback: raw host decoder failed (${JSON.stringify(decoder)}); app fallback PASS`);
+        await page.screenshot({ path: resolve(captures, `${viewport.name}-${format}-unsupported.png`) });
+        console.log(`SKIP ${viewport.name} ${format} playback: raw decoder failed (${JSON.stringify(decoder)}); app fallback PASS`);
         await page.locator('#closeFullImageModal').click();
         continue;
       }
@@ -209,7 +265,7 @@ try {
     assert.deepEqual(external, [], 'No external service is contacted');
     assert.deepEqual(errors, [], 'No uncaught browser errors');
     await context.close();
-    console.log(`PASS ${viewport.name}: ${played.join('/')} native playback, seeking, volume, touch, cleanup, error fallback, image zoom; no external requests`);
+    console.log(`PASS ${viewport.name}: QuickTime Open/Save menu, ${played.join('/')} native playback, seeking, volume, touch, cleanup, error fallback, image zoom; no external requests`);
   }
 } finally {
   await browser?.close();
