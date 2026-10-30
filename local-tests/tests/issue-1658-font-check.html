@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <link rel="stylesheet" href="../styles.css">
+  </head>
+  <body style="flex-direction: column">
+    <main style="width: 100%; max-width: 430px; background: white">
+      <ul class="menu-list">
+        <li class="menu-item" data-icon="user">Profile</li>
+      </ul>
+    </main>
+    <p id="identifiers" hidden>1x2 x0x7_ 0xabc123</p>
+    <pre id="result" hidden>WAITING</pre>
+    <script>
+      document.fonts.ready.then(() => {
+        const menu = document.querySelector('.menu-item');
+        const menuStyle = getComputedStyle(menu);
+        const iconStyle = getComputedStyle(menu, '::before');
+        const checks = {
+          font400: document.fonts.check('400 16px Inter'),
+          font500: document.fonts.check('500 16px Inter'),
+          font600: document.fonts.check('600 16px Inter'),
+          font700: document.fonts.check('700 16px Inter'),
+          ligatures: getComputedStyle(document.body).fontVariantLigatures,
+          menuFontFamily: menuStyle.fontFamily,
+          menuFontSize: menuStyle.fontSize,
+          menuFontWeight: menuStyle.fontWeight,
+          iconWidth: iconStyle.width,
+          iconHeight: iconStyle.height,
+          iconOpacity: iconStyle.opacity,
+          identifiers: document.querySelector('#identifiers').textContent,
+        };
+        const passed = Object.values(checks).every(Boolean)
+          && checks.ligatures === 'no-contextual'
+          && checks.menuFontSize === '16px'
+          && checks.menuFontWeight === '500'
+          && checks.iconWidth === '20px'
+          && checks.iconHeight === '20px'
+          && checks.iconOpacity === '0.75'
+          && checks.identifiers === '1x2 x0x7_ 0xabc123';
+        document.querySelector('#result').textContent = JSON.stringify({ passed, checks });
+      });
+    </script>
+  </body>
+</html>
