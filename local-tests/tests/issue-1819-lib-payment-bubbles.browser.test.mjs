@@ -329,6 +329,25 @@ try {
 
     const openMenu = async target => {
       await page.evaluate(() => __fixture.clearComposer());
+      // Composer focus schedules a 500ms scroll. Let it and layout settle before
+      // opening another receipt's menu, which correctly closes on any scrolling.
+      await page.evaluate(async () => {
+        const started = performance.now();
+        let stableSince = started;
+        let previous;
+        while (performance.now() - started < 3000) {
+          await new Promise(resolve => requestAnimationFrame(resolve));
+          const container = __fixture.chatModal.messagesContainer;
+          const input = __fixture.chatModal.messageInput.getBoundingClientRect();
+          const current = [container.scrollTop, container.clientHeight, input.y, input.height].join(',');
+          if (current !== previous) {
+            previous = current;
+            stableSince = performance.now();
+          }
+          if (performance.now() - stableSince >= 600) return;
+        }
+        throw Error('Composer and message scrolling did not settle before opening the receipt menu');
+      });
       await target.locator('.payment-header').scrollIntoViewIfNeeded();
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       await target.locator('.payment-header').click();
