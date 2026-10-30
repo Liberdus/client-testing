@@ -72,7 +72,7 @@ function setup(options = {}) {
     historyModal: inactive, sendAssetFormModal: inactive, validatorModal: inactive,
     chatsScreen: { isActive: () => true, updateChatList: () => events.refresh.push('list'), updateChatData: async () => 0 },
     contactsScreen: { updateContactsList: async () => {} },
-    walletScreen: { updateWalletBalances: async () => {}, updateWalletView: async () => {} },
+    walletScreen: { reset: noop, updateWalletBalances: async () => {}, updateWalletView: async () => {} },
     reactNativeApp: { isReactNativeWebView: false, handleNativeAppSubscribe: noop, handleNativeAppUnsubscribe: noop, sendNavigationBarVisibility: noop },
     useLongPolling: false, longPoll: noop, stopLongPoll: noop,
     getNetworkParams: async () => {}, updateUIForConnectivity: noop,
