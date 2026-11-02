@@ -27,6 +27,10 @@ The browser test starts its own loopback server and intercepts service requests
 with synthetic replies. Screenshots/reports are written outside this repository.
 No live-account or transaction flow runs.
 
+Price captions stay on one line in modal totals and at Wallet widths of
+360px and above; 320px Wallet rows may wrap rather than overlap asset labels
+or overflow. Browser coverage includes 320, 360, 420, and 1100px widths.
+
 These tests require the updated client fix for Liberdus/web-client-v2#1732 in
 PR #1864. Keep this topic branch unmerged until the behavior is on client main,
 then rerun focused tests against that exact main revision and record its SHA

@@ -208,6 +208,13 @@ class PriceAvailabilityChecks {
       const amountBox = await value.boundingBox(), captionBox = await status.boundingBox();
       // Hidden screens have no bounds yet; their actual display is checked after navigation.
       if (amountBox && captionBox) assert.ok(captionBox.y >= amountBox.y + amountBox.height - 1, 'Caption follows its USD amount');
+      if (captionBox && (this.fixture.viewport.width >= 360 || ['#multichainPriceStatus', '#assetsPriceStatus'].includes(statusSelector))) {
+        const lines = await status.evaluate(element => {
+          const range = document.createRange(); range.selectNodeContents(element);
+          return new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size;
+        });
+        assert.equal(lines, 1, `${statusSelector}: price caption stays on one line when space permits`);
+      }
     }
   }
 
@@ -307,12 +314,12 @@ class PriceAvailabilityChecks {
   }
 
   static async runAll() {
-    for (const viewport of [{ width: 320, height: 900 }, { width: 420, height: 940 }, { width: 1100, height: 1000 }]) {
+    for (const viewport of [{ width: 320, height: 900 }, { width: 360, height: 900 }, { width: 420, height: 940 }, { width: 1100, height: 1000 }]) {
       const fixture = new PriceBrowserFixture({ root: process.env.WEB_CLIENT_ROOT, viewport,
         output: process.env.PRICE_CAPTURE_DIR || '/tmp/issue-1732-price-captures' });
       try { await fixture.start(); await new PriceAvailabilityChecks(fixture).run(); }
       finally { await fixture.close(); }
-      console.log(`PASS ${viewport.width}: actual Wallet/Multichain/EVM none/partial/all/zero/invalid/error/recovery, unchanged quantities and row bounds; zero external/signing/broadcast`);
+      console.log(`PASS ${viewport.width}: actual Wallet/Multichain/EVM none/partial/all/zero/invalid/error/recovery, unchanged quantities, caption line count and row bounds; zero external/signing/broadcast`);
     }
   }
 }
