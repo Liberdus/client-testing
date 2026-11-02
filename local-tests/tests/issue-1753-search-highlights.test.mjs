@@ -211,6 +211,14 @@ test('regex metacharacters in the query are literal and every occurrence is high
   assert.deepEqual(previewOf((await renderedItems(fixture, '[y] 1+1'))[0].item).marks, ['[y] 1+1']);
 });
 
+test('self-overlapping queries highlight leftmost, non-overlapping occurrences', async () => {
+  const fixture = createFixture([{ message: 'ababa and aaaa' }]);
+  const preview = previewOf((await renderedItems(fixture, 'aba'))[0].item);
+  assert.deepEqual(preview.nodes, ['> ', '<mark>aba', 'ba and aaaa']);
+  const pairs = previewOf((await renderedItems(fixture, 'aa'))[0].item);
+  assert.deepEqual(pairs.nodes, ['> ababa and ', '<mark>aa', '<mark>aa']);
+});
+
 test('long messages show context around the first match with ellipses on both sides', async () => {
   const before = 'before '.repeat(30).trim(); // 209 characters
   const after = ' after'.repeat(30);
