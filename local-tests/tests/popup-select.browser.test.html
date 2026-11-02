@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="../styles.css" />
+    <style>
+      body { margin: 0; min-height: 100vh; }
+      #fixture, #secondary-fixture { box-sizing: border-box; padding: 16px; width: 340px; }
+      #fixture.force-above { bottom: 8px; position: fixed; }
+      #outside { margin: 16px; }
+    </style>
+  </head>
+  <body>
+    <div id="fixture">
+      <label for="subject">Parameter</label>
+      <select id="subject" class="form-control" aria-label="Select parameter" required></select>
+      <select id="other"><option value="other">Other select</option></select>
+    </div>
+    <div id="secondary-fixture">
+      <label for="proposal-type">Proposal Type</label>
+      <select id="proposal-type" class="form-control" required>
+        <option value="governance">Governance</option>
+        <option value="economic">Economic</option>
+        <option value="protocol">Protocol</option>
+      </select>
+      <label for="proposal-emergency">Emergency</label>
+      <select id="proposal-emergency" class="form-control" required>
+        <option value="false">No</option>
+        <option value="true">Yes</option>
+      </select>
+    </div>
+    <button id="outside" type="button">Outside</button>
+    <div id="popupSelectListbox" class="popup-select__menu" tabindex="-1" role="listbox" hidden></div>
+    <div id="popupSelectScrollIndicator" class="popup-select__scroll-indicator" aria-hidden="true" hidden>
+      <span class="popup-select__scroll-thumb"></span>
+    </div>
+    <pre id="result">RUNNING</pre>
+
+    <script type="module">
+      const appSource = await fetch('../app.js').then((response) => response.text());
+      const popupSelectStart = appSource.lastIndexOf('\nclass PopupSelect');
+      const popupSelectEnd = appSource.indexOf('\nconst FULL_IMAGE_CACHE_MAX_SIZE', popupSelectStart);
+      const popupSelectSource = appSource.slice(popupSelectStart, popupSelectEnd);
+      const popupSelectModuleUrl = URL.createObjectURL(new Blob([
+        `${popupSelectSource}\nexport { PopupSelect };`,
+      ], { type: 'text/javascript' }));
+      const { PopupSelect } = await import(popupSelectModuleUrl);
+      URL.revokeObjectURL(popupSelectModuleUrl);
+
+      const result = document.getElementById('result');
+      const select = document.getElementById('subject');
+      const otherSelect = document.getElementById('other');
+      const proposalType = document.getElementById('proposal-type');
+      const proposalEmergency = document.getElementById('proposal-emergency');
+      const fixture = document.getElementById('fixture');
+      const outside = document.getElementById('outside');
+      const labels = [
+        'Claim Duration',
+        'Grace Duration',
+        'Minimum Vote Spend',
+        'Percent Burned',
+        'Proposal Fee',
+        'Review Duration',
+        'Vote Exponent',
+        'Vote Threshold',
+        'Voting Duration',
+        'Certificate Cycle Duration',
+        'Enable Node Slashing',
+        'Maintenance Interval',
+        'Message Max Length',
+        'Message Retention Days',
+        'Node Reward Interval',
+        'Restake Cooldown',
+        'Enable Left Network Early Slashing',
+        'Enable Node Refuted Slashing',
+        'Enable Sync Timeout Slashing',
+      ];
+
+      function assert(condition, message) {
+        if (!condition) throw new Error(message);
+      }
+
+      function key(target, value) {
+        target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: value }));
+      }
+
+      try {
+        labels.forEach((label, index) => select.add(new Option(label, `value-${index}`)));
+        select.selectedIndex = 2;
+        PopupSelect.load();
+        const trigger = PopupSelect.getTrigger(select);
+        const typeTrigger = PopupSelect.getTrigger(proposalType);
+        const emergencyTrigger = PopupSelect.getTrigger(proposalEmergency);
+
+        assert(select.getAttribute('aria-hidden') === 'true', 'native select should be hidden from accessibility');
+        assert(select.tabIndex === -1, 'native select should be removed from keyboard navigation');
+        assert(document.querySelector('label').htmlFor === trigger.id, 'label should target visible trigger');
+        assert(PopupSelect.getTrigger(otherSelect), 'other static selects should also be enhanced');
+        assert(otherSelect.value === 'other', 'enhancement should preserve the native selection');
+        assert(trigger.getAttribute('aria-haspopup') === 'listbox', 'trigger should expose listbox popup');
+        assert(trigger.getAttribute('aria-expanded') === 'false', 'trigger should start collapsed');
+        assert(trigger.textContent.includes('Minimum Vote Spend'), 'trigger should show selected label');
+        assert(typeTrigger.getAttribute('aria-controls') === trigger.getAttribute('aria-controls'), 'all triggers should use one shared listbox');
+
+        trigger.click();
+        let menu = document.querySelector('.popup-select__menu');
+        const sharedMenu = menu;
+        assert(menu?.parentElement === document.body && !menu.hidden, 'menu should open at body level');
+        assert(menu.getAttribute('role') === 'listbox', 'menu should use listbox semantics');
+        assert(menu.children.length === labels.length, 'menu should render every option');
+        assert(menu.querySelectorAll('[role="option"][aria-selected="true"]').length === 1, 'one option should be selected');
+        const selectedCheck = getComputedStyle(menu.querySelector('[aria-selected="true"]'), '::before');
+        assert(selectedCheck.backgroundColor !== 'rgba(0, 0, 0, 0)', 'selected option should show a checkmark color');
+        assert(selectedCheck.maskImage !== 'none' || selectedCheck.webkitMaskImage !== 'none', 'selected option should show a checkmark mask');
+        assert(trigger.getAttribute('aria-expanded') === 'true', 'trigger should expose expanded state');
+        assert(menu.scrollHeight > menu.clientHeight, 'long menu should scroll');
+        assert(menu.clientHeight <= 460, 'menu should show no more than about ten rows');
+        let scrollIndicator = document.querySelector('.popup-select__scroll-indicator');
+        assert(scrollIndicator && !scrollIndicator.hidden, 'scrollable menu should show its scroll indicator');
+        const scrollThumb = scrollIndicator.querySelector('.popup-select__scroll-thumb');
+        const initialThumbTop = parseFloat(scrollThumb.style.top);
+        const manualScrollTop = Math.min(60, menu.scrollHeight - menu.clientHeight);
+        menu.scrollTop = manualScrollTop;
+        menu.dispatchEvent(new Event('scroll'));
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        assert(menu.scrollTop === manualScrollTop, 'manual menu scrolling should preserve its position');
+        assert(parseFloat(scrollThumb.style.top) > initialThumbTop, 'scroll indicator should follow menu position');
+        assert(!menu.hidden, 'scrolling the option list should keep it open');
+        const triggerRect = trigger.getBoundingClientRect();
+        const menuRect = menu.getBoundingClientRect();
+        assert(menuRect.top >= triggerRect.bottom || menuRect.bottom <= triggerRect.top, 'menu should not cover trigger');
+        assert(menuRect.left >= 0 && menuRect.right <= window.innerWidth, 'menu should remain within viewport width');
+
+        document.dispatchEvent(new Event('scroll'));
+        assert(menu.hidden, 'external scrolling should dismiss menu');
+
+        trigger.click();
+        menu = document.querySelector('.popup-select__menu');
+        scrollIndicator = document.querySelector('.popup-select__scroll-indicator');
+        assert(menu === sharedMenu, 'reopening should reuse the shared listbox');
+
+        outside.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }));
+        assert(menu.hidden, 'outside pointer should dismiss menu');
+        assert(scrollIndicator.hidden, 'outside pointer should dismiss scroll indicator');
+        assert(select.selectedIndex === 2, 'outside dismissal should preserve selection');
+
+        typeTrigger.click();
+        menu = document.querySelector('.popup-select__menu');
+        assert(menu === sharedMenu, 'proposal type should reuse the shared listbox');
+        assert(menu.getAttribute('aria-labelledby') === 'proposal-typePopupLabel', 'shared listbox should use the active trigger label');
+        assert(menu.children.length === 3, 'short proposal type menu should show all options');
+        assert(menu.scrollHeight === menu.clientHeight, 'short proposal type menu should not scroll');
+        scrollIndicator = document.querySelector('.popup-select__scroll-indicator');
+        assert(scrollIndicator.hidden, 'short proposal type menu should hide its scroll indicator');
+        menu.querySelector('[data-option-index="1"]').click();
+        assert(proposalType.value === 'economic', 'proposal type menu should update the native value');
+        proposalType.value = 'governance';
+        PopupSelect.sync(proposalType);
+        assert(typeTrigger.textContent.includes('Governance'), 'proposal type trigger should follow modal reset');
+
+        let emergencyInputs = 0;
+        let emergencyChanges = 0;
+        proposalEmergency.addEventListener('input', () => { emergencyInputs += 1; });
+        proposalEmergency.addEventListener('change', () => { emergencyChanges += 1; });
+        emergencyTrigger.click();
+        menu = document.querySelector('.popup-select__menu');
+        assert(menu.children.length === 2, 'emergency menu should show Yes and No');
+        assert(menu.scrollHeight === menu.clientHeight, 'emergency menu should not show a scrollbar');
+        scrollIndicator = document.querySelector('.popup-select__scroll-indicator');
+        assert(scrollIndicator.hidden, 'emergency menu should hide its scroll indicator');
+        menu.querySelector('[data-option-index="1"]').click();
+        assert(proposalEmergency.value === 'true', 'emergency menu should update the native value');
+        assert(emergencyInputs === 1, 'emergency menu should dispatch one input event');
+        assert(emergencyChanges === 1, 'emergency menu should dispatch one change event');
+        proposalEmergency.value = 'false';
+        PopupSelect.sync(proposalEmergency);
+        assert(emergencyTrigger.textContent.includes('No'), 'emergency trigger should follow modal reset');
+
+        trigger.click();
+        menu = document.querySelector('.popup-select__menu');
+        key(menu, 'Escape');
+        assert(document.activeElement === trigger, 'Escape should restore trigger focus');
+
+        let changes = 0;
+        select.addEventListener('change', () => { changes += 1; });
+        trigger.click();
+        menu = document.querySelector('.popup-select__menu');
+        key(menu, 'ArrowDown');
+        key(menu, 'Enter');
+        assert(select.selectedIndex === 3, 'keyboard selection should update native value');
+        assert(changes === 1, 'keyboard selection should dispatch one change event');
+        assert(trigger.textContent.includes('Percent Burned'), 'trigger should update after selection');
+
+        select.selectedIndex = labels.length - 1;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        const valueRect = trigger.querySelector('.popup-select__value').getBoundingClientRect();
+        const chevronRect = trigger.querySelector('.popup-select__chevron').getBoundingClientRect();
+        assert(valueRect.right <= chevronRect.left, 'long trigger label should not overlap chevron');
+        trigger.click();
+        menu = document.querySelector('.popup-select__menu');
+        assert(menu.scrollTop > 0, 'selected option should scroll into view when reopened');
+        assert(menu.getAttribute('aria-activedescendant').endsWith(`Option${labels.length - 1}`), 'selected option should be active');
+        const activeRect = menu.querySelector('.is-active').getBoundingClientRect();
+        const selectedMenuRect = menu.getBoundingClientRect();
+        assert(activeRect.top >= selectedMenuRect.top && activeRect.bottom <= selectedMenuRect.bottom, 'active option should be visible');
+        key(menu, 'Escape');
+
+        fixture.classList.add('force-above');
+        trigger.click();
+        menu = document.querySelector('.popup-select__menu');
+        assert(menu.dataset.placement === 'above', 'menu should open above when below space is insufficient');
+        assert(menu.getBoundingClientRect().bottom <= trigger.getBoundingClientRect().top, 'menu above should not overlap trigger');
+        key(menu, 'Escape');
+
+        PopupSelect.hide();
+        assert(sharedMenu.hidden, 'hide should close the shared listbox');
+        assert(select.classList.contains('sr-only'), 'enhanced select should remain visually hidden for its DOM lifetime');
+
+        result.dataset.result = 'PASS';
+        result.textContent = 'PASS';
+      } catch (error) {
+        result.dataset.result = 'FAIL';
+        result.textContent = `FAIL: ${error.stack || error.message}`;
+        document.title = 'FAIL';
+      }
+    </script>
+  </body>
+</html>

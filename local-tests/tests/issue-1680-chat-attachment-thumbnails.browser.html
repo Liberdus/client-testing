@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Issue 1680 attachment states</title>
+    <link rel="stylesheet" href="../styles.css">
+    <style>
+      body { display: block; padding: 24px; }
+      .case { display: flex; flex-direction: column; gap: 16px; max-width: 360px; margin-bottom: 32px; }
+      .case-title { margin: 0; }
+    </style>
+  </head>
+  <body>
+    <section class="case messages-list">
+      <h2 class="case-title">Received</h2>
+      <div class="message received has-media-attachment">
+        <div class="attachment-row attachment-row--media" data-image-attachment="true">
+          <div class="attachment-icon-container">
+            <img class="attachment-thumbnail" src="../media/liberdus_logo_512.png" alt="Preview of logo.png">
+          </div>
+        </div>
+        <div class="message-content">Loaded thumbnail preview.</div>
+        <div class="message-time">9:35 AM</div>
+      </div>
+      <div class="message received has-media-attachment">
+        <div class="attachment-row attachment-row--media" data-video-attachment="true">
+          <div class="attachment-icon-container">
+            <div class="attachment-icon" data-file-type="video"></div>
+            <div class="attachment-preview-hint">Click for options</div>
+          </div>
+        </div>
+        <div class="message-content">Waiting for a thumbnail.</div>
+        <div class="message-time">9:36 AM</div>
+      </div>
+      <div class="message received">
+        <div class="attachment-row attachment-row--file">
+          <div class="attachment-icon-container">
+            <div class="attachment-icon" data-file-type="pdf"></div>
+          </div>
+          <div class="attachment-details">
+            <span class="attachment-label">a-very-long-document-name-that-does-not-overflow.pdf</span>
+            <span class="attachment-meta">PDF · 2.4 MB</span>
+          </div>
+        </div>
+        <div class="message-time">9:37 AM</div>
+      </div>
+    </section>
+
+    <section class="case messages-list">
+      <h2 class="case-title">Sent and multiple</h2>
+      <div class="message sent has-media-attachment">
+        <div class="attachment-row attachment-row--media" data-image-attachment="true">
+          <div class="attachment-icon-container">
+            <div class="attachment-icon" data-file-type="image"></div>
+            <div class="attachment-preview-hint">Click for options</div>
+          </div>
+        </div>
+        <div class="attachment-row attachment-row--file">
+          <div class="attachment-icon-container">
+            <div class="attachment-icon" data-file-type="file"></div>
+          </div>
+          <div class="attachment-details">
+            <span class="attachment-label">notes.zip</span>
+            <span class="attachment-meta">ZIP · 18.1 KB</span>
+          </div>
+        </div>
+        <div class="message-content">Two attachments.</div>
+        <div class="message-time">9:38 AM</div>
+      </div>
+    </section>
+  </body>
+</html>

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+  </head>
+  <body>
+    <div id="fixture">
+      <label for="first">First</label>
+      <select id="first" class="form-control wallet-network-select">
+        <option value="one">One</option>
+        <option value="two">Two</option>
+      </select>
+      <label for="second">Second</label>
+      <select id="second" class="form-control picker-select">
+        <option value="a">A</option>
+      </select>
+    </div>
+    <div id="dynamic"></div>
+    <div id="popupSelectListbox" tabindex="-1" role="listbox" hidden></div>
+    <div id="popupSelectScrollIndicator" hidden><span></span></div>
+    <pre id="result">RUNNING</pre>
+
+    <script type="module">
+      const source = await fetch('../app.js').then((response) => response.text());
+      const popupStart = source.lastIndexOf('\nclass PopupSelect');
+      const popupEnd = source.indexOf('\nconst FULL_IMAGE_CACHE_MAX_SIZE', popupStart);
+      const popupSource = source.slice(popupStart, popupEnd);
+      const moduleUrl = URL.createObjectURL(new Blob([
+        `${popupSource}\nexport { PopupSelect };`,
+      ], { type: 'text/javascript' }));
+      const { PopupSelect } = await import(moduleUrl);
+      URL.revokeObjectURL(moduleUrl);
+
+      const result = document.getElementById('result');
+      const assert = (condition, message) => {
+        if (!condition) throw new Error(message);
+      };
+
+      try {
+        PopupSelect.load();
+        const staticSelects = document.querySelectorAll('#fixture select');
+        assert([...staticSelects].every((select) => PopupSelect.getTrigger(select)), 'all static selects should be enhanced');
+        assert(PopupSelect.getTrigger(staticSelects[0]).classList.contains('wallet-network-select'), 'wallet class should be preserved');
+        assert(PopupSelect.getTrigger(staticSelects[1]).classList.contains('picker-select'), 'picker class should be preserved');
+
+        const firstTrigger = PopupSelect.getTrigger(staticSelects[0]);
+        firstTrigger.click();
+        const menu = document.getElementById('popupSelectListbox');
+        assert(!menu.hidden, 'popup menu should open instead of the native OS select');
+        menu.querySelector('[data-option-index="1"]').click();
+        assert(staticSelects[0].value === 'two', 'popup selection should update the native value');
+
+        const dynamic = document.getElementById('dynamic');
+        dynamic.innerHTML = '<select id="third"><option>Three</option></select>';
+        PopupSelect.enhanceAll(dynamic);
+        PopupSelect.enhanceAll(dynamic);
+        const third = document.getElementById('third');
+        assert(PopupSelect.getTrigger(third), 'dynamic select should be enhanced');
+        assert(dynamic.querySelectorAll('.popup-select__trigger').length === 1, 'dynamic select should have one trigger');
+
+        third.add(new Option('Four', 'four'));
+        third.value = 'four';
+        PopupSelect.sync(third);
+        assert(PopupSelect.getTrigger(third).textContent.includes('Four'), 'programmatic changes should synchronize');
+
+        result.dataset.result = 'PASS';
+        result.textContent = 'PASS';
+      } catch (error) {
+        result.dataset.result = 'FAIL';
+        result.textContent = `FAIL: ${error.stack || error.message}`;
+        document.title = 'FAIL';
+      }
+    </script>
+  </body>
+</html>
