@@ -131,15 +131,13 @@ before(async () => {
     window.photo = id => ({ url: `https://storage.example/get/${id}`, type: 'image/png' });
     window.imageBlob = value => new Blob([value], { type: 'image/png' });
     window.saveEverywhere = async ({ avatars, thumbnails, images }, id) => {
-      const owners = await Promise.all([avatars.captureOwner(myAccount), thumbnails.captureOwner(myAccount), images.captureOwner(myAccount)]);
-      await avatars.save(id, imageBlob(`avatar-${id}`), owners[0]);
-      await thumbnails.save(photo(id).url, imageBlob(`thumb-${id}`), 'image/png', owners[1]);
-      await images.put(photo(id), imageBlob(`full-${id}`), undefined, owners[2]);
+      const owner = MediaCacheOwnership.getOwnerKey();
+      await avatars.save(id, imageBlob(`avatar-${id}`), owner);
+      await thumbnails.save(photo(id).url, imageBlob(`thumb-${id}`), 'image/png', owner);
+      await images.put(photo(id), imageBlob(`full-${id}`), undefined, owner);
     };
-    window.captureEverywhere = async ({ avatars, thumbnails, images }, username, netid = 'net1') => {
-      const account = { username, netid };
-      return Promise.all([avatars.captureOwner(account), thumbnails.captureOwner(account), images.captureOwner(account)]);
-    };
+    window.ownerForAccount = (username, netid = 'net1') =>
+      MediaCacheOwnership.getOwnerKey({ username, netid });
     window.removeEverywhere = ({ avatars, thumbnails }, keys) => Promise.all([
       avatars.removeOwners(keys), thumbnails.removeOwners(keys),
     ]);
@@ -190,10 +188,12 @@ test('new avatars, thumbnails and full images have an indexed account owner', as
       const index = store.index('byOwner');
       return { keyPath: store.keyPath, ownerPath: index.keyPath, multiEntry: index.multiEntry, unique: index.unique };
     });
+    const stores = [caches.avatars, caches.thumbnails].map(cache => Array.from(cache.db.objectStoreNames));
     await saveEverywhere(caches, 'new');
-    return { schemas, rows: await snapshot(caches) };
+    return { schemas, stores, rows: await snapshot(caches) };
   }));
   assert.deepEqual(result.schemas, Array(3).fill({ keyPath: 'id', ownerPath: 'ownerKeys', multiEntry: true, unique: false }));
+  assert.deepEqual(result.stores, [['avatars'], ['fullImages', 'thumbnails']]);
   assert.deepEqual(result.rows, Array(3).fill([{ id: 'new', ownerKeys: ['alice_net1'] }]));
 });
 
@@ -204,11 +204,11 @@ test('cache hits add shared owners, including avatar blob-URL hits and another n
     let downloads = 0;
     let bobUrl;
     for (const [username, netid] of [['bob', 'net1'], ['alice', 'net2']]) {
-      const owners = await captureEverywhere(caches, username, netid);
-      bobUrl = await caches.avatars.getBlobUrl('shared', owners[0]);
-      await caches.thumbnails.get(photo('shared').url, owners[1]);
+      const owner = ownerForAccount(username, netid);
+      bobUrl = await caches.avatars.getBlobUrl('shared', owner);
+      await caches.thumbnails.get(photo('shared').url, owner);
       await caches.images.getOrCache({
-        attachment: photo('shared'), owner: owners[2],
+        attachment: photo('shared'), owner,
         downloadAndDecrypt: async () => { downloads++; return imageBlob('must not download'); },
       });
     }
@@ -222,12 +222,12 @@ test('cache hits add shared owners, including avatar blob-URL hits and another n
 test('concurrent ownership registration preserves both accounts on one stored blob', async () => {
   const result = await page.evaluate(() => withCaches(async caches => {
     await saveEverywhere(caches, 'shared');
-    const bob = await captureEverywhere(caches, 'bob');
-    const carol = await captureEverywhere(caches, 'carol');
+    const bob = ownerForAccount('bob');
+    const carol = ownerForAccount('carol');
     await Promise.all([
-      caches.avatars.get('shared', bob[0]), caches.avatars.get('shared', carol[0]),
-      caches.thumbnails.get('shared', bob[1]), caches.thumbnails.get('shared', carol[1]),
-      caches.images.get('shared', bob[2]), caches.images.get('shared', carol[2]),
+      caches.avatars.get('shared', bob), caches.avatars.get('shared', carol),
+      caches.thumbnails.get('shared', bob), caches.thumbnails.get('shared', carol),
+      caches.images.get('shared', bob), caches.images.get('shared', carol),
     ]);
     return snapshot(caches);
   }));
@@ -237,10 +237,10 @@ test('concurrent ownership registration preserves both accounts on one stored bl
 test('upgrading existing ID-keyed stores preserves untracked rows through hits and rewrites', async () => {
   const result = await page.evaluate(() => withCaches(async caches => {
     const before = await snapshot(caches);
-    const owners = await captureEverywhere(caches, 'alice');
-    await caches.avatars.getBlobUrl('legacy', owners[0]);
-    await caches.thumbnails.get('legacy', owners[1]);
-    await caches.images.get('legacy', owners[2]);
+    const owner = ownerForAccount('alice');
+    await caches.avatars.getBlobUrl('legacy', owner);
+    await caches.thumbnails.get('legacy', owner);
+    await caches.images.get('legacy', owner);
     await saveEverywhere(caches, 'legacy');
     const afterRewrite = await snapshot(caches);
     await saveEverywhere(caches, 'new');
@@ -255,14 +255,14 @@ test('account removal detaches shared ownership, deletes the last owner, and inv
   const result = await page.evaluate(() => withCaches(async caches => {
     await saveEverywhere(caches, 'alice-only');
     await saveEverywhere(caches, 'shared');
-    const bob = await captureEverywhere(caches, 'bob');
+    const bob = ownerForAccount('bob');
     const url = await caches.avatars.getBlobUrl('alice-only');
-    await caches.avatars.get('shared', bob[0]);
-    await caches.thumbnails.get('shared', bob[1]);
-    await caches.images.get('shared', bob[2]);
+    await caches.avatars.get('shared', bob);
+    await caches.thumbnails.get('shared', bob);
+    await caches.images.get('shared', bob);
     await removeEverywhere(caches, ['alice_net1']);
     const afterAlice = await snapshot(caches);
-    const deletedUrl = await caches.avatars.getBlobUrl('alice-only', bob[0]);
+    const deletedUrl = await caches.avatars.getBlobUrl('alice-only', bob);
     const response = await fetch(url).then(() => 'still usable', () => 'revoked');
     await removeEverywhere(caches, ['bob_net1']);
     return { afterAlice, afterBob: await snapshot(caches), deletedUrl, response };
@@ -277,55 +277,53 @@ test('selected-account removal keeps owners outside the selected set and other n
   const result = await page.evaluate(() => withCaches(async caches => {
     await saveEverywhere(caches, 'selected');
     await saveEverywhere(caches, 'keep');
-    const bob = await captureEverywhere(caches, 'bob');
-    await caches.avatars.get('selected', bob[0]);
-    await caches.thumbnails.get('selected', bob[1]);
-    await caches.images.get('selected', bob[2]);
-    const otherNetwork = await captureEverywhere(caches, 'alice', 'net2');
-    await caches.avatars.get('keep', otherNetwork[0]);
-    await caches.thumbnails.get('keep', otherNetwork[1]);
-    await caches.images.get('keep', otherNetwork[2]);
+    const bob = ownerForAccount('bob');
+    await caches.avatars.get('selected', bob);
+    await caches.thumbnails.get('selected', bob);
+    await caches.images.get('selected', bob);
+    const otherNetwork = ownerForAccount('alice', 'net2');
+    await caches.avatars.get('keep', otherNetwork);
+    await caches.thumbnails.get('keep', otherNetwork);
+    await caches.images.get('keep', otherNetwork);
     await removeEverywhere(caches, ['alice_net1', 'bob_net1']);
     return snapshot(caches);
   }));
   assert.deepEqual(result, Array(3).fill([{ id: 'keep', ownerKeys: ['alice_net2'] }]));
 });
 
-test('late downloads cannot resurrect a removed owner or attach to a recreated account', async () => {
+test('best-effort removal allows late writes under their original account key', async () => {
   const result = await page.evaluate(() => withCaches(async caches => {
-    const old = await captureEverywhere(caches, 'alice');
-    let releaseDownload;
+    const owner = MediaCacheOwnership.getOwnerKey();
+    await saveEverywhere(caches, 'removed');
+    let releaseDownload, startDownload;
     const downloaded = new Promise(resolve => { releaseDownload = resolve; });
+    const started = new Promise(resolve => { startDownload = resolve; });
     const pendingImage = caches.images.getOrCache({
-      attachment: photo('late'), owner: old[2],
-      downloadAndDecrypt: () => downloaded,
+      attachment: photo('late'),
+      downloadAndDecrypt: () => { startDownload(); return downloaded; },
     });
+    await started;
     await removeEverywhere(caches, ['alice_net1']);
-    await caches.avatars.save('removed', imageBlob('avatar'), old[0]);
-    await caches.thumbnails.save('removed', imageBlob('thumb'), 'image/png', old[1]);
-    await caches.images.put(photo('removed'), imageBlob('full'), undefined, old[2]);
     const removed = await snapshot(caches);
-    await Promise.all([caches.avatars.activateOwners(['alice_net1']), caches.thumbnails.activateOwners(['alice_net1'])]);
+    useAccount('bob');
     releaseDownload(imageBlob('late-full'));
-    await pendingImage;
-    await caches.avatars.save('late', imageBlob('late-avatar'), old[0]);
-    await caches.thumbnails.save('late', imageBlob('late-thumb'), 'image/png', old[1]);
-    const stale = await snapshot(caches);
-    await saveEverywhere(caches, 'fresh');
-    return { removed, stale, fresh: await snapshot(caches) };
+    const image = await pendingImage;
+    await caches.avatars.save('late', imageBlob('late-avatar'), owner);
+    await caches.thumbnails.save('late', imageBlob('late-thumb'), 'image/png', owner);
+    return { removed, late: await snapshot(caches), image: await image.text() };
   }));
   assert.deepEqual(result.removed, [[], [], []]);
-  assert.deepEqual(result.stale, [[], [], []]);
-  assert.deepEqual(result.fresh, Array(3).fill([{ id: 'fresh', ownerKeys: ['alice_net1'] }]));
+  assert.deepEqual(result.late, Array(3).fill([{ id: 'late', ownerKeys: ['alice_net1'] }]));
+  assert.equal(result.image, 'late-full');
 });
 
 test('an owner captured before switching accounts is retained for delayed writes', async () => {
   const result = await page.evaluate(() => withCaches(async caches => {
-    const alice = await captureEverywhere(caches, 'alice');
+    const alice = ownerForAccount('alice');
     useAccount('bob');
-    await caches.avatars.save('delayed', imageBlob('avatar'), alice[0]);
-    await caches.thumbnails.save('delayed', imageBlob('thumb'), 'image/png', alice[1]);
-    await caches.images.put(photo('delayed'), imageBlob('full'), undefined, alice[2]);
+    await caches.avatars.save('delayed', imageBlob('avatar'), alice);
+    await caches.thumbnails.save('delayed', imageBlob('thumb'), 'image/png', alice);
+    await caches.images.put(photo('delayed'), imageBlob('full'), undefined, alice);
     return snapshot(caches);
   }));
   assert.deepEqual(result, Array(3).fill([{ id: 'delayed', ownerKeys: ['alice_net1'] }]));
@@ -361,22 +359,48 @@ test('aborted removal rejects and leaves persisted media and ownership intact', 
 test('backup imports retain accepted ownership, register skipped-byte hits, and leave legacy records untracked', async () => {
   const result = await page.evaluate(() => withCaches(async caches => {
     const { avatars, thumbnails } = caches;
-    const info = owners => ({ data: btoa('backup-image'), type: 'image/png', originalType: 'image/png', ...(owners ? { ownerKeys: owners } : {}) });
+    const info = (owners, contents = 'backup-image') => ({ data: btoa(contents), type: 'image/png', originalType: 'image/png', ...(owners ? { ownerKeys: owners } : {}) });
     const backup = {
       restored: info(['alice_net1', 'foreign_net1']),
+      foreign: info(['foreign_net1']),
       legacy: info(),
     };
-    await avatars.importAll(backup, false, ['alice_net1']);
-    await thumbnails.importAll(backup, false, ['alice_net1']);
+    const imported = [
+      await avatars.importAll(backup, false, ['alice_net1']),
+      await thumbnails.importAll(backup, false, ['alice_net1']),
+    ];
     const initial = [await readRows(avatars), await readRows(thumbnails)]
       .map(rows => rows.map(({ id, ownerKeys }) => ({ id, ownerKeys })));
-    await avatars.importAll({ restored: info(['bob_net1']) }, false, ['bob_net1']);
-    await thumbnails.importAll({ restored: info(['bob_net1']) }, false, ['bob_net1']);
+    const replacement = { restored: info(['bob_net1'], 'replacement') };
+    const skipped = [
+      await avatars.importAll(replacement, false, ['bob_net1']),
+      await thumbnails.importAll(replacement, false, ['bob_net1']),
+    ];
+    const ownersAfterSkipped = [await readRows(avatars), await readRows(thumbnails)]
+      .map(rows => rows.find(row => row.id === 'restored').ownerKeys?.sort());
+    const beforeOverwrite = [
+      await (await avatars.get('restored', null)).text(),
+      await (await thumbnails.get('restored', null)).text(),
+    ];
+    const overwritten = [
+      await avatars.importAll(replacement, true, ['bob_net1']),
+      await thumbnails.importAll(replacement, true, ['bob_net1']),
+    ];
+    const afterOverwrite = [
+      await (await avatars.get('restored', null)).text(),
+      await (await thumbnails.get('restored', null)).text(),
+    ];
     const exported = [await avatars.exportAll(), await thumbnails.exportAll()]
       .map(data => ({ restored: data.restored.ownerKeys?.sort(), legacyTracked: Object.hasOwn(data.legacy, 'ownerKeys') }));
     await removeEverywhere(caches, ['alice_net1']);
-    return { initial, exported, remaining: (await snapshot(caches)).slice(0, 2) };
+    return { imported, skipped, ownersAfterSkipped, overwritten, beforeOverwrite, afterOverwrite, initial, exported, remaining: (await snapshot(caches)).slice(0, 2) };
   }));
+  assert.deepEqual(result.imported, [2, 2]);
+  assert.deepEqual(result.skipped, [0, 0]);
+  assert.deepEqual(result.ownersAfterSkipped, Array(2).fill(['alice_net1', 'bob_net1']));
+  assert.deepEqual(result.overwritten, [1, 1]);
+  assert.deepEqual(result.beforeOverwrite, ['backup-image', 'backup-image']);
+  assert.deepEqual(result.afterOverwrite, ['replacement', 'replacement']);
   assert.deepEqual(result.initial, Array(2).fill([
     { id: 'legacy', ownerKeys: undefined }, { id: 'restored', ownerKeys: ['alice_net1'] },
   ]));
@@ -448,10 +472,10 @@ test('selected-account modal removes selected account data and keeps the survivi
     await saveEverywhere(caches, 'selected-only');
     await saveEverywhere(caches, 'shared');
     for (const username of ['bob', 'carol']) {
-      const owner = await captureEverywhere(caches, username);
-      await caches.avatars.get('shared', owner[0]);
-      await caches.thumbnails.get('shared', owner[1]);
-      await caches.images.get('shared', owner[2]);
+      const owner = ownerForAccount(username);
+      await caches.avatars.get('shared', owner);
+      await caches.thumbnails.get('shared', owner);
+      await caches.images.get('shared', owner);
     }
     installRemovalModals(caches);
     const modal = new RemoveAccountsModal();
@@ -473,15 +497,15 @@ test('selected-account modal removes selected account data and keeps the survivi
 
 test('attachment identity remains independent of storage host through reads, replacement and deletion', async () => {
   const result = await page.evaluate(() => withCaches(async caches => {
-    const owners = await captureEverywhere(caches, 'alice');
+    const owner = ownerForAccount('alice');
     const oldUrl = 'https://old.example/get/shared';
     const alias = 'http://new.example:8080/get/shared/?token=changed#preview';
-    await caches.thumbnails.save(oldUrl, imageBlob('old-thumb'), 'image/png', owners[1]);
-    await caches.images.put({ url: oldUrl, type: 'image/png' }, imageBlob('old-full'), undefined, owners[2]);
-    const initial = [await (await caches.thumbnails.get(alias, owners[1])).text(), await (await caches.images.get(alias, owners[2])).text()];
-    await caches.thumbnails.save(alias, imageBlob('new-thumb'), 'image/png', owners[1]);
-    await caches.images.put({ url: alias, type: 'image/png' }, imageBlob('new-full'), undefined, owners[2]);
-    const replaced = [await (await caches.thumbnails.get(oldUrl, owners[1])).text(), await (await caches.images.get(oldUrl, owners[2])).text()];
+    await caches.thumbnails.save(oldUrl, imageBlob('old-thumb'), 'image/png', owner);
+    await caches.images.put({ url: oldUrl, type: 'image/png' }, imageBlob('old-full'), undefined, owner);
+    const initial = [await (await caches.thumbnails.get(alias, owner)).text(), await (await caches.images.get(alias, owner)).text()];
+    await caches.thumbnails.save(alias, imageBlob('new-thumb'), 'image/png', owner);
+    await caches.images.put({ url: alias, type: 'image/png' }, imageBlob('new-full'), undefined, owner);
+    const replaced = [await (await caches.thumbnails.get(oldUrl, owner)).text(), await (await caches.images.get(oldUrl, owner)).text()];
     const rows = (await snapshot(caches)).slice(1);
     await caches.thumbnails.delete('https://third.example/get/shared#delete');
     await caches.images.delete('https://third.example/get/shared#delete');
@@ -497,7 +521,7 @@ test('full-image replacement and FIFO eviction still respect the byte budget', a
   const result = await page.evaluate(() => withCaches(async caches => {
     const { images } = caches;
     images.maxCacheSize = 11;
-    const owner = await images.captureOwner({ username: 'alice', netid: 'net1' });
+    const owner = MediaCacheOwnership.getOwnerKey({ username: 'alice', netid: 'net1' });
     const realNow = Date.now;
     let time = 1;
     Date.now = () => time++;
@@ -519,34 +543,25 @@ test('full-image replacement and FIFO eviction still respect the byte budget', a
   assert.deepEqual(result, { afterReplace: 11, oversized: false, size: 11, keys: ['a', 'c'], first: 'FIRST', second: null, third: 'third!' });
 });
 
-test('owner capture and storage failures do not prevent downloading and displaying an image', async () => {
+test('storage failures do not prevent downloading and displaying an image', async () => {
   const result = await page.evaluate(() => withCaches(async caches => {
     let downloads = 0;
-    const captureFailure = await caches.images.getOrCache({
-      attachment: photo('capture-failure'), owner: Promise.reject(new Error('Synthetic owner capture failure')),
-      downloadAndDecrypt: async () => { downloads++; return imageBlob('capture-fallback'); },
-    });
-    const init = caches.thumbnails.init.bind(caches.thumbnails);
+    const init = caches.thumbnails.init;
     caches.thumbnails.init = async () => { throw new Error('Synthetic storage failure'); };
-    let storageFailure;
     try {
-      storageFailure = await caches.images.getOrCache({
+      const image = await caches.images.getOrCache({
         attachment: photo('storage-failure'),
         downloadAndDecrypt: async () => { downloads++; return imageBlob('storage-fallback'); },
       });
+      return { downloads, contents: await image.text() };
     } finally { caches.thumbnails.init = init; }
-    return { downloads, capture: await captureFailure.text(), storage: await storageFailure.text() };
   }));
-  assert.deepEqual(result, { downloads: 2, capture: 'capture-fallback', storage: 'storage-fallback' });
+  assert.deepEqual(result, { downloads: 1, contents: 'storage-fallback' });
 });
 
-test('empty lookups, rejected writes and invalid attachments do not attempt owner capture or storage', async () => {
+test('empty lookups, rejected writes and invalid attachments do not access storage', async () => {
   const result = await page.evaluate(() => withCaches(async caches => {
-    let captures = 0;
     let opens = 0;
-    for (const cache of [caches.avatars, caches.thumbnails, caches.images]) {
-      cache.captureOwner = () => { captures++; throw new Error('Unexpected owner capture'); };
-    }
     for (const cache of [caches.avatars, caches.thumbnails]) {
       cache.init = async () => { opens++; throw new Error('Unexpected storage open'); };
     }
@@ -570,9 +585,8 @@ test('empty lookups, rejected writes and invalid attachments do not attempt owne
       settle(() => caches.thumbnails.get(invalidUrl)),
       settle(() => caches.thumbnails.save(invalidUrl, imageBlob('x'), 'image/png')),
     ]);
-    return { captures, opens, outcomes };
+    return { opens, outcomes };
   }));
-  assert.equal(result.captures, 0, 'validation and early returns must precede owner capture');
   assert.equal(result.opens, 0);
   assert.deepEqual(result.outcomes, [
     { value: null }, { value: null }, { error: 'avatar id required' },
@@ -599,85 +613,82 @@ test('synchronously thrown ownership actions abort queued writes before they rea
   assert.deepEqual(result.rows, [], 'rejecting the action must also roll back its pending writes');
 });
 
-test('a removed owner cannot evict a surviving account thumbnail before its late save is rejected', async () => {
+test('a late thumbnail write after removal still follows the normal cache budget', async () => {
   const result = await page.evaluate(() => withCaches(async caches => {
     const { thumbnails } = caches;
     thumbnails.maxCacheSize = 10;
-    const bob = await thumbnails.captureOwner({ username: 'bob', netid: 'net1' });
-    const alice = await thumbnails.captureOwner({ username: 'alice', netid: 'net1' });
+    const bob = MediaCacheOwnership.getOwnerKey({ username: 'bob', netid: 'net1' });
+    const alice = MediaCacheOwnership.getOwnerKey({ username: 'alice', netid: 'net1' });
     await thumbnails.save('bob-only', imageBlob('0123456789'), 'image/png', bob);
     await thumbnails.removeOwners(['alice_net1']);
     const saved = await thumbnails.save('late-alice', imageBlob('x'), 'image/png', alice);
     const rows = (await readRows(thumbnails)).map(({ id, ownerKeys }) => ({ id, ownerKeys }));
     return { saved, rows, bytes: await thumbnails.getCacheSize() };
   }));
-  assert.deepEqual(result, { saved: false, rows: [{ id: 'bob-only', ownerKeys: ['bob_net1'] }], bytes: 10 });
+  assert.deepEqual(result, { saved: true, rows: [{ id: 'late-alice', ownerKeys: ['alice_net1'] }], bytes: 1 });
 });
 
-test('owner capture failures resolve an unavailable context without an unhandled rejection', async () => {
-  const result = await page.evaluate(() => withCaches(async caches => {
-    const unhandled = [];
-    const onUnhandled = event => { unhandled.push(event.reason?.message || String(event.reason)); event.preventDefault(); };
-    window.addEventListener('unhandledrejection', onUnhandled);
-    const originals = [caches.avatars, caches.thumbnails].map(cache => [cache, cache.init]);
-    for (const [cache] of originals) cache.init = async () => { throw new Error('Synthetic capture storage failure'); };
+test('owner keys are synchronous account snapshots without IndexedDB access', async () => {
+  const result = await page.evaluate(() => {
+    const open = indexedDB.open;
+    const transaction = IDBDatabase.prototype.transaction;
+    let storageCalls = 0;
+    const fail = () => { storageCalls++; throw new Error('Unexpected ownership storage access'); };
+    indexedDB.open = fail;
+    IDBDatabase.prototype.transaction = fail;
     try {
-      const pending = [caches.avatars, caches.thumbnails, caches.images].map(cache =>
-        cache.captureOwner({ username: 'alice', netid: 'net1' }));
-      await new Promise(resolve => setTimeout(resolve, 0));
-      const settled = await Promise.allSettled(pending);
-      return {
-        unavailableIsDistinct: MediaCacheOwnership.unavailableOwner !== null && MediaCacheOwnership.unavailableOwner !== undefined,
-        statuses: settled.map(item => item.status),
-        contextsMatch: settled.every(item => item.status === 'fulfilled' && item.value === MediaCacheOwnership.unavailableOwner),
-        unhandled,
-      };
+      useAccount('alice');
+      const owner = MediaCacheOwnership.getOwnerKey();
+      useAccount('bob', 'net2');
+      const keys = [
+        owner, MediaCacheOwnership.getOwnerKey(),
+        MediaCacheOwnership.getOwnerKey({ username: 'carol', netid: 'net3' }),
+        MediaCacheOwnership.getOwnerKey(null),
+        MediaCacheOwnership.getOwnerKey({ username: 'missing-network' }),
+        MediaCacheOwnership.getOwnerKey({ netid: 'net1' }),
+      ];
+      useAccount(null);
+      keys.push(MediaCacheOwnership.getOwnerKey());
+      return { keys, storageCalls };
     } finally {
-      for (const [cache, init] of originals) cache.init = init;
-      window.removeEventListener('unhandledrejection', onUnhandled);
+      indexedDB.open = open;
+      IDBDatabase.prototype.transaction = transaction;
     }
-  }));
-  assert.deepEqual(result, { unavailableIsDistinct: true, statuses: ['fulfilled', 'fulfilled', 'fulfilled'], contextsMatch: true, unhandled: [] });
+  });
+  assert.deepEqual(result, { keys: ['alice_net1', 'bob_net2', 'carol_net3', null, null, null, null], storageCalls: 0 });
 });
 
-test('an unavailable context stays unavailable after account switches without reads, writes or eviction', async () => {
+test('default owners survive account switches during asynchronous cache reads and writes', async () => {
   const result = await page.evaluate(() => withCaches(async caches => {
     const { avatars, thumbnails, images } = caches;
+    await saveEverywhere(caches, 'shared');
     useAccount('bob');
-    const bob = await captureEverywhere(caches, 'bob');
-    await avatars.save('bob-only', imageBlob('0123456789'), bob[0]);
-    await thumbnails.save('bob-only', imageBlob('0123456789'), 'image/png', bob[1]);
-    await images.put(photo('bob-only'), imageBlob('0123456789'), undefined, bob[2]);
-    thumbnails.maxCacheSize = images.maxCacheSize = 10;
-    useAccount('alice');
+    let releaseStorage;
+    const storageReady = new Promise(resolve => { releaseStorage = resolve; });
     const originals = [avatars, thumbnails].map(cache => [cache, cache.init]);
-    for (const [cache] of originals) cache.init = async () => { throw new Error('Synthetic capture storage failure'); };
-    let unavailable;
-    try { unavailable = await captureEverywhere(caches, 'alice'); }
-    finally { for (const [cache, init] of originals) cache.init = init; }
-    useAccount('bob');
-    const reads = await Promise.all([
-      avatars.get('bob-only', unavailable[0]), avatars.getBlobUrl('bob-only', unavailable[0]),
-      thumbnails.get('bob-only', unavailable[1]), images.get('bob-only', unavailable[2]),
-    ]);
-    const saves = await Promise.all([
-      avatars.save('late', imageBlob('x'), unavailable[0]),
-      thumbnails.save('late', imageBlob('x'), 'image/png', unavailable[1]),
-      images.put(photo('late'), imageBlob('x'), undefined, unavailable[2]),
-    ]);
-    let downloads = 0;
-    const downloaded = await images.getOrCache({
-      attachment: photo('downloaded'), owner: unavailable[2],
-      downloadAndDecrypt: async () => { downloads++; return imageBlob('fallback'); },
-    });
-    return { reads, saves, downloads, downloaded: await downloaded.text(), rows: await snapshot(caches), bytes: await thumbnails.getCacheSize() };
+    for (const [cache, init] of originals) {
+      cache.init = async () => { await storageReady; return init.call(cache); };
+    }
+    try {
+      const pending = Promise.all([
+        avatars.get('shared'), thumbnails.get('shared'), images.get('shared'),
+        avatars.save('delayed', imageBlob('avatar')),
+        thumbnails.save('delayed', imageBlob('thumbnail'), 'image/png'),
+        images.put(photo('delayed'), imageBlob('full')),
+      ]);
+      useAccount('carol');
+      releaseStorage();
+      const results = await pending;
+      return { hits: results.slice(0, 3).every(blob => blob instanceof Blob), rows: await snapshot(caches) };
+    } finally {
+      for (const [cache, init] of originals) cache.init = init;
+    }
   }));
-  assert.deepEqual(result.reads, [null, null, null, null]);
-  assert.deepEqual(result.saves, [false, false, false]);
-  assert.equal(result.downloads, 1);
-  assert.equal(result.downloaded, 'fallback');
-  assert.deepEqual(result.rows, Array(3).fill([{ id: 'bob-only', ownerKeys: ['bob_net1'] }]));
-  assert.equal(result.bytes, 10);
+  assert.equal(result.hits, true);
+  assert.deepEqual(result.rows, Array(3).fill([
+    { id: 'delayed', ownerKeys: ['bob_net1'] },
+    { id: 'shared', ownerKeys: ['alice_net1', 'bob_net1'] },
+  ]));
 });
 
 test('explicit null ownership still permits untracked records while an account is active', async () => {
@@ -705,9 +716,7 @@ test('opening the avatar editor passes one data and owner context across awaited
   const result = await page.evaluate(async () => {
     const alice = { account: { username: 'alice', netid: 'net1' }, contacts: { contact: { mineAvatarId: 'alice-avatar' } } };
     const bob = { account: { username: 'bob', netid: 'net1' }, contacts: { contact: { mineAvatarId: 'bob-avatar' } } };
-    const owner = Promise.resolve(Object.freeze({ key: 'alice_net1', generation: 1 }));
-    const captured = [];
-    contactAvatarCache = { captureOwner: account => { captured.push(account); return owner; } };
+    const owner = 'alice_net1';
     useData(alice);
     const modal = new AvatarEditModal();
     modal.modal = document.createElement('div');
@@ -716,7 +725,6 @@ test('opening the avatar editor passes one data and owner context across awaited
     modal.populateOptions = async context => { contexts.push(context); };
     await modal.open('CONTACT');
     return {
-      captures: captured.map(account => `${account.username}_${account.netid}`),
       sameContext: contexts[0] === contexts[1],
       sameData: contexts.every(context => context.data === alice),
       sameOwner: contexts.every(context => context.owner === owner),
@@ -725,7 +733,7 @@ test('opening the avatar editor passes one data and owner context across awaited
       opened: modal.modal.classList.contains('active'),
     };
   });
-  assert.deepEqual(result, { captures: ['alice_net1'], sameContext: true, sameData: true, sameOwner: true, currentUsername: 'bob', address: 'contact', opened: true });
+  assert.deepEqual(result, { sameContext: true, sameData: true, sameOwner: true, currentUsername: 'bob', address: 'contact', opened: true });
 });
 
 test('replacing a legacy full image without cachedAt keeps it untracked through account removal', async () => {
@@ -733,7 +741,7 @@ test('replacing a legacy full image without cachedAt keeps it untracked through 
     const { thumbnails, images } = caches;
     await writeRows(thumbnails, 'fullImages', [{ id: 'legacy-no-time', blob: imageBlob('old'), size: 3 }]);
     const [legacy] = await readRows(thumbnails, 'fullImages');
-    const owner = await images.captureOwner({ username: 'alice', netid: 'net1' });
+    const owner = MediaCacheOwnership.getOwnerKey({ username: 'alice', netid: 'net1' });
     const saved = await images.put(photo('legacy-no-time'), imageBlob('replacement'), undefined, owner);
     const [replaced] = await readRows(thumbnails, 'fullImages');
     await removeEverywhere(caches, ['alice_net1']);
