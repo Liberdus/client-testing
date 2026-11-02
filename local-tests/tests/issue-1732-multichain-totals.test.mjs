@@ -18,6 +18,7 @@ class PortfolioFixture {
     this.balancesFail = false;
     this.saved = new Map();
     this.heldBefore = [];
+    this.accountAddress = 'a'.repeat(40);
   }
 
   async fetch(url, options = {}) {
@@ -41,6 +42,7 @@ class PortfolioFixture {
     this.catalogFails = false;
     this.balancesFail = false;
     this.heldBefore = [];
+    this.accountAddress = 'a'.repeat(40);
     this.saved.clear();
     this.balances = ['2500000', '1000000000'];
     this.tokens.forEach(token => { token.price = token.symbol === 'USDC' ? 1 : 100; });
@@ -66,25 +68,28 @@ globalThis.localStorage = {
 };
 const { intentsAssets, multichain } = await import(pathToFileURL(join(process.env.WEB_CLIENT_ROOT, 'near-assets.js')));
 multichain.configure({
-  getAccount: () => ({ keys: { address: 'a'.repeat(40) } }),
+  getAccount: () => ({ keys: { address: fixture.accountAddress } }),
   getSettings: () => ({ heldBefore: fixture.heldBefore, hideEmpty: false }),
   saveSettings: settings => { fixture.heldBefore = settings.heldBefore; },
 });
 intentsAssets.tokenCatalogTtlMs = 0;
 multichain.summaryValue = new ElementFixture();
+multichain.summaryStatus = new ElementFixture();
 const modal = multichain.assetsModal;
-for (const field of ['totalBalance', 'caption', 'assetsList', 'statusLine', 'sendButton', 'listHead', 'hideEmpty', 'empty', 'quick']) {
+for (const field of ['totalBalance', 'priceStatus', 'caption', 'assetsList', 'statusLine', 'sendButton', 'listHead', 'hideEmpty', 'empty', 'quick']) {
   modal[field] = new ElementFixture();
 }
 
 class TotalsAssertion {
-  static async check(text, unavailable) {
+  static async check(text, unavailable, caption = '', summaryCaption = caption) {
     modal.render();
     await multichain.updateSummary();
     for (const element of [modal.totalBalance, multichain.summaryValue]) {
       assert.equal(element.textContent, text);
       assert.equal(element.style.color || '', unavailable ? 'var(--danger-color)' : '');
     }
+    assert.equal(modal.priceStatus.textContent, caption);
+    assert.equal(multichain.summaryStatus.textContent, summaryCaption);
   }
 
   static quantities() {
@@ -102,12 +107,15 @@ test('Multichain dollar valuation availability', async t => {
     fixture.catalogFails = true;
     await intentsAssets.refresh({ force: true });
     assert.equal(intentsAssets.getStatus(), 'unpriced');
-    await TotalsAssertion.check('$0.00', true);
+    await TotalsAssertion.check('$ -', true, 'prices unavailable');
     TotalsAssertion.quantities();
+    assert.match(modal.assetsList.innerHTML, /\$ -/);
+    assert.match(modal.assetsList.innerHTML, /prices unavailable/);
     fixture.balancesFail = true;
     await intentsAssets.refresh({ force: true });
     assert.equal(intentsAssets.getStatus(), 'unavailable');
-    await TotalsAssertion.check('$0.00', true);
+    await TotalsAssertion.check('$ -', true, 'prices unavailable');
+    assert.match(modal.statusLine.textContent, /Balances are unavailable/);
     TotalsAssertion.quantities();
     fixture.catalogFails = fixture.balancesFail = false;
     await intentsAssets.refresh({ force: true });
@@ -125,17 +133,19 @@ test('Multichain dollar valuation availability', async t => {
     fixture.balancesFail = true;
     await intentsAssets.refresh({ force: true });
     assert.equal(intentsAssets.getStatus(), 'unavailable');
-    await TotalsAssertion.check('$0.00', true);
+    await TotalsAssertion.check('$ -', true, 'prices unavailable');
     TotalsAssertion.quantities();
   });
 
-  await t.test('one unpriced nonzero holding invalidates a partially priced total', async () => {
+  await t.test('one unpriced holding preserves the priced subtotal with a partial-price caption', async () => {
     fixture.reset(intentsAssets);
     fixture.tokens[1].price = null;
     await intentsAssets.refresh({ force: true });
     assert.equal(intentsAssets.getStatus(), 'connected');
-    await TotalsAssertion.check('$0.00', true);
+    await TotalsAssertion.check('$2.50', false, 'some prices unavailable');
     TotalsAssertion.quantities();
+    assert.match(modal.assetsList.innerHTML, /\$2\.50/);
+    assert.match(modal.assetsList.innerHTML, /\$ -/);
   });
 
   await t.test('a known zero stays normal even with unpriced remembered rows', async () => {
@@ -143,22 +153,27 @@ test('Multichain dollar valuation availability', async t => {
     fixture.balances = ['0', '0'];
     await intentsAssets.refresh({ force: true });
     await TotalsAssertion.check('$0.00', false);
+    assert.doesNotMatch(modal.assetsList.innerHTML, /prices unavailable|\$ -/);
     fixture.heldBefore = fixture.tokens.map(token => token.assetId);
     fixture.catalogFails = true;
     await intentsAssets.refresh({ force: true });
     assert.equal(intentsAssets.getAssets().length, 2);
     await TotalsAssertion.check('$0.00', false);
+    assert.ok((modal.assetsList.innerHTML.match(/\$0\.00/g) || []).length >= 2);
   });
 
   await t.test('an initial failed balance read has an unavailable total', async () => {
     fixture.reset(intentsAssets);
     fixture.balancesFail = true;
     await intentsAssets.refresh({ force: true });
-    await TotalsAssertion.check('$0.00', true);
+    await TotalsAssertion.check('$ -', true, '', 'balances unavailable');
+    assert.match(modal.statusLine.textContent, /Balances are unavailable/);
     multichain.reset();
     assert.equal(multichain.summaryValue.style.color, '');
+    assert.equal(multichain.summaryStatus.textContent, '');
     modal.renderLoading();
     assert.equal(modal.totalBalance.style.color, '');
+    assert.equal(modal.priceStatus.textContent, '');
   });
 
   await t.test('a failed refresh retains the last usable valuation', async () => {
@@ -177,5 +192,28 @@ test('Multichain dollar valuation availability', async t => {
     await intentsAssets.refresh({ force: true });
     await TotalsAssertion.check('$0.00', false);
     TotalsAssertion.quantities();
+  });
+
+  await t.test('an unpriced zero row does not mark a priced portfolio incomplete', async () => {
+    fixture.reset(intentsAssets);
+    fixture.tokens[1].price = null;
+    fixture.balances = ['2500000', '0'];
+    fixture.heldBefore = fixture.tokens.map(token => token.assetId);
+    await intentsAssets.refresh({ force: true });
+    await TotalsAssertion.check('$2.50', false);
+    assert.doesNotMatch(modal.assetsList.innerHTML, /prices unavailable|\$ -/);
+    assert.match(modal.assetsList.innerHTML, /\$0\.00/);
+  });
+
+  await t.test('switching accounts clears unavailable captions before showing a fresh known-zero portfolio', async () => {
+    fixture.reset(intentsAssets);
+    fixture.tokens.forEach(token => { token.price = null; });
+    await intentsAssets.refresh({ force: true });
+    await TotalsAssertion.check('$ -', true, 'prices unavailable');
+    fixture.accountAddress = 'b'.repeat(40);
+    fixture.balances = ['0', '0'];
+    await intentsAssets.refresh({ force: true });
+    await TotalsAssertion.check('$0.00', false);
+    assert.doesNotMatch(modal.assetsList.innerHTML, /prices unavailable|\$ -/);
   });
 });
