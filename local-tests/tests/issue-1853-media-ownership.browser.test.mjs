@@ -207,8 +207,9 @@ test('cache hits add shared owners, including avatar blob-URL hits and another n
       const owner = ownerForAccount(username, netid);
       bobUrl = await caches.avatars.getBlobUrl('shared', owner);
       await caches.thumbnails.get(photo('shared').url, owner);
+      useAccount(username, netid);
       await caches.images.getOrCache({
-        attachment: photo('shared'), owner,
+        attachment: photo('shared'),
         downloadAndDecrypt: async () => { downloads++; return imageBlob('must not download'); },
       });
     }
@@ -712,28 +713,63 @@ test('explicit null ownership still permits untracked records while an account i
   assert.deepEqual(result.contents, ['avatar', 'thumbnail', 'full']);
 });
 
-test('opening the avatar editor passes one data and owner context across awaited helpers', async () => {
-  const result = await page.evaluate(async () => {
-    const alice = { account: { username: 'alice', netid: 'net1' }, contacts: { contact: { mineAvatarId: 'alice-avatar' } } };
-    const bob = { account: { username: 'bob', netid: 'net1' }, contacts: { contact: { mineAvatarId: 'bob-avatar' } } };
-    const owner = 'alice_net1';
-    useData(alice);
+test('avatar editor helpers select the current account and retain ownership across their cache reads', async () => {
+  const result = await page.evaluate(() => withCaches(async ({ avatars }) => {
+    const accountData = (username, contact) => ({ account: { username, netid: 'net1' }, contacts: { contact } });
+    const alice = accountData('alice', { mineAvatarId: 'alice-preview' });
+    const bob = accountData('bob', { avatarId: 'bob-contact', mineAvatarId: 'bob-uploaded' });
+    const carol = accountData('carol', { avatarId: 'carol-contact', mineAvatarId: 'carol-uploaded' });
+    for (const id of ['alice-preview', 'bob-contact', 'bob-uploaded']) {
+      await avatars.save(id, imageBlob(id), 'seed_net1');
+    }
+    contactAvatarCache = avatars;
     const modal = new AvatarEditModal();
-    modal.modal = document.createElement('div');
-    const contexts = [];
-    modal.refreshPreview = async context => { contexts.push(context); await Promise.resolve(); useData(bob); };
-    modal.populateOptions = async context => { contexts.push(context); };
-    await modal.open('CONTACT');
-    return {
-      sameContext: contexts[0] === contexts[1],
-      sameData: contexts.every(context => context.data === alice),
-      sameOwner: contexts.every(context => context.owner === owner),
-      currentUsername: myData.account.username,
-      address: modal.currentAddress,
-      opened: modal.modal.classList.contains('active'),
+    for (const name of ['modal', 'avatarThumbContact', 'avatarThumbUploaded', 'avatarThumbIdenticon', 'avatarOptionsContainer', 'avatarOptionsActions', 'avatarUseButton']) {
+      modal[name] = document.createElement('div');
+    }
+    // Keep real preview/option selection; image decoding and button cooldown are unrelated here.
+    window.generateIdenticon = () => '<svg></svg>';
+    window.withButtonCooldown = (_button, _delay, _message, action) => action;
+    window.BUTTON_COOLDOWN_MS = 0;
+    let preview;
+    modal.setImageFromBlob = async blob => { preview = await blob.text(); useData(bob); };
+    const get = avatars.get.bind(avatars);
+    avatars.get = async (id, owner) => {
+      const blob = await get(id, owner);
+      if (id === 'bob-contact') useData(carol);
+      return blob;
     };
+    useData(alice);
+    try {
+      await modal.open('CONTACT');
+      const options = await Promise.all([modal.avatarThumbContact, modal.avatarThumbUploaded].map(async thumb => {
+        const image = thumb.querySelector('img');
+        return image ? (await fetch(image.src)).text() : null;
+      }));
+      return {
+        preview, options,
+        owners: (await readRows(avatars)).map(({ id, ownerKeys }) => ({ id, ownerKeys: ownerKeys.sort() })),
+        currentUsername: myData.account.username,
+        address: modal.currentAddress,
+        opened: modal.modal.classList.contains('active'),
+        optionsVisible: modal.avatarOptionsContainer.style.display === 'block',
+      };
+    } finally {
+      for (const url of modal._optionBlobUrls) URL.revokeObjectURL(url);
+      delete window.generateIdenticon;
+      delete window.withButtonCooldown;
+      delete window.BUTTON_COOLDOWN_MS;
+    }
+  }));
+  assert.deepEqual(result, {
+    preview: 'alice-preview', options: ['bob-contact', 'bob-uploaded'],
+    owners: [
+      { id: 'alice-preview', ownerKeys: ['alice_net1', 'seed_net1'] },
+      { id: 'bob-contact', ownerKeys: ['bob_net1', 'seed_net1'] },
+      { id: 'bob-uploaded', ownerKeys: ['bob_net1', 'seed_net1'] },
+    ],
+    currentUsername: 'carol', address: 'contact', opened: true, optionsVisible: true,
   });
-  assert.deepEqual(result, { sameContext: true, sameData: true, sameOwner: true, currentUsername: 'bob', address: 'contact', opened: true });
 });
 
 test('replacing a legacy full image without cachedAt keeps it untracked through account removal', async () => {
