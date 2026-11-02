@@ -45,7 +45,7 @@ test('voterList participation without local casts gives the neutral voted fallba
     getDaoUserVoteSummary({ proposal: proposal(votedBy(USER_LONG, 1_250)), address: USER, casts: [] }),
     { kind: DAO_USER_VOTE_SUMMARY_KINDS.VOTED, confirmed: true, timestamp: 1_250 },
   );
-  // Malformed or mismatched local casts do not invent a choice.
+  // Malformed or option-count-mismatched local casts do not invent a choice.
   const summary = getDaoUserVoteSummary({
     proposal: proposal(votedBy(USER)),
     address: `0x${USER}`,
@@ -54,68 +54,67 @@ test('voterList participation without local casts gives the neutral voted fallba
   assert.equal(summary.kind, 'voted');
 });
 
-test('a single cast is shown per option with allocation shares and no power', () => {
-  const summary = getDaoUserVoteSummary({ proposal: proposal(votedBy(USER)), address: USER_LONG, casts: [cast(TX_A)] });
+test('a single cast is listed with weight shares, allocated LIB, its status and no power', () => {
+  const summary = getDaoUserVoteSummary({ proposal: proposal(votedBy(USER, 1_250)), address: USER_LONG, casts: [cast(TX_A)] });
 
   assert.equal(summary.kind, DAO_USER_VOTE_SUMMARY_KINDS.DETAIL);
   assert.equal(summary.confirmed, true);
-  assert.equal(summary.castCount, 1);
-  assert.equal(summary.spend, 40n * LIB);
-  assert.equal(summary.totalPower, null);
-  assert.equal(summary.timestamp, 1_300);
-  assert.deepEqual(summary.rows, [
-    { option: 'No change', allocation: 0n, share: 0, power: null },
-    { option: 'Raise the fee', allocation: 30n * LIB, share: 0.75, power: null },
-    { option: 'Lower the fee', allocation: 10n * LIB, share: 0.25, power: null },
+  assert.equal(summary.timestamp, 1_250);
+  assert.equal(summary.casts.length, 1);
+  const [only] = summary.casts;
+  assert.equal(only.txid, TX_A);
+  assert.equal(only.status, 'submitted');
+  assert.equal(only.timestamp, 1_300);
+  assert.equal(only.spend, 40n * LIB);
+  assert.equal(only.totalPower, null);
+  assert.deepEqual(only.rows, [
+    { option: 'No change', weight: 0, share: 0, allocation: 0n, power: null },
+    { option: 'Raise the fee', weight: 3, share: 0.75, allocation: 30n * LIB, power: null },
+    { option: 'Lower the fee', weight: 1, share: 0.25, allocation: 10n * LIB, power: null },
   ]);
 });
 
-test('multiple casts combine by allocated LIB rather than by adding weight arrays', () => {
+test('multiple casts are listed separately in time order and are never combined', () => {
   const summary = getDaoUserVoteSummary({
-    proposal: proposal(votedBy(USER)),
+    proposal: proposal(),
     address: USER,
     casts: [
-      cast(TX_A, { weights: [1, 0, 0], spend: 10n * LIB, timestamp: 1_000 }),
       cast(TX_B, { weights: [0, 1, 1], spend: 30n * LIB, timestamp: 2_000 }),
-      cast(TX_A, { weights: [0, 0, 9], spend: 999n * LIB }), // duplicate txid is ignored
+      cast(TX_A, { weights: [1, 0, 0], spend: 10n * LIB, timestamp: 1_000 }),
+      cast(TX_A, { weights: [0, 0, 9], spend: 999n * LIB, timestamp: 1 }), // duplicate txid is ignored
     ],
   });
 
-  assert.equal(summary.castCount, 2);
-  assert.equal(summary.spend, 40n * LIB);
-  assert.equal(summary.timestamp, 2_000);
-  assert.deepEqual(summary.rows.map((row) => [row.allocation, row.share]), [
-    [10n * LIB, 0.25],
-    [15n * LIB, 0.375],
-    [15n * LIB, 0.375],
+  assert.equal(summary.confirmed, false);
+  assert.equal(summary.timestamp, 0);
+  assert.deepEqual(summary.casts.map((entry) => [entry.txid, entry.timestamp, entry.spend]), [
+    [TX_A, 1_000, 10n * LIB],
+    [TX_B, 2_000, 30n * LIB],
   ]);
+  assert.deepEqual(summary.casts[0].rows.map((row) => [row.share, row.allocation]), [[1, 10n * LIB], [0, 0n], [0, 0n]]);
+  assert.deepEqual(summary.casts[1].rows.map((row) => [row.share, row.allocation]), [[0, 0n], [0.5, 15n * LIB], [0.5, 15n * LIB]]);
+  assert.equal('rows' in summary, false);
 });
 
-test('applied power is reported only when every cast carries option weights', () => {
-  const withPower = getDaoUserVoteSummary({
+test('applied power is reported per cast only when that cast carries option weights', () => {
+  const summary = getDaoUserVoteSummary({
     proposal: proposal(),
     address: USER,
     casts: [
-      cast(TX_A, { optionWeights: [0n, 30n, 10n] }),
-      cast(TX_B, { weights: [2, 0, 0], spend: 20n * LIB, optionWeights: ['20', 0, { dataType: 'bi', value: '0' }] }),
+      cast(TX_A, { timestamp: 1_000, optionWeights: ['0', 30n, { dataType: 'bi', value: 'a' }] }),
+      cast(TX_B, { timestamp: 2_000, weights: [2, 0, 0], spend: 20n * LIB }),
     ],
   });
-  assert.equal(withPower.confirmed, false);
-  assert.equal(withPower.totalPower, 60n);
-  assert.deepEqual(withPower.rows.map((row) => row.power), [20n, 30n, 10n]);
 
-  const partial = getDaoUserVoteSummary({
-    proposal: proposal(),
-    address: USER,
-    casts: [cast(TX_A, { optionWeights: [0n, 30n, 10n] }), cast(TX_B)],
-  });
-  assert.equal(partial.totalPower, null);
-  assert.deepEqual(partial.rows.map((row) => row.power), [null, null, null]);
+  assert.equal(summary.casts[0].totalPower, 40n);
+  assert.deepEqual(summary.casts[0].rows.map((row) => row.power), [0n, 30n, 10n]);
+  assert.equal(summary.casts[1].totalPower, null);
+  assert.deepEqual(summary.casts[1].rows.map((row) => row.power), [null, null, null]);
 });
 
 test('option labels fall back to numbered options when the proposal has none', () => {
   const summary = getDaoUserVoteSummary({ proposal: { number: 12 }, address: USER, casts: [cast(TX_A)] });
-  assert.deepEqual(summary.rows.map((row) => row.option), ['Option 1', 'Option 2', 'Option 3']);
+  assert.deepEqual(summary.casts[0].rows.map((row) => row.option), ['Option 1', 'Option 2', 'Option 3']);
 });
 
 test('the tracker exposes normalized casts for a proposal without exposing other state', () => {
@@ -169,33 +168,38 @@ test('render: Vote recorded fallback names no option or amount', () => {
   assert.match(html, /<h3>Your vote<\/h3>/);
   assert.match(html, /Vote recorded/);
   assert.match(html, /Voted: t1250/);
-  assert.doesNotMatch(html, /Raise the fee|LIB|power/);
+  assert.doesNotMatch(html, /Raise the fee|LIB|power|Submitted/);
 });
 
-test('render: local casts show option rows, spend, status, and escape long labels', () => {
+test('render: each cast gets its own card with rows, spend, status, and escaped long labels', () => {
   const longLabel = `Raise the fee ${'x'.repeat(120)} <b>&"</b>`;
   const html = renderWith({
-    proposalData: proposal({ options: ['no', longLabel, 'Lower the fee'], ...votedBy(USER) }),
-    casts: [cast(TX_A), cast(TX_B, { weights: [0, 0, 1], spend: 20n * LIB })],
+    proposalData: proposal({ options: ['no', longLabel, 'Lower the fee'], ...votedBy(USER, 1_250) }),
+    casts: [cast(TX_A, { timestamp: 1_300 }), cast(TX_B, { weights: [0, 0, 1], spend: 20n * LIB, timestamp: 1_400 })],
   });
 
-  assert.match(html, /proposal-user-vote-status--confirmed">Confirmed</);
+  assert.match(html, /Voted: t1250/);
+  assert.equal((html.match(/proposal-user-vote-card"/g) || []).length, 2);
+  assert.equal((html.match(/>Submitted</g) || []).length, 2);
+  assert.match(html, /Vote 1 · t1300/);
+  assert.match(html, /Vote 2 · t1400/);
   assert.match(html, /<span>0%<\/span>\s*<span>No change<\/span>\s*<strong>0 LIB<\/strong>/);
-  assert.match(html, /<span>50%<\/span>\s*<span>Raise the fee x+ &lt;b&gt;&amp;&quot;&lt;\/b&gt;<\/span>\s*<strong>30 LIB<\/strong>/);
-  assert.match(html, /<span>50%<\/span>\s*<span>Lower the fee<\/span>\s*<strong>30 LIB<\/strong>/);
-  assert.match(html, /<span>Spend<\/span><strong>60 LIB<\/strong>/);
-  assert.doesNotMatch(html, /Voting power/);
-  assert.match(html, /Combined from 2 votes\./);
+  assert.match(html, /<span>75%<\/span>\s*<span>Raise the fee x+ &lt;b&gt;&amp;&quot;&lt;\/b&gt;<\/span>\s*<strong>30 LIB<\/strong>/);
+  assert.match(html, /<span>100%<\/span>\s*<span>Lower the fee<\/span>\s*<strong>20 LIB<\/strong>/);
+  assert.match(html, /<span>Spend<\/span><strong>40 LIB<\/strong>/);
+  assert.match(html, /<span>Spend<\/span><strong>20 LIB<\/strong>/);
+  assert.doesNotMatch(html, /Voting power|Combined|Confirmed|Awaiting/);
   assert.doesNotMatch(html, /<b>/);
 });
 
-test('render: unconfirmed casts are labeled and power appears once option weights exist', () => {
+test('render: a single cast is labeled Vote, and power appears for a cast with option weights', () => {
   const html = renderWith({
     proposalData: proposal(),
     casts: [cast(TX_A, { optionWeights: [0n, 30n, 10n] })],
   });
-  assert.match(html, /proposal-user-vote-status">Awaiting confirmation</);
+  assert.doesNotMatch(html, /Voted:/);
+  assert.match(html, /<span>Vote · t1300<\/span>\s*<span class="proposal-user-vote-status">Submitted<\/span>/);
   assert.match(html, /<span>Voting power<\/span><strong>40 power<\/strong>/);
   assert.match(html, /<strong>30 power<\/strong>/);
-  assert.doesNotMatch(html, /Combined from/);
+  assert.doesNotMatch(html, /Vote 1/);
 });
