@@ -2,7 +2,7 @@
  * Playwright global setup
  *
  * Purpose:
- *  - Read `baseURL` from Playwright config
+ *  - Read `baseURL` from the resolved Playwright project config
  *  - Fetch `${baseURL}/network.js` and extract the first gateway web URL
  *  - Fetch the zero-account from the gateway and read network parameters
  *  - Convert USD values to LIB using stabilityFactor
@@ -17,35 +17,6 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const https = require('https');
-
-/**
- * Extract the active baseURL from `playwright.config.ts`.
- * - Ignores commented lines
- * - Uses the last valid occurrence if multiple
- * - Throws if not found (no fallback)
- */
-function readBaseURLFromPlaywrightConfig() {
-  try {
-    const cfgPath = path.resolve(__dirname, '..', 'playwright.config.ts');
-    const text = fs.readFileSync(cfgPath, 'utf8');
-    const lines = text.split(/\r?\n/);
-    let candidate;
-    for (const line of lines) {
-      const idx = line.indexOf('baseURL:');
-      if (idx === -1) continue;
-      const trimmed = line.trim();
-      if (/^\/\//.test(trimmed)) continue;
-      const cmt = line.indexOf('//');
-      if (cmt !== -1 && cmt < idx) continue;
-      const m = line.match(/baseURL:\s*['\"]([^'\"]+)['\"]/);
-      if (m && m[1]) candidate = m[1];
-    }
-    if (candidate) return candidate;
-    throw new Error('baseURL not found in playwright.config.ts');
-  } catch (e) {
-    throw new Error(`Failed to read baseURL from config: ${e && e.message ? e.message : e}`);
-  }
-}
 
 /**
  * Fetch remote text with a timeout and redirect limit.
@@ -83,7 +54,14 @@ function fetchText(url, timeoutMs = 15000, maxRedirects = 5) {
   });
 }
 
-async function globalSetup() {
+/** @param {import('@playwright/test').FullConfig} config */
+async function globalSetup(config) {
+  // All browser projects share one app and network-parameter cache.
+  const baseURL = config.projects[0]?.use.baseURL;
+  if (!baseURL) {
+    throw new Error('baseURL not found in resolved Playwright project config');
+  }
+
   const outDir = path.resolve(__dirname, '..', '.cache');
   // Clear any previous cache to ensure fresh fetch each run
   try {
@@ -91,8 +69,7 @@ async function globalSetup() {
   } catch {}
   fs.mkdirSync(outDir, { recursive: true });
 
-  // 1) Discover base URL from Playwright config
-  const baseURL = readBaseURLFromPlaywrightConfig();
+  // 1) Discover the network from the app being tested
   const networkJsUrl = baseURL.replace(/\/+$/, '') + '/network.js';
 
   // 2) Fetch and evaluate network.js to extract gateway web URL
