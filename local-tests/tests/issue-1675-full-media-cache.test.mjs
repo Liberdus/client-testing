@@ -284,6 +284,25 @@ test('successful downloads with a colliding key or media kind do not replace a b
   }
 });
 
+test('a successful video download does not replace an existing image with the same ID', async () => {
+  const h = new CacheFixture(100);
+  h.seed('shared-id', 'cached photo', 10, 'image/png', ['another_network']);
+  const attachment = h.attachment('shared-id', 'video/mp4', 'moved.example');
+  const fresh = await h.cache.getOrCache({
+    attachment,
+    keyFingerprint: VIDEO_KEY_FINGERPRINT,
+    downloadAndDecrypt: async () => h.blob('decrypted clip'),
+  });
+  assert.equal(fresh.type, 'video/mp4');
+  assert.equal(await fresh.text(), 'decrypted clip');
+
+  const retained = await h.cache.getRecord(attachment.url, null);
+  assert.equal(await retained.blob.text(), 'cached photo');
+  assert.equal(retained.blob.type, 'image/png');
+  assert.equal(retained.cachedAt, 10);
+  assert.deepEqual(retained.ownerKeys, ['another_network']);
+});
+
 test('video requests without a key fingerprint bypass the cache without replacing or adding entries', async () => {
   const h = new CacheFixture(100);
   h.seed('bound-video', 'cached clip', 10, 'video/mp4', ['another_network']);
