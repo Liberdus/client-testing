@@ -143,7 +143,7 @@ const modalEnd = appSource.indexOf('const proposalInfoModal = new ProposalInfoMo
 assert.ok(modalStart >= 0 && modalEnd > modalStart, 'ProposalInfoModal must exist in app.js');
 const modalSource = `${appSource.slice(modalStart, modalEnd)}\n({ ProposalInfoModal });`;
 
-function buildModal({ proposalData, casts, address = USER_LONG }) {
+function buildModal({ proposalData, casts, address = USER_LONG, contextOverrides = {} }) {
   const context = {
     ...dao,
     getDaoCurrentAccountAddress: () => address,
@@ -154,6 +154,7 @@ function buildModal({ proposalData, casts, address = USER_LONG }) {
     formatDaoLibWei: (wei) => `${wei / LIB} LIB`,
     formatDaoVotingPower: (power) => `${power} power`,
     formatDaoCompactTimestamp: (ts) => (ts ? `t${ts}` : ''),
+    ...contextOverrides,
   };
   const { ProposalInfoModal } = vm.runInNewContext(modalSource, context);
   return new ProposalInfoModal();
@@ -163,15 +164,48 @@ function renderWith(options) {
   return buildModal(options).renderUserVote(options.proposalData, options.address ?? USER_LONG);
 }
 
+function readVoteDisclosure(html) {
+  const match = /<details\b([^>]*)>\s*<summary\b[^>]*>(.*?)<\/summary>/s.exec(html);
+  assert.ok(match, 'saved vote details have a native disclosure');
+  return { open: /\bopen\b/.test(match[1]), summary: match[2] };
+}
+
+function createVoteContent() {
+  let html = '';
+  let disclosure = null;
+  return {
+    get innerHTML() { return html; },
+    set innerHTML(value) {
+      html = value;
+      disclosure = /<details\b/.test(value) ? readVoteDisclosure(value) : null;
+      if (disclosure) {
+        disclosure.firstElementChild = {
+          focused: false,
+          matches(selector) { return selector === ':focus' && this.focused; },
+          focus() { this.focused = true; },
+        };
+      }
+    },
+    querySelector(selector) {
+      if (selector === '.proposal-user-vote-slot') return this;
+      if (selector === '.proposal-user-vote-section') return disclosure;
+      if (selector === '.proposal-user-vote-heading') return disclosure?.firstElementChild ?? null;
+      return null;
+    },
+  };
+}
+
 test('render: hidden when nothing shows the account voted', () => {
   assert.equal(renderWith({ proposalData: proposal(votedBy(OTHER)), casts: [] }), '');
 });
 
 test('render: Vote recorded fallback names no option or amount', () => {
   const html = renderWith({ proposalData: proposal(votedBy(USER, 1_250)), casts: [] });
-  assert.match(html, /<h3>Your vote<\/h3>/);
+  const disclosure = readVoteDisclosure(html);
+  assert.equal(disclosure.open, true);
+  assert.match(disclosure.summary, /Your vote/);
+  assert.match(disclosure.summary, /Voted: t1250/);
   assert.match(html, /Vote recorded/);
-  assert.match(html, /Voted: t1250/);
   assert.doesNotMatch(html, /Raise the fee|LIB|power|Submitted/);
 });
 
@@ -185,13 +219,14 @@ test('render: each cast gets its own card with rows, spend, status, and escaped 
   assert.match(html, /Voted: t1250/);
   assert.equal((html.match(/proposal-user-vote-card"/g) || []).length, 2);
   assert.equal((html.match(/>Submitted</g) || []).length, 2);
-  assert.match(html, /Vote 1 · t1300/);
-  assert.match(html, /Vote 2 · t1400/);
-  assert.match(html, /<span>0%<\/span>\s*<span>No change<\/span>\s*<strong>0 LIB<\/strong>/);
-  assert.match(html, /<span>75%<\/span>\s*<span>Raise the fee x+ &lt;b&gt;&amp;&quot;&lt;\/b&gt;<\/span>\s*<strong>30 LIB<\/strong>/);
-  assert.match(html, /<span>100%<\/span>\s*<span>Lower the fee<\/span>\s*<strong>20 LIB<\/strong>/);
+  assert.match(html, /Vote 1 · t1300<\/span>\s*<span[^>]*>Submitted<\/span>/);
+  assert.match(html, /Vote 2 · t1400<\/span>\s*<span[^>]*>Submitted<\/span>/);
+  assert.match(html, /<span[^>]*>No change<\/span>\s*<span[^>]*>0%<\/span>\s*<strong>0 LIB<\/strong>/);
+  assert.match(html, /<span[^>]*>Raise the fee x+ &lt;b&gt;&amp;&quot;&lt;\/b&gt;<\/span>\s*<span[^>]*>75%<\/span>\s*<strong>30 LIB<\/strong>/);
+  assert.match(html, /<span[^>]*>Lower the fee<\/span>\s*<span[^>]*>100%<\/span>\s*<strong>20 LIB<\/strong>/);
   assert.match(html, /<span>Spend<\/span><strong>40 LIB<\/strong>/);
   assert.match(html, /<span>Spend<\/span><strong>20 LIB<\/strong>/);
+  assert.match(readVoteDisclosure(html).summary, /60 LIB/);
   assert.doesNotMatch(html, /Voting power|Combined|Confirmed|Awaiting/);
   assert.doesNotMatch(html, /<b>/);
 });
@@ -202,7 +237,12 @@ test('render: a single cast is labeled Vote, and power appears for a cast with o
     casts: [cast(TX_A, { optionWeights: [0n, 30n, 10n] })],
   });
   assert.doesNotMatch(html, /Voted:/);
-  assert.match(html, /<span>Vote · t1300<\/span>\s*<span class="proposal-user-vote-status">Submitted<\/span>/);
+  const disclosure = readVoteDisclosure(html);
+  assert.equal(disclosure.open, true);
+  assert.match(disclosure.summary, /Your vote/);
+  assert.match(disclosure.summary, /40 LIB/);
+  assert.doesNotMatch(disclosure.summary, /Raise the fee|Lower the fee|Voting power/);
+  assert.match(html, /<span[^>]*>Vote · t1300<\/span>\s*<span[^>]*>Submitted<\/span>/);
   assert.match(html, /<span>Voting power<\/span><strong>40 power<\/strong>/);
   assert.match(html, /<strong>30 power<\/strong>/);
   assert.doesNotMatch(html, /Vote 1/);
@@ -212,7 +252,7 @@ test('refreshUserVote replaces only the slot in the open modal, so a saved cast 
   const saved = [];
   const proposalData = proposal();
   const modal = buildModal({ proposalData, casts: saved });
-  const slot = { innerHTML: '' };
+  const slot = createVoteContent();
   const untouched = { innerHTML: '<h3>Current Vote</h3>' };
   modal.content = { querySelector: (selector) => (selector === '.proposal-user-vote-slot' ? slot : untouched) };
 
@@ -221,7 +261,7 @@ test('refreshUserVote replaces only the slot in the open modal, so a saved cast 
 
   saved.push(cast(TX_A));
   modal.refreshUserVote(proposalData);
-  assert.match(slot.innerHTML, /<h3>Your vote<\/h3>/);
+  assert.match(readVoteDisclosure(slot.innerHTML).summary, /Your vote/);
   assert.match(slot.innerHTML, /Submitted/);
   assert.doesNotMatch(slot.innerHTML, /Voted:/, 'no voterList entry yet, so no Voted time');
   assert.equal(untouched.innerHTML, '<h3>Current Vote</h3>');
@@ -229,4 +269,56 @@ test('refreshUserVote replaces only the slot in the open modal, so a saved cast 
   modal.content = null;
   assert.doesNotThrow(() => modal.refreshUserVote(proposalData));
   assert.doesNotThrow(() => modal.refreshUserVote(null));
+});
+
+test('the collapsed disclosure keeps focus through refreshes and a reopened modal starts expanded', async () => {
+  const proposalId = 'proposal-12';
+  const saved = [cast(TX_A)];
+  const proposalData = proposal({ status: 'accepted' });
+  const active = new Set();
+  const modal = buildModal({
+    proposalData,
+    casts: saved,
+    contextOverrides: {
+      daoRepo: { ensureLoaded: async () => {}, getProposalById: () => proposalData },
+      daoModal: { restoreListFocus() {} },
+      openModal: () => active.add('active'),
+      enterFullscreen() {},
+      getTransactionTimestamp: () => 1_500,
+      getDaoProposalReviewWindow: () => ({}),
+      getDaoCommitteeReview: () => ({ committeeAddresses: [], committeeAddressSet: new Set(), votes: [] }),
+      getDaoProposalResultSummary: () => null,
+      getDaoProposalRewardSummary: () => null,
+      getDaoProposalLifecycleActions: () => [],
+      renderDaoProposalHeading: () => '',
+      renderDaoProposalOptions: () => '',
+      myData: { pending: [] },
+    },
+  });
+  modal.modal = {
+    classList: { contains: (name) => active.has(name), remove: (name) => active.delete(name) },
+    querySelectorAll: () => [],
+  };
+  modal.content = createVoteContent();
+  await modal._open(proposalId);
+  const disclosure = () => modal.content.querySelector('.proposal-user-vote-section');
+  assert.equal(disclosure()?.open, true);
+
+  disclosure().open = false;
+  disclosure().firstElementChild.focus();
+  saved.push(cast(TX_B, { spend: 20n * LIB }));
+  modal.refreshUserVote(proposalData);
+  assert.equal(disclosure().open, false, 'saving another cast preserves the collapsed state');
+  assert.match(disclosure().summary, /60 LIB/, 'the collapsed summary reflects the new spend');
+  assert.equal(disclosure().firstElementChild.matches(':focus'), true);
+
+  proposalData.voterList = votedBy(USER).voterList;
+  modal.refreshIfOpen(proposalId);
+  assert.equal(disclosure().open, false, 'a full proposal refresh preserves the collapsed state');
+  assert.match(modal.content.innerHTML, /Voted: t1250/);
+  assert.equal(disclosure().firstElementChild.matches(':focus'), true);
+
+  modal.close();
+  await modal._open(proposalId);
+  assert.equal(disclosure().open, true, 'reopening starts expanded');
 });
