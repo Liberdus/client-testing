@@ -9,6 +9,7 @@ import test from 'node:test';
 assert.ok(isAbsolute(process.env.WEB_CLIENT_ROOT || ''), 'Set WEB_CLIENT_ROOT to the implementation checkout');
 const app = readFileSync(join(process.env.WEB_CLIENT_ROOT, 'app.js'), 'utf8');
 const { normalizeMimeType } = await import(pathToFileURL(join(process.env.WEB_CLIENT_ROOT, 'lib.js')));
+const VIDEO_KEY_FINGERPRINT = 'a'.repeat(64);
 
 class MemoryDatabase {
   stores = new Map([['fullImages', new Map()], ['thumbnails', new Map()]]);
@@ -160,16 +161,23 @@ class CacheFixture {
 
   blob(bytes, type = 'video/mp4') { return new Blob([bytes], { type }); }
 
-  seed(id, bytes, cachedAt, type = 'video/mp4', ownerKeys) {
+  seed(id, bytes, cachedAt, type = 'video/mp4', ownerKeys,
+    keyFingerprint = type.startsWith('video/') ? VIDEO_KEY_FINGERPRINT : null) {
     const blob = this.blob(bytes, type);
     this.database.stores.get('fullImages').set(id, {
       id, mimeType: type, blob, cachedAt, size: blob.size, ...(ownerKeys ? { ownerKeys } : {}),
+      ...(keyFingerprint ? { keyFingerprint } : {}),
     });
     return blob;
   }
 
   fetch(id, blob, shouldCache) {
-    return this.cache.getOrCache({ attachment: this.attachment(id, blob.type), downloadAndDecrypt: async () => blob, shouldCache });
+    return this.cache.getOrCache({
+      attachment: this.attachment(id, blob.type),
+      keyFingerprint: blob.type.startsWith('video/') ? VIDEO_KEY_FINGERPRINT : undefined,
+      downloadAndDecrypt: async () => blob,
+      shouldCache,
+    });
   }
 
   quotaError() { return new DOMException('Synthetic quota exceeded', 'QuotaExceededError'); }
@@ -204,6 +212,72 @@ test('legacy full images and cached videos share FIFO; reading an old record doe
   assert.equal(await (await h.cache.get(h.attachment('video-b').url))?.text(), 'clip!');
 });
 
+test('an unbound legacy video is decrypted again once and then reused for the matching key', async () => {
+  const h = new CacheFixture(100);
+  h.seed('legacy-video', 'unbound clip', 10, 'video/mp4', ['another_network'], null);
+  const attachment = h.attachment('legacy-video');
+  let decryptions = 0;
+  const request = {
+    attachment,
+    keyFingerprint: VIDEO_KEY_FINGERPRINT,
+    downloadAndDecrypt: async () => { decryptions++; return h.blob('verified clip'); },
+  };
+  assert.equal(await (await h.cache.getOrCache(request)).text(), 'verified clip');
+  const afterRefill = await h.cache.getRecord(attachment.url, null);
+  assert.ok(afterRefill.cachedAt > 10, 'refill enters the FIFO queue as a newly cached video');
+  assert.equal(await (await h.cache.getOrCache(request)).text(), 'verified clip');
+  assert.equal(decryptions, 1);
+  assert.equal((await h.cache.getRecord(attachment.url, null)).cachedAt, afterRefill.cachedAt);
+});
+
+test('a rejected key or media-kind mismatch cannot read or claim the existing video', async () => {
+  const h = new CacheFixture(100);
+  h.seed('bound-video', 'cached clip', 10, 'video/mp4', ['another_network']);
+  const attachment = h.attachment('bound-video');
+  const rejected = new Error('Synthetic decryption rejection');
+  for (const mismatch of [
+    { attachment, keyFingerprint: 'b'.repeat(64) },
+    { attachment: h.attachment('bound-video', 'image/png') },
+  ]) {
+    await assert.rejects(h.cache.getOrCache({
+      ...mismatch,
+      downloadAndDecrypt: async () => { throw rejected; },
+    }), error => error === rejected);
+    const existing = await h.cache.getRecord(attachment.url, null);
+    assert.equal(await existing.blob.text(), 'cached clip');
+    assert.equal(existing.cachedAt, 10);
+    assert.deepEqual(existing.ownerKeys, ['another_network']);
+  }
+
+  const hit = await h.cache.getOrCache({
+    attachment,
+    keyFingerprint: VIDEO_KEY_FINGERPRINT,
+    downloadAndDecrypt: async () => { throw new Error('Matching video key should reuse the cached video'); },
+  });
+  assert.equal(await hit.text(), 'cached clip');
+  const existing = await h.cache.getRecord(attachment.url, null);
+  assert.equal(existing.cachedAt, 10);
+  assert.deepEqual(existing.ownerKeys, ['another_network', 'synthetic_network']);
+});
+
+test('video requests without a key fingerprint bypass the cache without replacing or adding entries', async () => {
+  const h = new CacheFixture(100);
+  h.seed('bound-video', 'cached clip', 10, 'video/mp4', ['another_network']);
+  const fresh = h.blob('decrypted clip');
+  for (const id of ['bound-video', 'uncached-video']) {
+    const result = await h.cache.getOrCache({
+      attachment: h.attachment(id),
+      downloadAndDecrypt: async () => fresh,
+    });
+    assert.equal(await result.text(), 'decrypted clip');
+  }
+  const existing = await h.cache.getRecord(h.attachment('bound-video').url, null);
+  assert.equal(await existing.blob.text(), 'cached clip');
+  assert.equal(existing.cachedAt, 10);
+  assert.deepEqual(existing.ownerKeys, ['another_network']);
+  assert.equal(await h.cache.getRecord(h.attachment('uncached-video').url, null), null);
+});
+
 test('available browser quota is checked before writing and older records make space', async () => {
   const h = new CacheFixture(100, () => ({ usage: 98, quota: 100 }));
   h.seed('old', 'old!', 10, 'image/png');
@@ -228,6 +302,7 @@ test('quota errors evict FIFO and retry once, then reuse the newly cached video'
   assert.equal(await (await h.cache.get(h.attachment('recent').url))?.text(), await recent.text());
   const hit = await h.cache.getOrCache({
     attachment: h.attachment('incoming'),
+    keyFingerprint: VIDEO_KEY_FINGERPRINT,
     downloadAndDecrypt: async () => { throw new Error('Quota retry should have committed the video'); },
   });
   assert.equal(await hit?.text(), await incoming.text());
@@ -276,6 +351,7 @@ test('a download invalidated during decryption cannot reinsert an attachment rem
   const startedDownload = new Promise(resolve => { started = resolve; });
   const opening = h.cache.getOrCache({
     attachment,
+    keyFingerprint: VIDEO_KEY_FINGERPRINT,
     downloadAndDecrypt: () => new Promise(resolve => { finishDownload = resolve; started(); }),
     shouldCache: () => keepAttachment,
   });
@@ -316,6 +392,7 @@ test('remove-all does not let an earlier download repopulate the full media cach
   const blob = h.blob('clip');
   const result = await h.cache.getOrCache({
     attachment,
+    keyFingerprint: VIDEO_KEY_FINGERPRINT,
     downloadAndDecrypt: async () => {
       await h.cache.clear();
       return blob;

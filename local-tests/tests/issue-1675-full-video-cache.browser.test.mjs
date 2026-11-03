@@ -15,7 +15,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const videoMime = 'video/webm';
 const assetTypes = { '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2' };
 const syntheticKey = Buffer.alloc(32, 11);
+const wrongKey = Buffer.alloc(32, 12).toString('base64');
 const syntheticOwner = 'cachefixture_test';
+const syntheticAccountKeys = { secret: 'fixture-secret', pqSeed: 'fixture-pq-seed' };
+const legacyImage = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGPgTqkAAAFlAOgNRA6IAAAAAElFTkSuQmCC', 'base64');
 
 function extract(source, start, end) {
   const first = source.indexOf(`\n${start}`);
@@ -37,8 +40,9 @@ export class VideoCacheFixture {
     const { chromium } = require('playwright');
     const app = await readFile(resolve(clientRoot, 'app.js'), 'utf8');
     const index = (await readFile(resolve(clientRoot, 'index.html'), 'utf8')).replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
-    const { encryptChacha } = await import(pathToFileURL(resolve(clientRoot, 'crypto.js')));
+    const { encryptChacha, encryptData } = await import(pathToFileURL(resolve(clientRoot, 'crypto.js')));
     this.encrypt = bytes => Buffer.from(encryptChacha(syntheticKey, bytes.toString('base64')), 'base64');
+    this.selfKey = encryptData(syntheticKey.toString('hex'), syntheticAccountKeys.secret + syntheticAccountKeys.pqSeed, true);
     this.clip = execFileSync('ffmpeg', ['-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=480x270:rate=24',
       '-t', '4', '-c:v', 'libvpx', '-threads', '2', '-f', 'webm', 'pipe:1'], { timeout: 30000 });
     // The old cache name keeps the same behavior checks runnable on the before-fix client.
@@ -53,6 +57,7 @@ export class VideoCacheFixture {
       extract(app, `const FULL_${cacheName.toUpperCase()}_CACHE_MAX_SIZE`, `const full${cacheName}Cache = new Full${cacheName}Cache(thumbnailCache);`),
       extract(app, 'class ChatModal {', 'const chatModal = new ChatModal();'),
       extract(app, 'class FullImageModal {', 'const fullImageModal = new FullImageModal();'),
+      extract(app, 'class ShareAttachmentModal {', 'const shareAttachmentModal = new ShareAttachmentModal();'),
       `const thumbnailCache = new ThumbnailCache(); const full${cacheName}Cache = new Full${cacheName}Cache(thumbnailCache);`,
     ].join('\n');
 
@@ -110,8 +115,8 @@ export class VideoCacheFixture {
   }
 
   async install(page, attachment, { blockCache = false } = {}) {
-    await page.evaluate(async ({ attachment, blockCache }) => {
-      window.fixture = { attachment, decrypts: 0, previewPopups: 0, revokedUrls: [] };
+    await page.evaluate(async ({ attachment, blockCache, accountKeys }) => {
+      window.fixture = { attachment, accountKeys, decrypts: 0, previewPopups: 0, revokedUrls: [] };
       window.fixture.lib = await import('/lib.js');
       window.fixture.crypto = await import('/crypto.js');
       if (blockCache) IDBFactory.prototype.open = () => { throw new DOMException('Test blocks storage access', 'SecurityError'); };
@@ -119,52 +124,54 @@ export class VideoCacheFixture {
       window.open = (...args) => { fixture.previewPopups++; return open(...args); };
       const revoke = URL.revokeObjectURL.bind(URL);
       URL.revokeObjectURL = url => { fixture.revokedUrls.push(url); revoke(url); };
-    }, { attachment, blockCache });
+    }, { attachment, blockCache, accountKeys: syntheticAccountKeys });
     await page.addScriptTag({ content: `
-      const { base642bin, bin2base64, escapeHtml, escapeHtmlAttribute, formatTime, getSafeAttachmentPreviewMime,
+      const { base642bin, bin2base64, escapeHtml, escapeHtmlAttribute, formatTime, getSafeAttachmentPreviewMime, hex2bin,
         linkifyUrls, normalizeMimeType, normalizeResourceUrl, normalizeTransactionId, openModal } = fixture.lib;
-      const { hashBytes } = fixture.crypto;
+      const { decryptData, hashBytes } = fixture.crypto;
       const decryptChacha = (...args) => { fixture.decrypts++; return fixture.crypto.decryptChacha(...args); };
       const assert = (condition, message) => { if (!condition) throw new Error(message); };
       const getCorrectedTimestamp = Date.now;
       const EVM_CHAT_MESSAGE_TYPE = 'evm-payment';
       const INTENTS_CHAT_MESSAGE_TYPE = 'intents-payment';
       const CHAT_THUMBNAIL_ATTACHMENT_SELECTOR = '[data-image-attachment="true"], [data-video-attachment="true"]';
-      const myAccount = { username: 'cachefixture', netid: 'test' };
+      const myAccount = { username: 'cachefixture', netid: 'test', keys: fixture.accountKeys };
       const removeAccountModal = { isRemoving: false };
       const removeAccountsModal = { isRemovingAll: false };
-      const message = { type: 'message', timestamp: Date.now(), message: fixture.attachment.name, deleted: '0', xattach: [fixture.attachment] };
+      const message = { type: 'message', timestamp: Date.now(), message: fixture.attachment.name, deleted: '0',
+        my: Boolean(fixture.attachment.selfKey), xattach: [fixture.attachment] };
       const contact = { messages: [message] };
       const myData = { contacts: { synthetic: contact } };
       ${this.source}
       const fullImageModal = new FullImageModal();
       fullImageModal.load();
       document.querySelector('#bootSplash')?.remove();
-      const chat = Object.create(ChatModal.prototype);
-      chat.address = 'synthetic';
-      chat.abortController = new AbortController();
-      chat.imageAttachmentContextMenu = document.querySelector('#imageAttachmentContextMenu');
-      chat.imageAttachmentContextMenuReactions = chat.imageAttachmentContextMenu.querySelector('.message-context-reactions');
+      const chatModal = Object.create(ChatModal.prototype);
+      chatModal.address = 'synthetic';
+      chatModal.abortController = new AbortController();
+      chatModal.imageAttachmentContextMenu = document.querySelector('#imageAttachmentContextMenu');
+      chatModal.imageAttachmentContextMenuReactions = chatModal.imageAttachmentContextMenu.querySelector('.message-context-reactions');
       // Account setup, reactions and delete-for-all authorization are outside this fixture.
-      chat.closeAllContextMenus = () => chat.closeImageAttachmentContextMenu();
-      chat.canDeleteMessageForAll = () => false;
-      for (const method of ['syncContextReactionTrayDisplay', 'syncReactionPickerActiveState', 'syncDeleteContextMenuDisabledState']) chat[method] = () => {};
-      const chatModal = document.querySelector('#chatModal');
-      chatModal.querySelector('.modal-title').textContent = 'Synthetic chat';
-      chatModal.querySelector('.messages-list').innerHTML = chat.renderChatMessageHTML(message, { contact, lastReadTs: 0 });
-      chatModal.classList.add('active');
-      const row = chatModal.querySelector('.attachment-row');
-      row.addEventListener('click', event => chat.showAttachmentContextMenu(event, row));
-      chat.imageAttachmentContextMenu.addEventListener('click', event => {
+      chatModal.closeAllContextMenus = () => chatModal.closeImageAttachmentContextMenu();
+      chatModal.canDeleteMessageForAll = () => false;
+      for (const method of ['syncContextReactionTrayDisplay', 'syncReactionPickerActiveState', 'syncDeleteContextMenuDisabledState']) chatModal[method] = () => {};
+      const chatElement = document.querySelector('#chatModal');
+      chatElement.querySelector('.modal-title').textContent = 'Synthetic chat';
+      chatElement.querySelector('.messages-list').innerHTML = chatModal.renderChatMessageHTML(message, { contact, lastReadTs: 0 });
+      chatElement.classList.add('active');
+      const row = chatElement.querySelector('.attachment-row');
+      row.addEventListener('click', event => chatModal.showAttachmentContextMenu(event, row));
+      chatModal.imageAttachmentContextMenu.addEventListener('click', event => {
         const option = event.target.closest('[data-action]');
-        if (option) chat.handleImageAttachmentContextMenuAction(option.dataset.action);
+        if (option) chatModal.handleImageAttachmentContextMenuAction(option.dataset.action);
       });
       fixture.db = thumbnailCache;
+      fixture.shareMetadata = () => ShareAttachmentModal.prototype.extractAttachmentData(row.closest('.message'));
       fixture.removeAttachment = () => {
         message.xattach = [];
-        chat.purgeAttachmentCaches([fixture.attachment]);
+        chatModal.purgeAttachmentCaches([fixture.attachment]);
       };
-      if (!${blockCache}) void chat.loadThumbnailForAttachment(row);
+      if (!${blockCache}) void chatModal.loadThumbnailForAttachment(row);
     ` });
   }
 
@@ -208,21 +215,21 @@ export class VideoCacheFixture {
 }
 
 async function seedLegacyRows(page) {
-  await page.evaluate(() => new Promise((resolve, reject) => {
+  await page.evaluate(imageBase64 => new Promise((resolve, reject) => {
     const request = indexedDB.open('liberdus_thumbnails', 4);
     request.onupgradeneeded = () => {
       for (const name of ['thumbnails', 'fullImages']) {
         const store = request.result.createObjectStore(name, { keyPath: 'id' });
         store.createIndex('cachedAt', 'cachedAt');
         store.createIndex('byOwner', 'ownerKeys', { multiEntry: true });
-        const blob = new Blob([name], { type: 'image/jpeg' });
+        const blob = new Blob([Uint8Array.from(atob(imageBase64), character => character.charCodeAt(0))], { type: 'image/png' });
         const record = name === 'fullImages' ? { blob, size: blob.size, mimeType: blob.type } : { thumbnail: blob, originalType: blob.type };
         store.put({ ...record, id: 'legacy-image', cachedAt: 123 });
       }
     };
     request.onsuccess = () => { request.result.close(); resolve(); };
     request.onerror = () => reject(request.error);
-  }));
+  }), legacyImage.toString('base64'));
 }
 
 async function readRow(page, store, id) {
@@ -264,6 +271,103 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     });
   }
 
+  for (const [action, type] of [['open', videoMime], ['save', videoMime], ['save', 'image/png']]) {
+    test(`${action} rejects cached video bytes with a different key declared as ${type}`, async t => {
+      const attachment = fixture.attachment(`wrong-key-${action}-${type.split('/')[1]}`);
+      const { context, page, external, errors } = await fixture.createSession();
+      t.after(() => context.close());
+      await fixture.install(page, attachment);
+      await fixture.open(page);
+      await fixture.close(page);
+      await page.reload();
+      await fixture.install(page, { ...attachment, type, encKey: wrongKey });
+
+      if (action === 'open') {
+        await fixture.choose(page, 'open');
+        const outcome = await page.waitForFunction(() => {
+          if (!document.querySelector('#fullImageError').hidden) return 'error';
+          return document.querySelector('#fullImageViewerVideo').readyState >= 2 && 'played';
+        }, null, { timeout: 8000 });
+        assert.equal(await outcome.jsonValue(), 'error', 'Open must not play cached bytes with a different key');
+        assert.equal(await page.locator('#fullImageViewerVideo').getAttribute('src'), null);
+      } else {
+        const result = Promise.race([
+          page.waitForEvent('download', { timeout: 8000 }).then(() => 'downloaded'),
+          page.locator('#toastContainer .toast.error.show').waitFor({ timeout: 8000 }).then(() => 'error'),
+        ]);
+        const [outcome] = await Promise.all([result, fixture.choose(page, 'save')]);
+        assert.equal(outcome, 'error', 'Save must not download cached bytes with a different key');
+        assert.equal(await page.evaluate(() => fixture.previewPopups), 0, 'Save must not open the cached video in a new tab');
+      }
+
+      assert.deepEqual(await fixture.counts(page, attachment.id), { requests: 2, decrypts: 1 }, 'The different key misses the cache and fails authenticated decryption');
+      assert.deepEqual(external, []);
+      assert.deepEqual(errors, []);
+    });
+  }
+
+  test('shared video metadata reuses the cached bytes across storage hosts', async t => {
+    const attachment = fixture.attachment('shared-key');
+    const { context, page, external, errors } = await fixture.createSession();
+    t.after(() => context.close());
+    await fixture.install(page, attachment);
+    await fixture.open(page);
+    await fixture.close(page);
+    const shared = await page.evaluate(() => fixture.shareMetadata());
+    assert.equal(shared.url, attachment.url, 'Share copies the storage URL');
+    assert.equal(shared.encKey, attachment.encKey, 'Share copies the original encryption key');
+
+    const alias = new URL(shared.url);
+    alias.protocol = 'https:';
+    alias.hostname = 'localhost';
+    fixture.unavailable.add(attachment.id);
+    await page.reload();
+    const copiedAttachment = { ...shared, url: alias.href };
+    await fixture.install(page, copiedAttachment);
+    await fixture.open(page);
+    await fixture.close(page);
+    await fixture.save(page, copiedAttachment);
+    assert.deepEqual(await fixture.counts(page, attachment.id), { requests: 1, decrypts: 0 }, 'The copy uses the same IndexedDB data after reload');
+    assert.deepEqual(external, [], 'A cache hit never contacts the alternate storage host');
+    assert.deepEqual(errors, []);
+  });
+
+  test('existing unkeyed image cache entries still open and save', async t => {
+    const id = 'legacy-image';
+    const attachment = { id, url: `${fixture.origin}/get/${id}`, name: 'Legacy image.png', type: 'image/png', size: legacyImage.length };
+    const { context, page, external, errors } = await fixture.createSession();
+    t.after(() => context.close());
+    await seedLegacyRows(page);
+    await fixture.install(page, attachment);
+    await fixture.choose(page, 'open');
+    await page.waitForFunction(() => {
+      const image = document.querySelector('#fullImageViewerImage');
+      return !image.hidden && image.complete && image.naturalWidth === 1;
+    }, null, { timeout: 8000 });
+    await fixture.close(page);
+    await fixture.save(page, attachment, legacyImage);
+    assert.deepEqual(await fixture.counts(page, id), { requests: 0, decrypts: 0 });
+    assert.deepEqual(external, []);
+    assert.deepEqual(errors, []);
+  });
+
+  test('legacy selfKey and explicit encKey resolve to the same cached video', async t => {
+    const attachment = fixture.attachment('legacy-video-key');
+    const { context, page, external, errors } = await fixture.createSession();
+    t.after(() => context.close());
+    await fixture.install(page, { ...attachment, encKey: undefined, selfKey: fixture.selfKey });
+    await fixture.open(page);
+    await fixture.close(page);
+    assert.deepEqual(await fixture.counts(page, attachment.id), { requests: 1, decrypts: 1 });
+    fixture.unavailable.add(attachment.id);
+    await page.reload();
+    await fixture.install(page, attachment);
+    await fixture.save(page, attachment);
+    assert.deepEqual(await fixture.counts(page, attachment.id), { requests: 1, decrypts: 0 });
+    assert.deepEqual(external, []);
+    assert.deepEqual(errors, []);
+  });
+
   test('IndexedDB survives reload and keeps existing v4 image and thumbnail data', async t => {
     const attachment = fixture.attachment('persisted');
     const { context, page, external, errors } = await fixture.createSession();
@@ -296,7 +400,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     assert.equal(await readRow(page, 'thumbnails', attachment.id), null, 'Removal purges the video thumbnail');
     for (const name of ['fullImages', 'thumbnails']) {
       const legacy = await readRow(page, name, 'legacy-image');
-      assert.equal(legacy.digest, createHash('sha256').update(name).digest('base64'));
+      assert.equal(legacy.digest, createHash('sha256').update(legacyImage).digest('base64'));
       assert.equal(legacy.ownerKeys, undefined, 'Legacy unowned rows retain their shape');
     }
     assert.deepEqual(external, []);
