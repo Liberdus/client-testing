@@ -143,9 +143,10 @@ const modalEnd = appSource.indexOf('const proposalInfoModal = new ProposalInfoMo
 assert.ok(modalStart >= 0 && modalEnd > modalStart, 'ProposalInfoModal must exist in app.js');
 const modalSource = `${appSource.slice(modalStart, modalEnd)}\n({ ProposalInfoModal });`;
 
-function renderWith({ proposalData, casts, address = USER_LONG }) {
+function buildModal({ proposalData, casts, address = USER_LONG }) {
   const context = {
     ...dao,
+    getDaoCurrentAccountAddress: () => address,
     daoProposalVoteTracker: { getCasts: (number) => (number === proposalData.number ? casts : []) },
     escapeHtml: (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
     escapeDaoFormAttribute: (value) => String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'),
@@ -155,8 +156,11 @@ function renderWith({ proposalData, casts, address = USER_LONG }) {
     formatDaoCompactTimestamp: (ts) => (ts ? `t${ts}` : ''),
   };
   const { ProposalInfoModal } = vm.runInNewContext(modalSource, context);
-  const modal = new ProposalInfoModal();
-  return modal.renderUserVote(proposalData, address);
+  return new ProposalInfoModal();
+}
+
+function renderWith(options) {
+  return buildModal(options).renderUserVote(options.proposalData, options.address ?? USER_LONG);
 }
 
 test('render: hidden when nothing shows the account voted', () => {
@@ -202,4 +206,27 @@ test('render: a single cast is labeled Vote, and power appears for a cast with o
   assert.match(html, /<span>Voting power<\/span><strong>40 power<\/strong>/);
   assert.match(html, /<strong>30 power<\/strong>/);
   assert.doesNotMatch(html, /Vote 1/);
+});
+
+test('refreshUserVote replaces only the slot in the open modal, so a saved cast shows at once', () => {
+  const saved = [];
+  const proposalData = proposal();
+  const modal = buildModal({ proposalData, casts: saved });
+  const slot = { innerHTML: '' };
+  const untouched = { innerHTML: '<h3>Current Vote</h3>' };
+  modal.content = { querySelector: (selector) => (selector === '.proposal-user-vote-slot' ? slot : untouched) };
+
+  modal.refreshUserVote(proposalData);
+  assert.equal(slot.innerHTML, '', 'nothing saved yet: slot stays empty');
+
+  saved.push(cast(TX_A));
+  modal.refreshUserVote(proposalData);
+  assert.match(slot.innerHTML, /<h3>Your vote<\/h3>/);
+  assert.match(slot.innerHTML, /Submitted/);
+  assert.doesNotMatch(slot.innerHTML, /Voted:/, 'no voterList entry yet, so no Voted time');
+  assert.equal(untouched.innerHTML, '<h3>Current Vote</h3>');
+
+  modal.content = null;
+  assert.doesNotThrow(() => modal.refreshUserVote(proposalData));
+  assert.doesNotThrow(() => modal.refreshUserVote(null));
 });
