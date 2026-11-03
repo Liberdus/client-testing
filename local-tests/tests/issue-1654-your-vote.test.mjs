@@ -22,6 +22,7 @@ const USER_LONG = `${USER}${'0'.repeat(24)}`;
 const OTHER = 'b'.repeat(40);
 const TX_A = 'a1'.repeat(32);
 const TX_B = 'b2'.repeat(32);
+const TX_C = 'c3'.repeat(32);
 const LIB = 10n ** 18n;
 
 function proposal(overrides = {}) {
@@ -304,27 +305,42 @@ test('receipt polling stops at reminder expiry without repeating warnings or dis
   assert.deepEqual(tracker.getCasts(12), [cast(TX_A, { optionWeights: null })]);
 });
 
-test('receipt polling leaves missing power unavailable and removes only a rejected cast', async () => {
-  const { tracker, myData, poll } = buildVotePollingFixture();
+test('receipt polling leaves missing power unavailable and retains only the rejected cast as failed', async () => {
+  const { tracker, myData, poll, savedVoteStates } = buildVotePollingFixture();
   tracker.recordSubmittedVote({ proposalNumber: 12, ...cast(TX_A) });
   tracker.recordSubmittedVote({ proposalNumber: 12, ...cast(TX_B) });
+  tracker.recordSubmittedVote({ proposalNumber: 12, ...cast(TX_C) });
 
   const confirmed = cast(TX_A, { status: 'confirmed', optionWeights: null });
-  const submitted = cast(TX_B, { optionWeights: null });
+  const rejected = cast(TX_B, { optionWeights: null });
+  const submitted = cast(TX_C, { optionWeights: null });
   for (const optionWeights of [[1n], [0, 0.5, 10], [0, Number.MAX_SAFE_INTEGER + 1, 10]]) {
     await poll(TX_A, { success: true, additionalInfo: { optionWeights } });
-    assert.deepEqual(tracker.getCasts(12), [confirmed, submitted]);
+    assert.deepEqual(tracker.getCasts(12), [confirmed, rejected, submitted]);
   }
   const html = renderWith({ proposalData: proposal(), casts: [confirmed] });
   assert.deepEqual(readVoteColumnHeadings(html), ['Option', 'LIB']);
   assert.doesNotMatch(html, /\d+%|Voting power/);
 
   await poll(TX_B, { success: false, reason: 'Synthetic rejection' });
-  assert.deepEqual(tracker.getCasts(12), [confirmed]);
+  const failed = { ...rejected, status: 'failed' };
+  assert.deepEqual(tracker.getCasts(12), [confirmed, failed, submitted]);
+  assert.equal(myData.pending.length, 0);
+  assert.deepEqual(savedVoteStates.at(-1)[12].casts, [confirmed, failed, submitted]);
   assert.equal(myData.daoUserVotes[12].votingEndsAt, 105_000);
+  assert.deepEqual(tracker.getPendingClaimProposalNumbers(), [12]);
 
   await poll(TX_A, { success: false, reason: 'Conflicting rejection' });
-  assert.deepEqual(tracker.getCasts(12), [confirmed]);
+  assert.deepEqual(tracker.getCasts(12), [confirmed, failed, submitted]);
+});
+
+test('a failed-only vote is kept in history without becoming a claim candidate', async () => {
+  const { tracker, poll } = buildVotePollingFixture();
+  tracker.recordSubmittedVote({ proposalNumber: 12, ...cast(TX_A) });
+  await poll(TX_A, { success: false, reason: 'Synthetic rejection' });
+
+  assert.deepEqual(tracker.getCasts(12), [cast(TX_A, { status: 'failed', optionWeights: null })]);
+  assert.deepEqual(tracker.getPendingClaimProposalNumbers(), []);
 });
 
 const modalStart = appSource.indexOf('class ProposalInfoModal {');
@@ -440,6 +456,29 @@ test('render: a receipt-backed cast shows Option, Share, Power and total voting 
   assert.match(html, /<span[^>]*>Lower the fee<\/span>\s*<span[^>]*>25%<\/span>\s*<strong>30 power<\/strong>/);
   assert.match(html, /<span>Voting power<\/span><strong>40 power<\/strong>/);
   assert.doesNotMatch(html, /Vote 1/);
+});
+
+test('render: failed casts show the attempted amount without contributing to Spent', () => {
+  const proposalData = proposal();
+  const failed = cast(TX_B, { status: 'failed', spend: 20n * LIB, timestamp: 1_400 });
+  const mixed = renderWith({
+    proposalData,
+    casts: [
+      cast(TX_A, { status: 'confirmed', optionWeights: [0n, 10n, 30n] }),
+      failed,
+      cast(TX_C, { spend: 10n * LIB, timestamp: 1_500 }),
+    ],
+  });
+
+  assert.match(readVoteDisclosure(mixed).summary, /Spent\s*<strong>50 LIB<\/strong>/);
+  assert.match(mixed, /Vote 2 · t1400<\/span>\s*<span[^>]*>Failed<\/span>/);
+  assert.match(mixed, /<span>Attempted<\/span>\s*<strong>20 LIB<\/strong>/);
+
+  const onlyFailed = renderWith({ proposalData, casts: [failed] });
+  assert.match(readVoteDisclosure(onlyFailed).summary, /Spent\s*<strong>0 LIB<\/strong>/);
+  assert.match(onlyFailed, /<span>Attempted<\/span>\s*<strong>20 LIB<\/strong>/);
+  assert.deepEqual(readVoteColumnHeadings(onlyFailed), ['Option', 'LIB']);
+  assert.doesNotMatch(onlyFailed, /Voting power/);
 });
 
 test('refreshUserVote replaces only the slot in the open modal, so a saved cast shows at once', () => {
