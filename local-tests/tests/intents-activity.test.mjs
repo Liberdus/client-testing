@@ -95,6 +95,8 @@ const received = paymentEntry({ assetId: SOL, amount: '0.002', my: false, peer: 
 ck('theirs: a claim until checked', [received.title, received.direction, received.status], ['From Dana', 1, 'checking']);
 ck('a claim that failed its check', paymentEntry({ ...received, my: false, verified: 'failed' }).status, 'unconfirmed');
 ck('a claim too old to check is neither', paymentEntry({ ...received, my: false, verified: 'expired' }).status, 'expired');
+ck('a saved inconclusive verdict carries over to activity',
+  paymentEntry({ ...received, my: false, verified: 'unknown' }).status, 'unknown');
 
 section('an order, from each side');
 const swap = { id: 's1', kind: 'swap', fromAssetId: SOL, toAssetId: USDC, fromSymbol: 'SOL', toSymbol: 'USDC', amount: '0.005', amountOut: '0.57', time: 7, status: 'pending' };
@@ -179,11 +181,16 @@ ck('remembered once settled', await activity.verifyPayment(row('h9'), '0xme'), '
 ck('offline is not a verdict', await activity.verifyPayment(row('h10'), '0xme'), 'checking');
 let askedWith = null;
 activity.configure({ verifyClaim: async (claim, options) => { askedWith = { claim, options }; return { state: 'expired' }; } });
-ck('too old to check, when the relay has forgotten', await activity.verifyPayment(row('h11', { time: 1234 }), '0xme'), 'expired');
-ck('  judged by the payment\'s own time', askedWith?.options.sentAt, 1234);
+const oldPaymentRow = paymentEntry({ ...received, intentHash: 'h11', initiatedAt: 1234, time: 5678, peerAccount: '0xpeer' });
+ck('too old to check, when the relay has forgotten', await activity.verifyPayment(oldPaymentRow, '0xme'), 'expired');
+ck('  the payment age travels with its claim', askedWith?.claim.initiatedAt, 1234);
 ck('  checked as from the contact, to this account',
   [askedWith?.options.expectedFrom, askedWith?.options.expectedTo], ['0xpeer', '0xme']);
-ck('  against the whole claim, not just its hash', askedWith?.claim, { intentHash: 'h11' });
+ck('  against the whole claim', askedWith?.claim, oldPaymentRow.claim);
+activity.configure({ verifyClaim: async () => ({ state: 'unknown' }) });
+ck('an inconclusive lookup has its own status', await activity.verifyPayment(row('h12'), '0xme'), 'unknown');
+activity.configure({ verifyClaim: async () => ({ state: 'settled' }) });
+ck('an inconclusive lookup is remembered for this session', await activity.verifyPayment(row('h12'), '0xme'), 'unknown');
 
 section('addresses withdrawn to before');
 {

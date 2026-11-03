@@ -16,6 +16,7 @@ import {
   parseTransferMessage,
   verifyTransferClaim,
   paymentStatusLabel,
+  RELAY_MEMORY_MS,
 } from '../near-assets.js';
 
 let pass = 0, fail = 0;
@@ -110,7 +111,9 @@ section('verifying a claim against the logged transfer');
   const asked = [];
   const noRelay = async (hash) => { asked.push(hash); throw new Error('the relay should not be needed'); };
 
-  const good = await verifyTransferClaim(CLAIM, { ...parties, getStatus: noRelay, getTransfers: logged([LOGGED]) });
+  const good = await verifyTransferClaim({ ...CLAIM, initiatedAt: 1 }, {
+    ...parties, getStatus: noRelay, getTransfers: logged([LOGGED]),
+  });
   ck('the real payment verifies against its transaction', good.state, 'settled');
   ck('  without asking the relay, which forgets', asked, []);
   ck('addresses compare without regard to case', (await verifyTransferClaim(CLAIM, {
@@ -161,17 +164,22 @@ section('verifying a claim against the logged transfer');
 
   // The relay forgets: a real payment from days ago comes back "not found".
   const now = Date.parse('2026-09-28T12:00:00Z');
-  const notFound = async () => ({ status: 'NOT_FOUND_OR_NOT_VALID' });
-  ck('unknown and fresh is a failure -- a real payment is known at once',
-    (await verifyTransferClaim(oldStyle, { getStatus: notFound, sentAt: now - 60_000, now })).state, 'failed');
-  ck('unknown and old is too old to check, not an accusation',
-    (await verifyTransferClaim(oldStyle, { getStatus: notFound, sentAt: now - 3 * 86_400_000, now })).state, 'expired');
-  ck('age never excuses an explicit failure', (await verifyTransferClaim(oldStyle, {
-    getStatus: async () => ({ status: 'FAILED' }), sentAt: now - 3 * 86_400_000, now,
+  const relayMiss = { getStatus: async () => ({ status: 'NOT_FOUND_OR_NOT_VALID' }), now };
+  const recentPayment = { ...oldStyle, initiatedAt: now - RELAY_MEMORY_MS };
+  const oldPayment = { ...oldStyle, initiatedAt: recentPayment.initiatedAt - 1 };
+  ck('a relay miss at the cutoff still fails the check', (await verifyTransferClaim(recentPayment, relayMiss)).state, 'failed');
+  ck('a relay miss past the cutoff is too old to check', (await verifyTransferClaim(oldPayment, relayMiss)).state, 'expired');
+  ck('age never excuses an explicit failure', (await verifyTransferClaim(oldPayment, {
+    getStatus: async () => ({ status: 'FAILED' }), now,
   })).state, 'failed');
-  ck('with no time to go on, unknown stays a failure',
-    (await verifyTransferClaim(oldStyle, { getStatus: notFound, now })).state, 'failed');
-  ck('the label says why, and accuses no one', paymentStatusLabel('expired'), 'Too old to check');
+  ck('a legacy receipt with unknown age is inconclusive', (await verifyTransferClaim(oldStyle, relayMiss)).state, 'unknown');
+  ck('a future payment time is inconclusive',
+    (await verifyTransferClaim({ ...oldStyle, initiatedAt: now + 1 }, relayMiss)).state, 'unknown');
+  ck('an invalid payment time does not invalidate the receipt', withGood({ initiatedAt: String(now) })?.initiatedAt, null);
+  ck('a malformed payment time is inconclusive',
+    (await verifyTransferClaim(withGood({ initiatedAt: String(now) }), relayMiss)).state, 'unknown');
+  ck('the expiry label explains the age limit', paymentStatusLabel('expired'), 'Too old to check');
+  ck('the unknown label reflects uncertainty', paymentStatusLabel('unknown'), 'Unable to confirm');
 }
 
 section('the transaction a receipt names');
