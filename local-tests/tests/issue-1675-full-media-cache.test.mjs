@@ -278,6 +278,33 @@ test('video requests without a key fingerprint bypass the cache without replacin
   assert.equal(await h.cache.getRecord(h.attachment('uncached-video').url, null), null);
 });
 
+test('attachment purge only deletes matching videos or legacy images of the right media kind', async () => {
+  const h = new CacheFixture(100);
+  h.seed('bound-video', 'cached clip', 10, 'video/mp4', ['another_network']);
+  h.seed('legacy-image', 'photo', 20, 'image/png');
+  const videoUrl = h.attachment('bound-video', 'video/mp4', 'moved.example').url;
+  const imageUrl = h.attachment('legacy-image', 'image/png').url;
+
+  for (const [type, keyFingerprint] of [
+    ['video/mp4', 'b'.repeat(64)],
+    ['video/mp4', undefined],
+    ['image/png', undefined],
+  ]) {
+    await h.cache.delete(videoUrl, type, keyFingerprint);
+    const retained = await h.cache.getRecord(videoUrl, null);
+    assert.equal(await retained?.blob.text(), 'cached clip', `${type} alias must leave the cached video intact`);
+    assert.equal(retained.cachedAt, 10);
+    assert.deepEqual(retained.ownerKeys, ['another_network']);
+  }
+  await h.cache.delete(imageUrl, 'video/mp4', VIDEO_KEY_FINGERPRINT);
+  assert.equal(await (await h.cache.getRecord(imageUrl, null))?.blob.text(), 'photo');
+
+  await h.cache.delete(videoUrl, 'video/mp4', VIDEO_KEY_FINGERPRINT);
+  assert.equal(await h.cache.getRecord(videoUrl, null), null);
+  await h.cache.delete(imageUrl, 'image/png');
+  assert.equal(await h.cache.getRecord(imageUrl, null), null);
+});
+
 test('available browser quota is checked before writing and older records make space', async () => {
   const h = new CacheFixture(100, () => ({ usage: 98, quota: 100 }));
   h.seed('old', 'old!', 10, 'image/png');
@@ -357,7 +384,7 @@ test('a download invalidated during decryption cannot reinsert an attachment rem
   });
   await startedDownload;
   keepAttachment = false;
-  await h.cache.delete(attachment.url);
+  await h.cache.delete(attachment.url, attachment.type, VIDEO_KEY_FINGERPRINT);
   const blob = h.blob('clip');
   finishDownload(blob);
   assert.equal(await opening, blob);
@@ -377,7 +404,7 @@ test('full videos follow attachment deletion and remove-all without entering thu
   assert.equal(backup.video.originalType, 'video/mp4');
   const videoUrl = h.attachment('video', 'video/mp4', 'moved.example').url;
   assert.ok(await h.cache.get(videoUrl));
-  await h.cache.delete(videoUrl);
+  await h.cache.delete(videoUrl, 'video/mp4', VIDEO_KEY_FINGERPRINT);
   assert.equal(await h.cache.get(videoUrl), null);
   await h.fetch('video', h.blob('redownloaded full video'));
   await h.cache.clear();

@@ -168,8 +168,9 @@ export class VideoCacheFixture {
       fixture.db = thumbnailCache;
       fixture.shareMetadata = () => ShareAttachmentModal.prototype.extractAttachmentData(row.closest('.message'));
       fixture.removeAttachment = () => {
+        const attachments = message.xattach;
         message.xattach = [];
-        chatModal.purgeAttachmentCaches([fixture.attachment]);
+        return chatModal.purgeAttachmentCaches(attachments, message);
       };
       if (!${blockCache}) void chatModal.loadThumbnailForAttachment(row);
     ` });
@@ -301,6 +302,33 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       }
 
       assert.deepEqual(await fixture.counts(page, attachment.id), { requests: 2, decrypts: 1 }, 'The different key misses the cache and fails authenticated decryption');
+      assert.deepEqual(external, []);
+      assert.deepEqual(errors, []);
+    });
+  }
+
+  for (const type of [videoMime, 'image/png']) {
+    test(`purging the same attachment ID with a different key declared as ${type} preserves the cached video`, async t => {
+      const attachment = fixture.attachment(`purge-wrong-key-${type.split('/')[1]}`);
+      const { context, page, external, errors } = await fixture.createSession();
+      t.after(() => context.close());
+      await fixture.install(page, attachment);
+      await fixture.open(page);
+      await fixture.close(page);
+      fixture.unavailable.add(attachment.id);
+
+      await page.reload();
+      await fixture.install(page, { ...attachment, type, encKey: wrongKey });
+      await page.evaluate(() => fixture.removeAttachment());
+      // Wait behind the cache transaction before closing the deleting document.
+      await readRow(page, 'fullImages', attachment.id);
+
+      await page.reload();
+      await fixture.install(page, attachment);
+      await fixture.open(page);
+      await fixture.close(page);
+      await fixture.save(page, attachment);
+      assert.deepEqual(await fixture.counts(page, attachment.id), { requests: 1, decrypts: 0 });
       assert.deepEqual(external, []);
       assert.deepEqual(errors, []);
     });
