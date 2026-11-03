@@ -324,3 +324,32 @@ test('remove-all does not let an earlier download repopulate the full media cach
   assert.equal(result, blob);
   assert.equal(await h.cache.get(attachment.url), null);
 });
+
+test('Remove All clears account data and reloads even when IndexedDB blocks media cleanup', async () => {
+  const start = app.indexOf('\nclass RemoveAccountsModal {');
+  const end = app.indexOf('\nconst removeAccountsModal =', start);
+  assert.ok(start >= 0 && end > start);
+  const events = [];
+  const warnings = [];
+  const toasts = [];
+  const environment = {
+    prompt: () => 'REMOVE ALL',
+    fullMediaCache: { clear: async () => {
+      events.push('clear media');
+      throw new DOMException('IndexedDB access denied', 'SecurityError');
+    } },
+    localStorage: { clear: () => events.push('clear storage') },
+    clearMyData: () => events.push('clear account state'),
+    alert: message => { warnings.push(message); events.push('warn'); },
+    showToast: (...args) => toasts.push(args),
+    window: { location: { reload: () => events.push('reload') } },
+    console: { warn() {} },
+  };
+  const Modal = new Function(...Object.keys(environment), `return (${app.slice(start, end)});`)(...Object.values(environment));
+  await new Modal().handleRemoveAllAccounts();
+
+  assert.deepEqual(events, ['clear media', 'clear storage', 'clear account state', 'warn', 'reload']);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /cached attachments|cached media|media cache/i);
+  assert.equal(toasts.some(([, , kind]) => kind === 'success'), false);
+});
