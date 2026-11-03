@@ -12,6 +12,7 @@ assert.ok(clientRoot && isAbsolute(clientRoot), 'Set WEB_CLIENT_ROOT to the abso
 const dao = await import(pathToFileURL(join(clientRoot, 'dao.js')).href);
 const {
   createDaoProposalVoteTracker,
+  DAO_ACTION_TYPES,
   DAO_USER_VOTE_SUMMARY_KINDS,
   getDaoUserVoteSummary,
 } = dao;
@@ -41,9 +42,9 @@ test('nothing is shown for an account that has not voted', () => {
 });
 
 test('voterList participation without local casts gives the neutral voted fallback', () => {
-  assert.deepEqual(
-    getDaoUserVoteSummary({ proposal: proposal(votedBy(USER_LONG, 1_250)), address: USER, casts: [] }),
-    { kind: DAO_USER_VOTE_SUMMARY_KINDS.VOTED, confirmed: true, timestamp: 1_250 },
+  assert.equal(
+    getDaoUserVoteSummary({ proposal: proposal(votedBy(USER_LONG, 1_250)), address: USER, casts: [] }).kind,
+    DAO_USER_VOTE_SUMMARY_KINDS.VOTED,
   );
   // Malformed or option-count-mismatched local casts do not invent a choice.
   const summary = getDaoUserVoteSummary({
@@ -58,8 +59,6 @@ test('a single cast is listed with weight shares, allocated LIB, its status and 
   const summary = getDaoUserVoteSummary({ proposal: proposal(votedBy(USER, 1_250)), address: USER_LONG, casts: [cast(TX_A)] });
 
   assert.equal(summary.kind, DAO_USER_VOTE_SUMMARY_KINDS.DETAIL);
-  assert.equal(summary.confirmed, true);
-  assert.equal(summary.timestamp, 1_250);
   assert.equal(summary.casts.length, 1);
   const [only] = summary.casts;
   assert.equal(only.txid, TX_A);
@@ -85,8 +84,6 @@ test('multiple casts are listed separately in time order and are never combined'
     ],
   });
 
-  assert.equal(summary.confirmed, false);
-  assert.equal(summary.timestamp, 0);
   assert.deepEqual(summary.casts.map((entry) => [entry.txid, entry.timestamp, entry.spend]), [
     [TX_A, 1_000, 10n * LIB],
     [TX_B, 2_000, 30n * LIB],
@@ -138,6 +135,198 @@ test('the tracker exposes normalized casts for a proposal without exposing other
 // Render checks: evaluate the real ProposalInfoModal class with simple, deterministic
 // formatter stubs so assertions stay about structure and fallbacks, not number formatting.
 const appSource = readFileSync(join(clientRoot, 'app.js'), 'utf8');
+
+function readAppSource(startMarker, endMarker) {
+  const start = appSource.indexOf(startMarker);
+  const end = appSource.indexOf(endMarker, start);
+  assert.ok(start >= 0 && end > start, 'production source must exist: ' + startMarker);
+  return appSource.slice(start, end);
+}
+
+const votePollingSource = [
+  readAppSource('class DaoModal {', 'const daoModal = new DaoModal();'),
+  readAppSource('function removePendingTransaction(', '/**\n * Remove failed transaction'),
+  readAppSource('async function checkPendingTransactionsOnce()', '/**\n * Update status of a transaction'),
+  'const daoModal = new DaoModal(); ({ daoModal, checkPending: checkPendingTransactionsOnce });',
+].join('\n');
+
+function buildVotePollingFixture({ refresh = async () => {} } = {}) {
+  let now = 100_000;
+  const proposalNumber = 12;
+  const myData = { pending: [], daoUserVotes: {} };
+  const receiptsRequested = [];
+  const modalRefreshes = [];
+  const toasts = [];
+  const savedVoteStates = [];
+  const tracker = createDaoProposalVoteTracker({
+    getDaoUserVotes: () => myData.daoUserVotes,
+    setDaoUserVotes: (votes) => { myData.daoUserVotes = votes; },
+  });
+  let receipt = null;
+  const { daoModal, checkPending } = vm.runInNewContext(votePollingSource, {
+    ...dao,
+    myData,
+    myAccount: { keys: { address: USER_LONG } },
+    network: { netid: 'synthetic-network' },
+    daoProposalVoteTracker: tracker,
+    DAO_PROPOSAL_PAGE_SIZE: 10,
+    createEmptyDaoNotificationSummary: () => ({}),
+    getCorrectedTimestamp: () => now,
+    queryNetwork: async (path) => {
+      receiptsRequested.push(path);
+      return { transaction: typeof receipt === 'function' ? receipt(path) : receipt };
+    },
+    daoRepo: {
+      refresh,
+      getProposalMetaForUi: () => [],
+      getProposalById: () => ({ number: proposalNumber }),
+    },
+    proposalInfoModal: { refreshIfOpen: (_id, options) => modalRefreshes.push({ ...options }) },
+    refreshNetworkParamsOnTxFeeMismatch: async () => null,
+    getUserFacingTxFailureReason: (reason) => reason,
+    refreshActiveBalanceDisplays: async () => {},
+    showToast: (_message, _duration, kind) => toasts.push(kind),
+    saveState: () => savedVoteStates.push(structuredClone(myData.daoUserVotes)),
+    console: { log() {}, warn() {}, error() {} },
+  });
+  daoModal.modal = { classList: { contains: () => false } };
+  return {
+    tracker,
+    myData,
+    checkPending,
+    receiptsRequested,
+    modalRefreshes,
+    toasts,
+    savedVoteStates,
+    async advance(elapsed, transaction) {
+      now += elapsed;
+      receipt = transaction;
+      await checkPending();
+    },
+    async poll(txid, transaction, age = 10_000) {
+      receipt = transaction;
+      myData.pending.push({
+        txid,
+        type: DAO_ACTION_TYPES.VOTE,
+        proposalNumber,
+        proposalStoreId: 'proposal-12',
+        from: USER_LONG,
+        submittedts: now - age,
+        votingEndsAt: now + 5_000,
+        estimatedClaimEndsAt: now + 10_000,
+        reminderExpiresAt: now + 180_000,
+      });
+      await checkPending();
+    },
+  };
+}
+
+test('receipt polling attaches option weights to the matching cast and tolerates a refresh retry', async () => {
+  let refreshes = 0;
+  let durableCastBeforeRefresh;
+  const { tracker, myData, poll, checkPending, savedVoteStates, modalRefreshes } = buildVotePollingFixture({
+    refresh: async () => {
+      refreshes += 1;
+      if (refreshes === 1) {
+        durableCastBeforeRefresh = savedVoteStates.at(-1)?.[12]?.casts?.[0];
+        throw new Error('Proposal refresh temporarily unavailable');
+      }
+    },
+  });
+  tracker.recordSubmittedVote({ proposalNumber: 12, ...cast(TX_A) });
+  tracker.recordSubmittedVote({ proposalNumber: 12, ...cast(TX_B) });
+  tracker.setAuthoritativeClaimWindow(12, 110_000, 120_000);
+
+  await poll(TX_A, {
+    success: true,
+    additionalInfo: { optionWeights: ['0', '10', { dataType: 'bi', value: '1e' }] },
+  });
+  assert.deepEqual(tracker.getCasts(12), [
+    cast(TX_A, { status: 'confirmed', optionWeights: [0n, 10n, 30n] }),
+    cast(TX_B, { optionWeights: null }),
+  ]);
+  assert.deepEqual(durableCastBeforeRefresh, tracker.getCasts(12)[0]);
+  assert.equal(modalRefreshes[0]?.voteOnly, true, 'the open vote section can refresh if proposal reload fails');
+  assert.equal(myData.pending.length, 1, 'refresh failure leaves receipt reconciliation pending');
+
+  const savedAfterFirstReceipt = structuredClone(myData.daoUserVotes);
+  await checkPending();
+  assert.equal(refreshes, 2);
+  assert.equal(myData.pending.length, 0);
+  assert.deepEqual(myData.daoUserVotes, savedAfterFirstReceipt);
+  assert.deepEqual(tracker.getOpenClaimProposalNumbers(115_000), [12]);
+});
+
+test('DAO receipt polling checks the validator when the collector lacks a result', async () => {
+  const { tracker, poll, receiptsRequested } = buildVotePollingFixture();
+  tracker.recordSubmittedVote({ proposalNumber: 12, ...cast(TX_A) });
+  const validatorPath = '/transaction/' + TX_A;
+  await poll(TX_A, (path) => path === validatorPath
+    ? { success: true, additionalInfo: { optionWeights: [0n, 30n, 10n] } }
+    : { additionalInfo: {} }, 21_000);
+  assert.deepEqual(receiptsRequested, ['/collector/api/transaction?appReceiptId=' + TX_A, validatorPath]);
+  assert.deepEqual(tracker.getCasts(12), [
+    cast(TX_A, { status: 'confirmed', optionWeights: [0n, 30n, 10n] }),
+  ]);
+});
+
+test('a timed-out vote stops blocking the form and reconciles a late receipt without resetting it', async () => {
+  const { tracker, myData, poll, advance, receiptsRequested, modalRefreshes, toasts } = buildVotePollingFixture();
+  tracker.recordSubmittedVote({ proposalNumber: 12, ...cast(TX_A) });
+  await poll(TX_A, { additionalInfo: {} }, 31_000);
+  assert.deepEqual(tracker.getCasts(12), [cast(TX_A, { optionWeights: null })]);
+  assert.equal(myData.pending.length, 1, 'keep checking the unresolved vote');
+  assert.equal(dao.hasPendingDaoAction(myData.pending, DAO_ACTION_TYPES.VOTE, 'proposal-12', USER_LONG), false);
+  assert.deepEqual(toasts, ['warning']);
+
+  const initialRequests = receiptsRequested.length;
+  const receipt = { success: true, additionalInfo: { optionWeights: [0n, 30n, 10n] } };
+  await advance(10_000, receipt);
+  assert.equal(receiptsRequested.length, initialRequests, 'do not query again before the retry interval');
+  await advance(50_000, receipt);
+  assert.deepEqual(tracker.getCasts(12), [
+    cast(TX_A, { status: 'confirmed', optionWeights: [0n, 30n, 10n] }),
+  ]);
+  assert.equal(myData.pending.length, 0);
+  assert.deepEqual(modalRefreshes.map((options) => options.resetVoteForm), [false, false],
+    'a late receipt does not reset the vote form');
+});
+
+test('receipt polling stops at reminder expiry without repeating warnings or discarding the local cast', async () => {
+  const { tracker, myData, poll, advance, toasts } = buildVotePollingFixture();
+  tracker.recordSubmittedVote({ proposalNumber: 12, ...cast(TX_A) });
+  await poll(TX_A, null, 31_000);
+  await advance(60_000, null);
+  assert.equal(myData.pending.length, 1);
+  await advance(120_000, null);
+  assert.equal(myData.pending.length, 0);
+  assert.deepEqual(toasts, ['warning']);
+  assert.deepEqual(tracker.getCasts(12), [cast(TX_A, { optionWeights: null })]);
+});
+
+test('receipt polling leaves missing power unavailable and removes only a rejected cast', async () => {
+  const { tracker, myData, poll } = buildVotePollingFixture();
+  tracker.recordSubmittedVote({ proposalNumber: 12, ...cast(TX_A) });
+  tracker.recordSubmittedVote({ proposalNumber: 12, ...cast(TX_B) });
+
+  const confirmed = cast(TX_A, { status: 'confirmed', optionWeights: null });
+  const submitted = cast(TX_B, { optionWeights: null });
+  for (const optionWeights of [[1n], [0, 0.5, 10], [0, Number.MAX_SAFE_INTEGER + 1, 10]]) {
+    await poll(TX_A, { success: true, additionalInfo: { optionWeights } });
+    assert.deepEqual(tracker.getCasts(12), [confirmed, submitted]);
+  }
+  const html = renderWith({ proposalData: proposal(), casts: [confirmed] });
+  assert.deepEqual(readVoteColumnHeadings(html), ['Option', 'LIB']);
+  assert.doesNotMatch(html, /\d+%|Voting power/);
+
+  await poll(TX_B, { success: false, reason: 'Synthetic rejection' });
+  assert.deepEqual(tracker.getCasts(12), [confirmed]);
+  assert.equal(myData.daoUserVotes[12].votingEndsAt, 105_000);
+
+  await poll(TX_A, { success: false, reason: 'Conflicting rejection' });
+  assert.deepEqual(tracker.getCasts(12), [confirmed]);
+});
+
 const modalStart = appSource.indexOf('class ProposalInfoModal {');
 const modalEnd = appSource.indexOf('const proposalInfoModal = new ProposalInfoModal();', modalStart);
 assert.ok(modalStart >= 0 && modalEnd > modalStart, 'ProposalInfoModal must exist in app.js');
@@ -170,6 +359,10 @@ function readVoteDisclosure(html) {
   return { open: /\bopen\b/.test(match[1]), summary: match[2] };
 }
 
+function readVoteColumnHeadings(html) {
+  return Array.from(html.matchAll(/<(?:span|th)\b[^>]*>(Option|LIB|Share|Power)<\/(?:span|th)>/g), (match) => match[1]);
+}
+
 function createVoteContent() {
   let html = '';
   let disclosure = null;
@@ -199,31 +392,30 @@ test('render: hidden when nothing shows the account voted', () => {
   assert.equal(renderWith({ proposalData: proposal(votedBy(OTHER)), casts: [] }), '');
 });
 
-test('render: Vote recorded fallback names no option or amount', () => {
+test('render: Vote recorded fallback names no timestamp, option, or amount', () => {
   const html = renderWith({ proposalData: proposal(votedBy(USER, 1_250)), casts: [] });
-  const disclosure = readVoteDisclosure(html);
-  assert.equal(disclosure.open, true);
-  assert.match(disclosure.summary, /Your vote/);
-  assert.match(disclosure.summary, /Voted: t1250/);
+  assert.match(html, /Your vote/);
   assert.match(html, /Vote recorded/);
-  assert.doesNotMatch(html, /Raise the fee|LIB|power|Submitted/);
+  assert.doesNotMatch(html, /Voted:|t1250|Raise the fee|LIB|power|Submitted/);
 });
 
-test('render: each cast gets its own card with rows, spend, status, and escaped long labels', () => {
+test('render: unverified casts show Option and LIB, with each cast time and escaped long labels', () => {
   const longLabel = `Raise the fee ${'x'.repeat(120)} <b>&"</b>`;
   const html = renderWith({
     proposalData: proposal({ options: ['no', longLabel, 'Lower the fee'], ...votedBy(USER, 1_250) }),
     casts: [cast(TX_A, { timestamp: 1_300 }), cast(TX_B, { weights: [0, 0, 1], spend: 20n * LIB, timestamp: 1_400 })],
   });
 
-  assert.match(html, /Voted: t1250/);
+  assert.doesNotMatch(html, /Voted:|t1250/);
+  assert.deepEqual(readVoteColumnHeadings(html), ['Option', 'LIB', 'Option', 'LIB']);
   assert.equal((html.match(/proposal-user-vote-card"/g) || []).length, 2);
   assert.equal((html.match(/>Submitted</g) || []).length, 2);
   assert.match(html, /Vote 1 · t1300<\/span>\s*<span[^>]*>Submitted<\/span>/);
   assert.match(html, /Vote 2 · t1400<\/span>\s*<span[^>]*>Submitted<\/span>/);
-  assert.match(html, /<span[^>]*>No change<\/span>\s*<span[^>]*>0%<\/span>\s*<strong>0 LIB<\/strong>/);
-  assert.match(html, /<span[^>]*>Raise the fee x+ &lt;b&gt;&amp;&quot;&lt;\/b&gt;<\/span>\s*<span[^>]*>75%<\/span>\s*<strong>30 LIB<\/strong>/);
-  assert.match(html, /<span[^>]*>Lower the fee<\/span>\s*<span[^>]*>100%<\/span>\s*<strong>20 LIB<\/strong>/);
+  assert.match(html, /<span[^>]*>No change<\/span>\s*<strong>0 LIB<\/strong>/);
+  assert.match(html, /<span[^>]*>Raise the fee x+ &lt;b&gt;&amp;&quot;&lt;\/b&gt;<\/span>\s*<strong>30 LIB<\/strong>/);
+  assert.match(html, /<span[^>]*>Lower the fee<\/span>\s*<strong>20 LIB<\/strong>/);
+  assert.doesNotMatch(html, /\d+%/);
   assert.match(html, /<span>Spend<\/span><strong>40 LIB<\/strong>/);
   assert.match(html, /<span>Spend<\/span><strong>20 LIB<\/strong>/);
   assert.match(readVoteDisclosure(html).summary, /60 LIB/);
@@ -231,10 +423,10 @@ test('render: each cast gets its own card with rows, spend, status, and escaped 
   assert.doesNotMatch(html, /<b>/);
 });
 
-test('render: a single cast is labeled Vote, and power appears for a cast with option weights', () => {
+test('render: a receipt-backed cast shows Option, Share, Power and total voting power', () => {
   const html = renderWith({
     proposalData: proposal(),
-    casts: [cast(TX_A, { optionWeights: [0n, 30n, 10n] })],
+    casts: [cast(TX_A, { status: 'confirmed', optionWeights: [0n, 10n, 30n] })],
   });
   assert.doesNotMatch(html, /Voted:/);
   const disclosure = readVoteDisclosure(html);
@@ -242,9 +434,11 @@ test('render: a single cast is labeled Vote, and power appears for a cast with o
   assert.match(disclosure.summary, /Your vote/);
   assert.match(disclosure.summary, /40 LIB/);
   assert.doesNotMatch(disclosure.summary, /Raise the fee|Lower the fee|Voting power/);
-  assert.match(html, /<span[^>]*>Vote · t1300<\/span>\s*<span[^>]*>Submitted<\/span>/);
+  assert.match(html, /<span[^>]*>Vote · t1300<\/span>\s*<span[^>]*>Confirmed<\/span>/);
+  assert.deepEqual(readVoteColumnHeadings(html), ['Option', 'Share', 'Power']);
+  assert.match(html, /<span[^>]*>Raise the fee<\/span>\s*<span[^>]*>75%<\/span>\s*<strong>10 power<\/strong>/);
+  assert.match(html, /<span[^>]*>Lower the fee<\/span>\s*<span[^>]*>25%<\/span>\s*<strong>30 power<\/strong>/);
   assert.match(html, /<span>Voting power<\/span><strong>40 power<\/strong>/);
-  assert.match(html, /<strong>30 power<\/strong>/);
   assert.doesNotMatch(html, /Vote 1/);
 });
 
@@ -315,7 +509,7 @@ test('the collapsed disclosure keeps focus through refreshes and a reopened moda
   proposalData.voterList = votedBy(USER).voterList;
   modal.refreshIfOpen(proposalId);
   assert.equal(disclosure().open, false, 'a full proposal refresh preserves the collapsed state');
-  assert.match(modal.content.innerHTML, /Voted: t1250/);
+  assert.doesNotMatch(modal.content.innerHTML, /Voted:|t1250/);
   assert.equal(disclosure().firstElementChild.matches(':focus'), true);
 
   modal.close();
