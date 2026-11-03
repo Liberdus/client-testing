@@ -123,3 +123,28 @@ reply-quote and call-link test PRs stay preserved and excluded. The #81–#87 E2
 stack is separate and unchanged. `playwright-tests/` live flows require an
 explicitly selected environment and authorization for accounts/transactions;
 they are not part of this offline audit.
+
+## Account media ownership and removal
+
+These focused tests exercise the production cache classes in headless Chromium with real IndexedDB. No application startup, live account, signing, broadcast, or external service is used.
+
+Install the repository's locked Playwright dependencies and Chromium:
+
+```bash
+npm ci --prefix playwright-tests
+cd playwright-tests
+npx playwright install chromium
+```
+
+Run from the repository root with Node.js 20.19 or newer:
+
+```bash
+WEB_CLIENT_ROOT=/absolute/path/to/web-client-v2 \
+  node --test local-tests/tests/issue-1853-media-ownership.browser.test.mjs
+```
+
+Set `WEB_CLIENT_ROOT` to the exact implementation checkout, including when it is a worktree. Each test uses temporary database names and closes and removes them afterward. Tests load the client's actual cache classes without running the full app; they read persisted records and indexes to check observable IndexedDB behavior.
+
+The 24 issue #1853 cases cover indexed media ownership, cache-hit registration, concurrent readers, preservation of legacy records (including full images missing an indexed timestamp), shared and selected-account removal, transaction aborts and action failures, best-effort delayed writes after removal, account switches, backup imports and exports (including overwrite counts and retained bytes), attachment identity and eviction, download fallbacks, and validation before storage access. Owner keys are synchronous account snapshots that require no IndexedDB access. Each asynchronous cache operation retains its owner key across awaited work. Avatar editor helpers select the current account when each helper starts and keep that local key across its cache reads; they do not carry an account context from one UI helper to the next.
+
+Removal cleans up media owned only by the selected accounts when its transactions run. An already-running download or delayed save can finish afterward and leave files under the original account key; it still follows the normal cache budget. These tests accept that best-effort behavior without attributing the late media to a newly selected account. They require the unmerged issue #1853 client implementation and must remain on their companion topic branch until that implementation is on client `main` and the cases have passed against it.
