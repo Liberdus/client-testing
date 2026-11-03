@@ -260,6 +260,30 @@ test('a rejected key or media-kind mismatch cannot read or claim the existing vi
   assert.deepEqual(existing.ownerKeys, ['another_network', 'synthetic_network']);
 });
 
+test('successful downloads with a colliding key or media kind do not replace a bound video', async () => {
+  const h = new CacheFixture(100);
+  h.seed('bound-video', 'cached clip', 10, 'video/mp4', ['another_network']);
+  const url = h.attachment('bound-video').url;
+
+  for (const [type, keyFingerprint, bytes] of [
+    ['video/mp4', 'b'.repeat(64), 'different decrypted video'],
+    ['image/png', undefined, 'different decrypted image'],
+  ]) {
+    const fresh = await h.cache.getOrCache({
+      attachment: h.attachment('bound-video', type),
+      keyFingerprint,
+      downloadAndDecrypt: async () => h.blob(bytes, type),
+    });
+    assert.equal(await fresh.text(), bytes, 'a colliding request still uses its fresh decrypted bytes');
+
+    const retained = await h.cache.getRecord(url, null);
+    assert.equal(await retained.blob.text(), 'cached clip');
+    assert.equal(retained.keyFingerprint, VIDEO_KEY_FINGERPRINT);
+    assert.equal(retained.cachedAt, 10);
+    assert.deepEqual(retained.ownerKeys, ['another_network']);
+  }
+});
+
 test('video requests without a key fingerprint bypass the cache without replacing or adding entries', async () => {
   const h = new CacheFixture(100);
   h.seed('bound-video', 'cached clip', 10, 'video/mp4', ['another_network']);

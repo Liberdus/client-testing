@@ -41,7 +41,7 @@ export class VideoCacheFixture {
     const app = await readFile(resolve(clientRoot, 'app.js'), 'utf8');
     const index = (await readFile(resolve(clientRoot, 'index.html'), 'utf8')).replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
     const { encryptChacha, encryptData } = await import(pathToFileURL(resolve(clientRoot, 'crypto.js')));
-    this.encrypt = bytes => Buffer.from(encryptChacha(syntheticKey, bytes.toString('base64')), 'base64');
+    this.encrypt = (bytes, key = syntheticKey) => Buffer.from(encryptChacha(key, bytes.toString('base64')), 'base64');
     this.selfKey = encryptData(syntheticKey.toString('hex'), syntheticAccountKeys.secret + syntheticAccountKeys.pqSeed, true);
     this.clip = execFileSync('ffmpeg', ['-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=480x270:rate=24',
       '-t', '4', '-c:v', 'libvpx', '-threads', '2', '-f', 'webm', 'pipe:1'], { timeout: 30000 });
@@ -333,6 +333,43 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       assert.deepEqual(errors, []);
     });
   }
+
+  test('a second valid video with the same attachment ID leaves the first cached video available', async t => {
+    const attachment = fixture.attachment('storage-id-collision');
+    const { context, page, external, errors } = await fixture.createSession();
+    t.after(() => context.close());
+    await fixture.install(page, attachment);
+    await fixture.open(page);
+    await fixture.close(page);
+
+    const alternateBytes = execFileSync('ffmpeg', ['-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=160x90:r=24',
+      '-t', '4', '-c:v', 'libvpx', '-threads', '2', '-f', 'webm', 'pipe:1'], { timeout: 30000 });
+    const alternate = { ...attachment, url: `https://alternate-storage.invalid/get/${attachment.id}`,
+      name: 'Alternate clip.webm', size: alternateBytes.length, encKey: wrongKey };
+    const encrypted = fixture.encrypt(alternateBytes, Buffer.from(alternate.encKey, 'base64'));
+    let alternateRequests = 0;
+    // Fulfill the synthetic HTTPS storage host locally without DNS or network access.
+    await context.route(alternate.url, route => {
+      alternateRequests++;
+      return route.fulfill({ body: encrypted, contentType: 'application/octet-stream',
+        headers: { 'Access-Control-Allow-Origin': fixture.origin, 'Cache-Control': 'no-store' } });
+    });
+    await page.reload();
+    await fixture.install(page, alternate);
+    await fixture.save(page, alternate, alternateBytes);
+    assert.equal(alternateRequests, 1);
+    assert.deepEqual(await fixture.counts(page, attachment.id), { requests: 1, decrypts: 1 });
+
+    fixture.unavailable.add(attachment.id);
+    await page.reload();
+    await fixture.install(page, attachment);
+    await fixture.open(page);
+    await fixture.close(page);
+    await fixture.save(page, attachment);
+    assert.deepEqual(await fixture.counts(page, attachment.id), { requests: 1, decrypts: 0 });
+    assert.deepEqual(external, []);
+    assert.deepEqual(errors, []);
+  });
 
   test('shared video metadata reuses the cached bytes across storage hosts', async t => {
     const attachment = fixture.attachment('shared-key');
