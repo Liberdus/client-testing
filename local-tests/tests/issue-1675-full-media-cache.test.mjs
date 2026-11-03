@@ -89,7 +89,6 @@ class MemoryTransaction {
         this.database.events.push(`delete:${key}`);
         rows.delete(key);
       }),
-      clear: () => this.request(() => rows.clear()),
       index: index => ({ openCursor: key => this.cursor(rows, store, index, key) }),
     };
     return store;
@@ -435,7 +434,7 @@ test('a download invalidated during decryption cannot reinsert an attachment rem
   assert.equal(h.database.events.includes('put:removed'), false);
 });
 
-test('full videos follow attachment deletion and remove-all without entering thumbnail backups', async () => {
+test('full videos follow attachment deletion without entering thumbnail backups', async () => {
   const h = new CacheFixture(100);
   h.seed('legacy-image', 'photo', 10, 'image/png');
   await h.fetch('video', h.blob('decrypted full video'));
@@ -449,27 +448,7 @@ test('full videos follow attachment deletion and remove-all without entering thu
   assert.ok(await h.cache.get(videoUrl));
   await h.cache.delete(videoUrl, 'video/mp4', VIDEO_KEY_FINGERPRINT);
   assert.equal(await h.cache.get(videoUrl), null);
-  await h.fetch('video', h.blob('redownloaded full video'));
-  await h.cache.clear();
-  assert.equal(await h.cache.get(videoUrl), null);
-  assert.equal(await h.cache.get(h.attachment('legacy-image').url), null);
   assert.deepEqual(Object.keys(await h.thumbnail.exportAll()), ['video']);
-});
-
-test('remove-all does not let an earlier download repopulate the full media cache', async () => {
-  const h = new CacheFixture(100);
-  const attachment = h.attachment('in-flight');
-  const blob = h.blob('clip');
-  const result = await h.cache.getOrCache({
-    attachment,
-    keyFingerprint: VIDEO_KEY_FINGERPRINT,
-    downloadAndDecrypt: async () => {
-      await h.cache.clear();
-      return blob;
-    },
-  });
-  assert.equal(result, blob);
-  assert.equal(await h.cache.get(attachment.url), null);
 });
 
 test('Remove All clears account data and reloads even when IndexedDB blocks media cleanup', async () => {
@@ -479,11 +458,18 @@ test('Remove All clears account data and reloads even when IndexedDB blocks medi
   const events = [];
   const warnings = [];
   const toasts = [];
+  let finishAttachmentDeletion;
+  const attachmentDeletion = new Promise(resolve => { finishAttachmentDeletion = resolve; });
   const environment = {
     prompt: () => 'REMOVE ALL',
-    fullMediaCache: { clear: async () => {
-      events.push('clear media');
-      throw new DOMException('IndexedDB access denied', 'SecurityError');
+    contactAvatarCache: { deleteDatabase: async () => {
+      events.push('delete avatar cache');
+      throw new DOMException('IndexedDB deletion blocked', 'InvalidStateError');
+    } },
+    thumbnailCache: { deleteDatabase: async () => {
+      events.push('delete attachment cache');
+      await attachmentDeletion;
+      events.push('attachment cache deleted');
     } },
     localStorage: { clear: () => events.push('clear storage') },
     clearMyData: () => events.push('clear account state'),
@@ -493,9 +479,17 @@ test('Remove All clears account data and reloads even when IndexedDB blocks medi
     console: { warn() {} },
   };
   const Modal = new Function(...Object.keys(environment), `return (${app.slice(start, end)});`)(...Object.values(environment));
-  await new Modal().handleRemoveAllAccounts();
+  const removal = new Modal().handleRemoveAllAccounts();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(events, ['delete avatar cache', 'delete attachment cache'],
+    'Account removal waits for both cache deletions even when one fails');
+  finishAttachmentDeletion();
+  await removal;
 
-  assert.deepEqual(events, ['clear media', 'clear storage', 'clear account state', 'warn', 'reload']);
+  assert.deepEqual(events, [
+    'delete avatar cache', 'delete attachment cache', 'attachment cache deleted',
+    'clear storage', 'clear account state', 'warn', 'reload',
+  ]);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /cached attachments|cached media|media cache/i);
   assert.equal(toasts.some(([, , kind]) => kind === 'success'), false);

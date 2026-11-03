@@ -47,18 +47,27 @@ export class VideoCacheFixture {
       '-t', '4', '-c:v', 'libvpx', '-threads', '2', '-f', 'webm', 'pipe:1'], { timeout: 30000 });
     // The old cache name keeps the same behavior checks runnable on the before-fix client.
     const cacheName = app.includes('\nclass FullMediaCache {') ? 'Media' : 'Image';
+    const cacheSource = [
+      extract(app, 'class MediaCacheOwnership {', '/** Handles IndexedDB storage for contact avatar thumbnails. */'),
+      extract(app, 'class ThumbnailCache {', 'const thumbnailCache = new ThumbnailCache();'),
+      extract(app, `const FULL_${cacheName.toUpperCase()}_CACHE_MAX_SIZE`, `const full${cacheName}Cache = new Full${cacheName}Cache(thumbnailCache);`),
+      `const thumbnailCache = new ThumbnailCache(); const full${cacheName}Cache = new Full${cacheName}Cache(thumbnailCache);`,
+    ];
+    this.removeAllSource = [
+      ...cacheSource,
+      extract(app, 'class ContactAvatarCache {', 'const contactAvatarCache = new ContactAvatarCache();'),
+      extract(app, 'class RemoveAccountsModal {', 'const removeAccountsModal = new RemoveAccountsModal();'),
+      'const contactAvatarCache = new ContactAvatarCache();',
+    ].join('\n');
     this.source = [
       extract(app, 'function encodeAttachmentName(', '// Used in getNetworkParams function'),
       extract(app, 'function getDeletedState(', 'function isDeletedForMeOnly('),
       extract(app, 'function generateMessageHash(', 'function normalizeFailureReason('),
       extract(app, 'function showToast(', '// Handle online/offline events'),
-      extract(app, 'class MediaCacheOwnership {', '/** Handles IndexedDB storage for contact avatar thumbnails. */'),
-      extract(app, 'class ThumbnailCache {', 'const thumbnailCache = new ThumbnailCache();'),
-      extract(app, `const FULL_${cacheName.toUpperCase()}_CACHE_MAX_SIZE`, `const full${cacheName}Cache = new Full${cacheName}Cache(thumbnailCache);`),
+      ...cacheSource,
       extract(app, 'class ChatModal {', 'const chatModal = new ChatModal();'),
       extract(app, 'class FullImageModal {', 'const fullImageModal = new FullImageModal();'),
       extract(app, 'class ShareAttachmentModal {', 'const shareAttachmentModal = new ShareAttachmentModal();'),
-      `const thumbnailCache = new ThumbnailCache(); const full${cacheName}Cache = new Full${cacheName}Cache(thumbnailCache);`,
     ].join('\n');
 
     this.server = createServer(async (request, response) => {
@@ -468,6 +477,97 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       assert.equal(legacy.digest, createHash('sha256').update(legacyImage).digest('base64'));
       assert.equal(legacy.ownerKeys, undefined, 'Legacy unowned rows retain their shape');
     }
+    assert.deepEqual(external, []);
+    assert.deepEqual(errors, []);
+  });
+
+  test('Remove All deletes owned and unowned media before reporting success', async t => {
+    const { context, page, external, errors } = await fixture.createSession();
+    t.after(() => context.close());
+
+    const result = await page.evaluate(async source => {
+      const { normalizeMimeType } = await import('/lib.js');
+      const events = [];
+      const deleteDatabase = indexedDB.deleteDatabase.bind(indexedDB);
+      indexedDB.deleteDatabase = name => {
+        const request = deleteDatabase(name);
+        request.addEventListener('success', () => events.push(name));
+        return request;
+      };
+
+      const environment = {
+        myAccount: { username: 'cachefixture', netid: 'test' },
+        normalizeMimeType,
+        prompt: () => 'REMOVE ALL',
+        showToast: (_message, _duration, kind) => events.push(kind),
+        alert: message => events.push(message),
+        clearMyData: () => events.push('account cleared'),
+        window: { location: { reload: () => events.push('reload') } },
+      };
+      const { avatarCache, attachmentCache, fullCache, removeAll } =
+        new Function(...Object.keys(environment), source + `
+          return {
+            avatarCache: contactAvatarCache,
+            attachmentCache: thumbnailCache,
+            fullCache: fullMediaCache,
+            removeAll: () => new RemoveAccountsModal().handleRemoveAllAccounts(),
+          };
+        `)(...Object.values(environment));
+
+      const image = new Blob(['cached image'], { type: 'image/png' });
+      const video = new Blob(['cached video'], { type: 'video/webm' });
+      const seed = async (cache, storeName, records) => {
+        const db = await cache.init();
+        await new Promise((resolve, reject) => {
+          const transaction = db.transaction(storeName, 'readwrite');
+          transaction.oncomplete = resolve;
+          transaction.onerror = () => reject(transaction.error);
+          const store = transaction.objectStore(storeName);
+          for (const record of records) store.put(record);
+        });
+      };
+      const ownerKeys = ['cachefixture_test'];
+      await seed(avatarCache, 'avatars', [
+        { id: 'owned-avatar', blob: image, ownerKeys },
+        { id: 'unowned-avatar', blob: image },
+      ]);
+      await seed(attachmentCache, 'thumbnails', [
+        { id: 'owned-thumbnail', thumbnail: image, ownerKeys },
+        { id: 'unowned-thumbnail', thumbnail: image },
+      ]);
+      await seed(attachmentCache, 'fullImages', [
+        { id: 'owned-video', blob: video, mimeType: video.type, ownerKeys },
+        { id: 'unowned-image', blob: image, mimeType: image.type },
+      ]);
+      localStorage.setItem('cachefixture_test', 'synthetic account');
+
+      const download = Promise.withResolvers();
+      const started = Promise.withResolvers();
+      const opening = fullCache.getOrCache({
+        attachment: { url: 'late-video', type: video.type },
+        keyFingerprint: 'a'.repeat(64),
+        downloadAndDecrypt: () => {
+          started.resolve();
+          return download.promise;
+        },
+      });
+      await started.promise;
+      await removeAll();
+      download.resolve(video);
+
+      return {
+        events,
+        account: localStorage.getItem('cachefixture_test'),
+        freshBytesAvailable: await opening === video,
+        databases: await indexedDB.databases(),
+      };
+    }, fixture.removeAllSource);
+
+    assert.deepEqual(result.events.slice(0, 2).sort(), ['liberdus_contact_avatars', 'liberdus_thumbnails']);
+    assert.deepEqual(result.events.slice(2), ['account cleared', 'success', 'reload']);
+    assert.equal(result.account, null);
+    assert.equal(result.freshBytesAvailable, true, 'An in-flight download still has its in-memory bytes');
+    assert.deepEqual(result.databases, [], 'An in-flight download cannot recreate the deleted cache');
     assert.deepEqual(external, []);
     assert.deepEqual(errors, []);
   });
