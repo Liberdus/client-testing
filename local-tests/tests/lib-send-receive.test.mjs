@@ -17,6 +17,7 @@ class ElementFixture {
     this.innerHTML = '';
     this.style = {};
     this.children = [];
+    this.attributes = new Map();
     this.listeners = new Map();
     this.events = [];
     const classes = new Set();
@@ -30,6 +31,9 @@ class ElementFixture {
   set value(value) { this.inputValue = String(value); }
   addEventListener(type, listener) { this.listeners.set(type, listener); }
   dispatchEvent(event) { this.events.push(event.type); }
+  setAttribute(name, value) { this.attributes.set(name, String(value)); }
+  removeAttribute(name) { this.attributes.delete(name); }
+  replaceChildren(...children) { this.children = children; }
   setCustomValidity(message) { this.validationMessage = message; }
   reset() {}
   appendChild(child) { this.children.push(child); }
@@ -66,6 +70,8 @@ class LibModalFixture {
       getNetworkParams: async () => {}, getTransactionFeeWei: () => wei,
       isValidEthereumAddress: () => false, normalizeUsername: value => value,
       normalizeAddress: value => value, longAddress: value => value,
+      getContactDisplayName: contact => contact.name || contact.username,
+      isFaucetAddress: () => false,
       queryNetwork: async path => path.startsWith('/address/')
         ? { address: 'b'.repeat(40) } : { account: {} },
       showToast: (...args) => this.toasts.push(args),
@@ -104,6 +110,7 @@ class LibModalFixture {
       LibModalFixture.source('function getStabilityFactor(', '// returns transaction fee in wei'),
       LibModalFixture.source('function isLibAsset(', 'function getLibUsdPriceFromParameters('),
       LibModalFixture.source('class WalletScreen', 'const walletScreen'),
+      LibModalFixture.source('class ContactSearch', 'class SearchContactsModal'),
       LibModalFixture.source('class SendAssetFormModal', 'const sendAssetFormModal'),
       LibModalFixture.source('class SendAssetConfirmModal', 'const sendAssetConfirmModal'),
       LibModalFixture.source('class ReceiveModal', '// initialize the receive modal'),
@@ -140,7 +147,11 @@ class LibModalFixture {
     this.send.usernameInput.value = 'bob';
     this.send.usernameAvailable.textContent = 'found';
     this.send.usernameAvailable.style.display = 'inline';
-    this.send.foundAddressObject = { address: 'b'.repeat(40) };
+    this.send.foundAddressObject = {
+      address: 'b'.repeat(40),
+      username: 'bob',
+      input: this.send.usernameInput.value,
+    };
   }
   async approve(amount = '10', unit = 'LIB') {
     await this.send.open();
@@ -169,6 +180,17 @@ test('native Send and Receive identify LIB without an asset dropdown', async () 
   assert.equal(fixture.receive.open(), true);
   assert.equal(fixture.receive.displayAddress.textContent, `0x${fixture.account.keys.address}`);
   assert.deepEqual(fixture.lastPayment(), { u: 'alice', i: 'liberdus', s: 'LIB', d: 'LIB' });
+});
+
+test('recipient suggestions match @usernames and literal profile fields', async () => {
+  const fixture = new LibModalFixture();
+  await fixture.send.open();
+  fixture.data.contacts['b'.repeat(40)] = { name: 'Bob Jones', username: 'bob' };
+  fixture.data.contacts['c'.repeat(40)] = { name: 'Carol Jones', username: 'carol', x: '@bo' };
+
+  fixture.send.usernameInput.value = '@bo';
+  const matches = Array.from(fixture.send.contactAutocomplete.getMatches(), contact => contact.username);
+  assert.deepEqual(matches, ['carol', 'bob']);
 });
 
 test('LIB lookup follows the current wallet and ignores catalog order and EVM assets', () => {
@@ -535,6 +557,19 @@ test('confirmation submits its approved amount when the hidden input and quote c
   assert.equal(fixture.transfers[0].amount, 50n * wei);
   assert.equal(fixture.data.wallet.history[0].memo, 'approved memo');
   assert.equal(fixture.data.contacts['b'.repeat(40)].username, 'bob');
+});
+
+test('a changed recipient address stops confirmation before modifying contacts or transferring', async () => {
+  const fixture = new LibModalFixture();
+  await fixture.approve();
+  fixture.context.queryNetwork = async () => ({ address: 'c'.repeat(40) });
+
+  await fixture.confirm.handleSendAsset({ preventDefault() {} });
+
+  assert.equal(fixture.confirm.isActive(), false);
+  assert.match(fixture.toasts.at(-1)[0], /Recipient address changed/);
+  assert.deepEqual(fixture.data.contacts, {});
+  assert.deepEqual(fixture.transfers, []);
 });
 
 for (const action of ['cancel', 'form close', 'form reset', 'form reopen']) {
