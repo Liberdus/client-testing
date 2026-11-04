@@ -39,7 +39,9 @@ class FakeClock {
 class Element {
   constructor(markup = '') {
     this.hidden = /\bhidden(?:\s|>|$)/.test(markup);
-    this.style = {};
+    this.style = {
+      setProperty(name, value) { this[name] = value; },
+    };
     this.attributes = new Map();
     this.listeners = new Map();
     this.classes = new Set();
@@ -125,6 +127,8 @@ class MediaHarness {
     this.container.append(this.header);
     this.document.append(this.container);
     for (const id of ['closeFullImageModal', 'fullImageModalTitle']) this.header.append(this.nodes.get(id));
+    const rotate = this.nodes.get('fullImageRotate');
+    if (rotate) this.header.append(rotate);
     const viewer = this.nodes.get('fullImageViewer');
     this.container.append(viewer);
     for (const id of ['fullImageLoading', 'fullImageError', 'fullImageViewerImage', 'fullImageViewerVideo', 'fullImageZoomControls']) {
