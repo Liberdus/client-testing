@@ -573,8 +573,9 @@ test('a changed recipient address stops confirmation before modifying contacts o
 });
 
 for (const action of ['cancel', 'form close', 'form reset', 'form reopen']) {
-  test(`${action} invalidates a previously approved LIB payment`, async () => {
+  test(`${action} invalidates a previously approved LIB payment`, async (t) => {
     const fixture = new LibModalFixture();
+    t.after(() => fixture.send.close());
     await fixture.approve();
     if (action === 'cancel') fixture.confirm.cancelButton.listeners.get('click')();
     if (action === 'form close') await fixture.send.close();
@@ -607,13 +608,23 @@ test('an overlapping confirmation opening preserves the approved payment', async
 test('reopening USD Send clears its old confirmation and preserves its amount unit', async () => {
   const fixture = new LibModalFixture();
   await fixture.approve('10', 'USD');
+  let revalidateRecipient;
+  fixture.context.setTimeout = (callback) => {
+    revalidateRecipient = callback;
+    return 1;
+  };
+  fixture.context.checkUsernameAvailability = async (username, _sender, found) => {
+    assert.equal(username, 'bob');
+    found.address = 'b'.repeat(40);
+    return 'taken';
+  };
   await fixture.send.reopen();
   assert.equal(fixture.confirm.isActive(), false);
   assert.equal(fixture.send.balanceSymbol.textContent, 'USD');
   assert.equal(fixture.send.amountInput.value, '10');
   await fixture.confirm.handleSendAsset({ preventDefault() {} });
   assert.deepEqual(fixture.transfers, []);
-  fixture.prepareRecipient();
+  await revalidateRecipient();
   await fixture.send.handleSendFormSubmit({ preventDefault() {} });
   assert.equal(fixture.confirm.confirmAmount.textContent, '50 LIB');
   await fixture.confirm.handleSendAsset({ preventDefault() {} });
