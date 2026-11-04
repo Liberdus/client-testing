@@ -38,24 +38,35 @@ class MediaChecks {
     this.viewer = page.locator('#fullImageViewer');
     this.image = page.locator('#fullImageViewerImage');
     this.video = page.locator('#fullImageViewerVideo');
+    this.back = page.locator('#closeFullImageModal');
+    this.rotate = this.header.getByRole('button', { name: /rotate/i });
   }
 
-  async openImage(shape = 'portrait') {
-    await this.page.evaluate(async shape => {
+  async openImage(shape = 'portrait', filename = `Synthetic ${shape}.png`) {
+    await this.page.evaluate(async ({ shape, filename }) => {
       const canvas = document.createElement('canvas');
       [canvas.width, canvas.height] = shape === 'portrait' ? [720, 1280] : [1280, 720];
       const drawing = canvas.getContext('2d');
       drawing.fillStyle = '#155a89'; drawing.fillRect(0, 0, canvas.width, canvas.height);
       drawing.fillStyle = '#fff'; drawing.font = '36px sans-serif'; drawing.fillText(`Synthetic ${shape}`, 48, 100);
       const blob = await new Promise(done => canvas.toBlob(done, 'image/png'));
-      const id = __modal.openLoading(`Synthetic ${shape}.png`);
+      const id = __modal.openLoading(filename);
       __modal.showImage(blob, id);
-    }, shape);
+    }, { shape, filename });
     await this.image.waitFor({ state: 'visible' });
     await this.modal.evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));
   }
 
-  async assertCanvas(shape) {
+  async openVideo(shape) {
+    await this.page.evaluate(async shape => {
+      const id = __modal.openLoading(`Synthetic ${shape}.mp4`, 'video');
+      __modal.showVideo(await (await fetch(`/${shape}.mp4`)).blob(), id);
+    }, shape);
+    await this.page.waitForFunction(() => document.getElementById('fullImageViewerVideo').readyState >= 2);
+    await this.modal.evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));
+  }
+
+  async assertCanvas(shape, quarterTurns = 0) {
     const boxes = await this.page.evaluate(() => {
       const rect = id => document.getElementById(id).getBoundingClientRect().toJSON();
       const image = document.getElementById('fullImageViewerImage');
@@ -67,11 +78,122 @@ class MediaChecks {
         `${this.scenario.name}: ${dimension} fills the modal behind the header: ${JSON.stringify(boxes)}`);
     }
     assert.ok(boxes.documentWidth <= boxes.width, 'No page horizontal overflow');
-    assert.ok(Math.abs(boxes.image.width / boxes.image.height - boxes.ratio) < .01, `${shape}: preserve image aspect ratio`);
+    const rotatedRatio = quarterTurns % 2 ? 1 / boxes.ratio : boxes.ratio;
+    assert.ok(Math.abs(boxes.image.width / boxes.image.height - rotatedRatio) < .01,
+      `${this.scenario.name} ${shape}, ${quarterTurns * 90}°: preserve rotated image aspect ratio`);
     assert.ok(boxes.image.left >= boxes.viewer.left - 1 && boxes.image.right <= boxes.viewer.right + 1
       && boxes.image.top >= boxes.viewer.top - 1 && boxes.image.bottom <= boxes.viewer.bottom + 1, `${shape}: contain the entire image`);
     assert.ok(Math.abs((boxes.image.left + boxes.image.right) - (boxes.viewer.left + boxes.viewer.right)) <= 2
       && Math.abs((boxes.image.top + boxes.image.bottom) - (boxes.viewer.top + boxes.viewer.bottom)) <= 2, 'Center media in the whole canvas');
+  }
+
+  async imageRotation() {
+    const desktop = this.scenario.name === 'desktop';
+    const shape = desktop ? 'landscape' : 'portrait';
+    const filename = 'A long synthetic attachment filename for the immersive media viewer.png';
+    await this.openImage(shape, filename);
+    assert.equal(await this.rotate.count(), 1, 'A named Rotate button appears in the image header');
+    const [back, title, rotate] = await Promise.all([
+      this.back.boundingBox(),
+      this.header.locator('#fullImageModalTitle').boundingBox(),
+      this.rotate.boundingBox(),
+    ]);
+    assert.ok(back.x + back.width < title.x && title.x + title.width < rotate.x,
+      'The title has a dedicated space between Back and Rotate');
+    assert.equal(await this.header.locator('#fullImageModalTitle').textContent(), filename);
+
+    const original = await this.image.boundingBox();
+    const source = await this.image.getAttribute('src');
+    await this.back.focus();
+    await this.page.keyboard.press('Tab');
+    assert.equal(await this.rotate.evaluate(button => document.activeElement === button), true, 'Tab from Back reaches Rotate');
+    await this.page.keyboard.press('Enter');
+    await this.assertCanvas(shape, 1);
+    await this.page.waitForTimeout(3250);
+    await this.visible('Keyboard focus on Rotate keeps the header visible');
+
+    if (desktop) {
+      const beforeZoom = await this.image.boundingBox();
+      await this.page.getByRole('button', { name: 'Zoom in', exact: true }).click();
+      const zoomed = await this.image.boundingBox();
+      assert.ok(zoomed.height > beforeZoom.height, 'Zoom still enlarges the rotated image');
+      const { x, y, width, height } = await this.viewer.boundingBox();
+      await this.page.mouse.move(x + width / 2, y + height / 2);
+      await this.page.mouse.down();
+      await this.page.mouse.move(x + width / 2, y + height / 2 + 60);
+      await this.page.mouse.up();
+      assert.ok((await this.image.boundingBox()).y > zoomed.y + 40, 'The rotated, zoomed image can be panned on screen');
+    }
+    for (let turn = 2; turn <= 4; turn += 1) {
+      await this.rotate.click();
+      await this.assertCanvas(shape, turn);
+    }
+    assert.deepEqual(await this.image.boundingBox(), original, 'Four rotations restore the original image orientation');
+    assert.equal(await this.image.getAttribute('src'), source, 'Rotation uses the same immutable attachment URL');
+
+    await this.page.evaluate(() => document.activeElement.blur());
+    await this.idle();
+    assert.equal(await this.rotate.evaluate(button => getComputedStyle(button).pointerEvents), 'none');
+    if (desktop) {
+      await this.viewer.hover();
+      await this.rotate.click();
+    } else {
+      await this.viewer.tap();
+      await this.rotate.tap();
+    }
+    await this.visible('Viewer activity reveals Rotate again');
+    await this.openImage(shape);
+    await this.assertCanvas(shape);
+    await this.rotate.click();
+    await this.page.keyboard.press('Escape');
+    assert.equal(await this.modal.evaluate(element => element.classList.contains('active')), false);
+    await this.openImage(shape);
+    await this.assertCanvas(shape);
+    await this.back.click();
+    assert.equal(await this.modal.evaluate(element => element.classList.contains('active')), false);
+  }
+
+  async videoRotation() {
+    await this.openVideo('portrait');
+    assert.equal(await this.rotate.count(), 1, 'A named Rotate button appears in the video header');
+    await this.video.evaluate(async video => {
+      await new Promise(done => {
+        video.addEventListener('seeked', done, { once: true });
+        video.currentTime = 3;
+      });
+    });
+    const before = await this.video.evaluate(video => ({ src: video.currentSrc, time: video.currentTime }));
+    await this.rotate.click();
+    assert.deepEqual(await this.video.evaluate(video => ({
+      src: video.currentSrc, time: video.currentTime, paused: video.paused, controls: video.controls,
+    })), { ...before, paused: true, controls: true }, 'A paused video keeps its source, time and controls');
+
+    const viewer = await this.viewer.boundingBox();
+    const video = await this.video.boundingBox();
+    const { width, height, objectFit } = await this.video.evaluate(element => ({
+      width: element.clientWidth, height: element.clientHeight, objectFit: getComputedStyle(element).objectFit,
+    }));
+    assert.equal(objectFit, 'contain');
+    assert.ok(Math.abs(video.width - height) <= 1 && Math.abs(video.height - width) <= 1,
+      'The video frame turns by a quarter turn');
+    assert.ok(video.x >= viewer.x - 1 && video.x + video.width <= viewer.x + viewer.width + 1
+      && video.y >= viewer.y - 1 && video.y + video.height <= viewer.y + viewer.height + 1,
+      'The rotated video frame fits inside the viewer');
+    assert.ok(Math.abs(video.x + video.width / 2 - viewer.x - viewer.width / 2) <= 1
+      && Math.abs(video.y + video.height / 2 - viewer.y - viewer.height / 2) <= 1,
+      'The rotated video frame is centered');
+
+    // The clockwise-rotated native play button moves from lower-left to upper-left.
+    await this.page.mouse.click(video.x + 48, video.y + 24);
+    await this.page.waitForFunction(() => document.getElementById('fullImageViewerVideo').currentTime > 3.1, null, { timeout: 4500 });
+    await this.page.mouse.click(video.x + 22, video.y + video.height * .6);
+    await this.page.waitForFunction(() => document.getElementById('fullImageViewerVideo').currentTime > 8, null, { timeout: 4500 });
+    await this.rotate.click();
+    const playing = await this.video.evaluate(video => ({ src: video.currentSrc, time: video.currentTime, paused: video.paused }));
+    assert.equal(playing.src, before.src);
+    assert.equal(playing.paused, false, 'Playback continues while rotating');
+    assert.ok(playing.time > 8, 'A playing video retains its playback position');
+    await this.close();
   }
 
   async visible(reason) {
@@ -92,6 +214,7 @@ class MediaChecks {
     await this.page.keyboard.press('Escape');
     assert.equal(await this.modal.evaluate(element => element.classList.contains('active')), false);
     assert.deepEqual(await this.page.evaluate(() => ({ timer: __modal.chromeHideTimer, urls: __urls.size })), { timer: null, urls: 0 }, 'Closing clears idle timer and object URLs');
+    await this.page.evaluate(() => document.activeElement.blur());
   }
 
   async thorough() {
@@ -99,10 +222,12 @@ class MediaChecks {
     await this.page.evaluate(() => { window.__request = __modal.openLoading('Still loading.png'); });
     await this.page.waitForTimeout(3250);
     await this.visible('Loading keeps chrome visible');
+    assert.equal(await this.rotate.isVisible(), false, 'Loading media offers no rotation action');
     await this.page.evaluate(() => __modal.showError('Synthetic unavailable media.', __request));
     await this.page.waitForTimeout(3250);
     await this.visible('Error keeps chrome visible');
     assert.match(await this.page.locator('#fullImageError').textContent(), /Save/);
+    assert.equal(await this.rotate.isVisible(), false, 'Unavailable media offers no rotation action');
 
     await this.openImage();
     await this.page.mouse.move(1, 1);
@@ -111,8 +236,10 @@ class MediaChecks {
     await this.page.waitForTimeout(3250);
     await this.visible('Keyboard focus keeps chrome visible');
     await this.page.evaluate(() => document.activeElement?.blur());
+    const beforeZoom = await this.image.boundingBox();
     await this.page.locator('#fullImageZoomIn').tap();
-    assert.match(await this.image.evaluate(image => image.style.transform), /scale\(1\.5\)/);
+    const zoomed = await this.image.boundingBox();
+    assert.ok(zoomed.width > beforeZoom.width, 'Tap zoom enlarges the image');
     await this.page.waitForTimeout(3500);
     assert.equal(await this.modal.evaluate(element => element.classList.contains('is-chrome-hidden')), true, 'A coarse-device zoom tap must not leave sticky hover chrome');
     await this.viewer.tap();
@@ -134,11 +261,7 @@ class MediaChecks {
     await this.visible('Keyboard restores chrome');
 
     for (const shape of ['portrait', 'landscape']) {
-      await this.page.evaluate(async shape => {
-        const id = __modal.openLoading(`Synthetic ${shape}.mp4`, 'video');
-        __modal.showVideo(await (await fetch(`/${shape}.mp4`)).blob(), id);
-      }, shape);
-      await this.page.waitForFunction(() => document.getElementById('fullImageViewerVideo').readyState >= 2);
+      await this.openVideo(shape);
       assert.equal(await this.video.evaluate(video => getComputedStyle(video).objectFit), 'contain');
       assert.equal(await this.page.locator('#fullImageZoomControls').isVisible(), false);
       const box = await this.video.boundingBox();
@@ -203,6 +326,11 @@ try {
       URL.revokeObjectURL = url => { __urls.delete(url); revoke(url); };
     ` });
     const checks = new MediaChecks(page, scenario);
+    if (scenario.name === 'desktop' || scenario.name === 'narrow-reduced') {
+      await checks.imageRotation();
+      await checks.videoRotation();
+      console.log(`PASS ${scenario.name}: image and video rotation, fit, playback, keyboard and resets`);
+    }
     for (const shape of ['portrait', 'landscape']) {
       await checks.openImage(shape);
       await checks.assertCanvas(shape);
