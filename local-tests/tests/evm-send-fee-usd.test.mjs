@@ -105,7 +105,7 @@ for (const close of ['cancel', 'reset', 'dismiss', 'confirm']) {
   test(`${close} resolves the dedicated confirmation and permits a fresh render`, async () => {
     const modal = confirmation();
     const transfer = prepared(null);
-    transfer.chat = { totalRequired: '1000000000000000000', note: 'Previous note' };
+    transfer.chat = { fee: '1000000000000000000', toll: '0', totalRequired: '1000000000000000000', note: 'Previous note' };
     const result = modal.confirm('', transfer);
     transitions.get('transitionend')({ target: modal.modal, propertyName: 'opacity' });
     assert.equal(modal.amountUsd.style.display, 'none');
@@ -210,12 +210,16 @@ test('accepts an explicitly zero native price', () => {
 test('keeps notes, LIB costs and duplicate warnings alongside independent USD estimates', () => {
   const modal = confirmation();
   const transfer = prepared(null);
-  transfer.chat = { totalRequired: '1000000000000000000', note: 'Lunch\nThank you <3' };
+  transfer.chat = {
+    fee: '200000000000000000', toll: '800000000000000000', totalRequired: '1000000000000000000',
+    note: 'Lunch\nThank you <3',
+  };
   transfer.duplicatePaymentWarning = 'An earlier payment is still pending.';
   modal.render(transfer);
   assert.equal(modal.memoGroup.style.display, 'block');
   assert.equal(modal.memo.textContent, transfer.chat.note);
-  assert.match(modal.signingNotice.textContent, /1 LIB/);
+  assert.match(modal.signingNotice.textContent, /message fee: 0\.2 LIB/i);
+  assert.match(modal.signingNotice.textContent, /recipient toll: 0\.8 LIB/i);
   assert.match(modal.signingNotice.textContent, /An earlier payment is still pending/);
   assert.equal(modal.feeValue.textContent, '0.0001 BNB');
   assert.equal(modal.feeUsd.style.display, 'none');
