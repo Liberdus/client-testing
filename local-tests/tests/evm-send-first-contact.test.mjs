@@ -55,7 +55,7 @@ class FirstContactFixture {
     this.chat.buildEncryptedStructuredChatTx = async (address, _payment, amount, _keys, cryptoContext) => {
       assert.equal(address, RECIPIENT);
       assert.deepEqual(Object.keys(this.contacts), [], 'Preparing a receipt has no address book side effect yet');
-      assert.equal(cryptoContext.contact.friend, 1, 'A first-time receipt uses the Tolled profile-sharing policy');
+      assert.equal(cryptoContext.contact.friend, 2, 'A first-time receipt uses the Connection profile-sharing policy');
       return {
         payload: { sent_timestamp: 1000 },
         chatMessageObj: { amount, fee: this.receiptFee },
@@ -103,19 +103,38 @@ test('an insufficient LIB balance still reports the required recipient toll', as
   assert.deepEqual(fixture.contacts, {});
 });
 
-test('creates a Tolled first-time contact when preparing the confirmed payment', async () => {
+test('creates a Connection for a first-time recipient when preparing the confirmed payment', async () => {
   const fixture = new FirstContactFixture();
   const record = fixture.record();
   assert.equal(await fixture.chat.prepareEvmPaymentMessage(record, fixture.account), true);
 
   const contact = fixture.contacts[RECIPIENT];
   assert.equal(contact.username, 'recipient');
-  assert.equal(contact.friend, 1);
+  assert.equal(contact.friend, 2);
   assert.equal(contact.public, PUBLIC_KEY);
   assert.equal(contact.pqPublic, 'synthetic-pq');
   assert.equal(contact.tollRequiredToSend, 1);
   assert.equal(record.attempt.txid, 'synthetic-receipt');
   assert.deepEqual(fixture.savedPayments, [record]);
+});
+
+test('a payment preserves an existing Tolled contact and its receipt profile-sharing policy', async () => {
+  const fixture = new FirstContactFixture();
+  const contact = { address: RECIPIENT, username: 'recipient', friend: 1 };
+  fixture.contacts[RECIPIENT] = contact;
+  fixture.chat.buildEncryptedStructuredChatTx = async (_address, _payment, amount, _keys, cryptoContext) => {
+    assert.equal(cryptoContext.contact, contact);
+    assert.equal(cryptoContext.contact.friend, 1);
+    return {
+      payload: { sent_timestamp: 1000 },
+      chatMessageObj: { amount, fee: fixture.receiptFee },
+      txid: 'synthetic-receipt',
+    };
+  };
+
+  assert.equal(await fixture.chat.prepareEvmPaymentMessage(fixture.record(), fixture.account), true);
+  assert.equal(fixture.contacts[RECIPIENT], contact);
+  assert.equal(contact.friend, 1);
 });
 
 test('does not create a contact when the prepared receipt exceeds the approved LIB cost', async () => {
