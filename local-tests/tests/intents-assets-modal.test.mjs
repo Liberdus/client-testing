@@ -2,7 +2,7 @@ import '../fixtures/near-rpc.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { intentsActivity, intentsAssets, multichain } from '../near-assets.js';
+import { intentsActivity, intentsAssets, intentsDeposits, multichain } from '../near-assets.js';
 import { installModalTransitionListeners } from '../lib.js';
 
 const markup = await readFile(new URL('../index.html', import.meta.url), 'utf8');
@@ -97,7 +97,9 @@ class AssetsModalFixture {
     this.modal = this.controller.assetsModal;
     this.modal.load();
     t.after(() => {
-      transitions.get('transitionend')({ target: this.controller.assetModal.modal, propertyName: 'opacity' });
+      for (const modal of [this.controller.assetModal.modal, this.controller.receiveModal.modal]) {
+        transitions.get('transitionend')({ target: modal, propertyName: 'opacity' });
+      }
       intentsAssets.reset();
     });
   }
@@ -122,7 +124,6 @@ test('an empty wallet lists its six starter assets as rows without changing the 
   assert.deepEqual(new Set(fixture.rows()), new Set(TOKENS.map(key)));
   assert.equal(fixture.modal.assetsList.hidden, false);
   assert.equal(fixture.modal.empty.hidden, true);
-  assert.equal(fixture.modal.sendButton.disabled, true);
   assert.equal(fixture.modal.totalBalance.textContent, '$0.00');
   assert.deepEqual(intentsAssets.getAssets(), []);
   assert.ok(fixture.synced.includes(fixture.network()), 'Custom dropdown stays synchronized');
@@ -211,7 +212,7 @@ test('a removed selected chain falls back to all available assets', t => {
 });
 
 for (const balances of [{}, null]) {
-  test(`a catalog row with ${balances === null ? 'unknown' : 'zero'} balance opens details with Receive available`, async t => {
+  test(`a catalog row with ${balances === null ? 'unknown' : 'zero'} balance opens details with Deposit available`, async t => {
     const fixture = new AssetsModalFixture(t, { balances, status: balances === null ? 'unavailable' : 'connected' });
     fixture.controller.assetModal.load();
     const activityAssets = [];
@@ -219,8 +220,15 @@ for (const balances of [{}, null]) {
       activityAssets.push(asset.key);
       return { entries: [], depositsUnavailable: false };
     });
-    const receives = [];
-    t.mock.method(fixture.controller.receiveModal, 'open', assetKey => receives.push(assetKey));
+    const deposit = fixture.controller.receiveModal;
+    deposit.load();
+    const requestedAssets = [];
+    t.mock.method(intentsDeposits, 'requestDepositTarget', async (_accountId, assetId) => {
+      requestedAssets.push(assetId);
+      return { address: 'synthetic-deposit-address' };
+    });
+    t.mock.method(deposit, 'render', () => {});
+    t.mock.method(deposit, 'startWatching', () => {});
     fixture.modal.render();
     fixture.modal.assetsList.emit('click', {
       target: { closest: () => ({ dataset: { assetKey: key(TOKENS[0]) } }) },
@@ -242,7 +250,28 @@ for (const balances of [{}, null]) {
     assert.equal(detail.swapButton.disabled, true);
     assert.equal(detail.receiveButton.disabled, false);
     assert.deepEqual(activityAssets, [key(TOKENS[0])]);
-    detail.receiveButton.emit('click');
-    assert.deepEqual(receives, [key(TOKENS[0])]);
+    transitions.get('transitionend')({ target: detail.modal, propertyName: 'opacity' });
+    await detail.receiveButton.emit('click');
+    assert.equal(deposit.assetKey, key(TOKENS[0]));
+    assert.match(deposit.title.textContent, /Deposit BTC.*Bitcoin/);
+    assert.deepEqual(requestedAssets, [TOKENS[0].assetId]);
   });
 }
+
+test('the deposit picker remains available without overview action controls', async t => {
+  const fixture = new AssetsModalFixture(t);
+  t.mock.method(intentsDeposits, 'loadBridgeTokens', async () => {});
+  t.mock.method(intentsDeposits, 'isDepositable', assetId => assetId === TOKENS[0].assetId);
+  const pickers = [];
+  t.mock.method(fixture.controller.tokenPicker, 'open', options => pickers.push(options));
+  const deposits = [];
+  t.mock.method(fixture.controller.receiveModal, 'open', assetKey => deposits.push(assetKey));
+
+  await fixture.controller.startDeposit();
+
+  assert.equal(pickers.length, 1);
+  assert.equal(pickers[0].accepts({ assetId: TOKENS[0].assetId }), true);
+  assert.equal(pickers[0].accepts({ assetId: ODD.assetId }), false);
+  pickers[0].onPick(key(TOKENS[0]));
+  assert.deepEqual(deposits, [key(TOKENS[0])]);
+});
