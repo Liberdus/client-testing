@@ -31,7 +31,7 @@ class ElementFixture {
     this.disabled = false;
     this.textContent = '';
     this.html = '';
-    this.selection = '';
+    this.value = '';
     const classes = new Set();
     this.classList = {
       add: name => classes.add(name),
@@ -41,28 +41,14 @@ class ElementFixture {
     };
   }
   get innerHTML() { return this.html; }
-  set innerHTML(html) {
-    this.html = html;
-    if (this.tagName !== 'SELECT') return;
-    this.children = [...html.matchAll(/<option value="([^"]*)"[^>]*>([^<]*)<\/option>/g)]
-      .map(([, value, textContent]) => Object.assign(new ElementFixture('option'), { value, textContent }));
-    this.selection = this.children[0]?.value || '';
-  }
-  get value() { return this.selection; }
-  set value(value) {
-    this.selection = this.tagName === 'SELECT' && !this.children.some(option => option.value === value) ? '' : value;
-  }
-  get options() { return this.children; }
+  set innerHTML(html) { this.html = html; }
   addEventListener(type, handler) { this.listeners.set(type, handler); }
   emit(type, event = {}) { return this.listeners.get(type)?.(event); }
   focus() {}
   setAttribute(name, value) { this.attributes.set(name, value); }
   removeAttribute(name) { this.attributes.delete(name); }
   replaceChildren(...children) { this.html = ''; this.children = children; }
-  append(...children) {
-    this.children.push(...children);
-    if (this.tagName === 'SELECT' && !this.selection) this.selection = this.children[0]?.value || '';
-  }
+  append(...children) { this.children.push(...children); }
   appendChild(child) { this.append(child); }
 }
 
@@ -86,12 +72,10 @@ class AssetsModalFixture {
       })]));
     this.controller = new multichain.constructor();
     this.settings = { heldBefore: [...heldBefore], hideEmpty: false };
-    this.synced = [];
     this.controller.configure({
       getAccount: () => ({ keys: { address: 'a'.repeat(40) } }),
       getSettings: () => this.settings,
       saveSettings: settings => { this.settings = settings; },
-      syncSelect: select => this.synced.push(select),
     });
     intentsAssets.activateAccount(`0x${'a'.repeat(40)}`);
     intentsAssets.tokens = tokens;
@@ -110,11 +94,6 @@ class AssetsModalFixture {
   rows() {
     return [...this.modal.assetsList.innerHTML.matchAll(/data-asset-key="([^"]+)"/g)].map(([, assetKey]) => assetKey);
   }
-  network() { return documentFixture.getElementById('multichainNetwork'); }
-  chooseNetwork(value) {
-    this.network().value = value;
-    this.network().emit('change');
-  }
   hideEmpty() {
     this.modal.hideEmpty.checked = true;
     this.modal.hideEmpty.emit('change');
@@ -130,20 +109,6 @@ test('an empty wallet lists its six starter assets as rows without changing the 
   assert.equal(fixture.modal.empty.hidden, true);
   assert.equal(fixture.modal.totalBalance.textContent, '$0.00');
   assert.deepEqual(intentsAssets.getAssets(), []);
-  assert.ok(fixture.synced.includes(fixture.network()), 'Custom dropdown stays synchronized');
-});
-
-test('the chain dropdown filters displayed chains and leaves the total unchanged', t => {
-  const fixture = new AssetsModalFixture(t, { balances: { [TOKENS[0].assetId]: '100000000' } });
-  fixture.modal.render();
-  const total = fixture.modal.totalBalance.textContent;
-
-  fixture.chooseNetwork('Bitcoin');
-  assert.deepEqual(fixture.rows(), [key(TOKENS[0])], 'nBTC belongs under its displayed Bitcoin chain');
-  assert.equal(fixture.modal.totalBalance.textContent, total);
-  fixture.chooseNetwork('Ethereum');
-  assert.deepEqual(new Set(fixture.rows()), new Set([key(TOKENS[1]), key(TOKENS[5])]));
-  assert.equal(fixture.modal.totalBalance.textContent, total);
 });
 
 test('held assets outside the starter list remain visible and duplicate rows are omitted', t => {
@@ -201,14 +166,14 @@ test('an unknown balance does not add a formerly held nonstarter to the starter 
   assert.deepEqual(fixture.settings.heldBefore, [ODD.assetId]);
 });
 
-test('hiding empty rows gives an empty result without removing chain choices', t => {
+test('hiding empty rows gives an empty result', t => {
   const fixture = new AssetsModalFixture(t);
   fixture.modal.render();
   fixture.hideEmpty();
 
   assert.deepEqual(fixture.rows(), []);
   assert.equal(fixture.modal.empty.hidden, false);
-  assert.ok(fixture.network().options.some(option => option.value === 'Ethereum'));
+  assert.equal(fixture.modal.assetsList.hidden, true);
   assert.equal(fixture.modal.totalBalance.textContent, '$0.00');
 });
 
@@ -235,21 +200,10 @@ test('an unavailable refresh keeps previously read amounts and totals visible', 
   assert.match(fixture.modal.assetsList.innerHTML, /1\.25 SOL/);
   assert.equal(fixture.modal.totalBalance.textContent, '$125.00');
   assert.match(fixture.modal.statusLine.textContent, /unavailable/i);
-  fixture.chooseNetwork('Solana');
+  assert.deepEqual(new Set(fixture.rows()), new Set(TOKENS.map(key)));
+  fixture.hideEmpty();
   assert.deepEqual(fixture.rows(), [key(TOKENS[2])]);
   assert.equal(fixture.modal.totalBalance.textContent, '$125.00');
-});
-
-test('a removed selected chain falls back to all available assets', t => {
-  const fixture = new AssetsModalFixture(t);
-  fixture.modal.render();
-  fixture.chooseNetwork('Bitcoin');
-  intentsAssets.tokens = TOKENS.filter(token => token !== TOKENS[0]);
-  intentsAssets.rebuildNetwork();
-  fixture.modal.render();
-
-  assert.equal(fixture.network().value, 'all');
-  assert.equal(fixture.rows().length, 5);
 });
 
 for (const balances of [{}, null]) {
@@ -302,8 +256,8 @@ for (const balances of [{}, null]) {
 for (const scenario of [
   { name: 'empty wallet', balances: {} },
   { name: 'funded wallet', balances: { [TOKENS[0].assetId]: '100000000' } },
-  { name: 'funded wallet on another selected chain', balances: { [TOKENS[0].assetId]: '100000000' }, chain: 'Ethereum' },
-  { name: 'funded wallet with Hide empty leaving no rows on the selected chain', balances: { [TOKENS[0].assetId]: '100000000' }, chain: 'Ethereum', hideEmpty: true },
+  { name: 'empty wallet with Hide empty leaving no rows', balances: {}, hideEmpty: true, overview: [] },
+  { name: 'funded wallet with Hide empty', balances: { [TOKENS[0].assetId]: '100000000' }, hideEmpty: true, overview: [TOKENS[0]] },
 ]) {
   test(`Deposit another asset opens the full deposit catalog for ${scenario.name}`, async t => {
     const unsupported = { ...ODD, assetId: 'nep141:unsupported.omft.near', symbol: 'NOPE' };
@@ -319,17 +273,13 @@ for (const scenario of [
     const deposits = [];
     t.mock.method(fixture.controller.receiveModal, 'open', assetKey => deposits.push(assetKey));
     fixture.modal.render();
-    if (scenario.chain) fixture.chooseNetwork(scenario.chain);
     if (scenario.hideEmpty) fixture.hideEmpty();
     const overviewRows = fixture.rows();
     const settings = structuredClone(fixture.settings);
     const history = intentsAssets.getAssets();
     assert.ok(!overviewRows.includes(key(ODD)), 'The never-held nonstarter is absent from the overview');
-    if (!scenario.chain) assert.deepEqual(new Set(overviewRows), new Set(TOKENS.map(key)));
-    if (scenario.hideEmpty) {
-      assert.deepEqual(overviewRows, []);
-      assert.equal(fixture.modal.assetsList.hidden, true);
-    }
+    assert.deepEqual(new Set(overviewRows), new Set((scenario.overview || TOKENS).map(key)));
+    assert.equal(fixture.modal.assetsList.hidden, overviewRows.length === 0);
 
     const button = documentFixture.getElementById('multichainDepositAnother');
     assert.equal(button.tagName, 'BUTTON');
