@@ -183,7 +183,9 @@ function autocompleteFactory(contacts) {
   const start = appSource.indexOf('class ContactSearch');
   const end = appSource.indexOf('class SearchContactsModal', start);
   assert.ok(start >= 0 && end > start);
-  const ContactAutocomplete = runInNewContext(`${appSource.slice(start, end)}\nContactAutocomplete`);
+  const ContactAutocomplete = runInNewContext(`${appSource.slice(start, end)}\nContactAutocomplete`, {
+    getContactAvatarHtml: async () => '',
+  });
   return ({ input, list, onSelect }) => new ContactAutocomplete({ input, list, getContacts: () => contacts, onSelect });
 }
 
@@ -209,7 +211,7 @@ test('EVM Send browses saved contacts alphabetically and resolves the selected w
   await usernameInput.emit('focus');
   const list = fixture.getElementById('evmSendRecipientSuggestions');
   assert.equal(list.hidden, false);
-  assert.deepEqual(list.children.map(option => option.children[0].textContent), ['Alice', 'Zara']);
+  assert.deepEqual(list.children.map(option => option.children[1].children[0].textContent), ['Alice', 'Zara']);
 
   await usernameInput.emit('keydown', { key: 'ArrowDown' });
   await usernameInput.emit('keydown', { key: 'Enter' });
