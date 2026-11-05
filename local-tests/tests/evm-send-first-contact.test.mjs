@@ -21,7 +21,7 @@ function excerpt(start, end) {
 }
 
 class FirstContactFixture {
-  constructor({ toll = TOLL, balance = FEE + TOLL } = {}) {
+  constructor({ toll = TOLL, balance = FEE + TOLL, recipientRequired = null } = {}) {
     this.account = { username: 'sender', keys: { address: SENDER, secret: '1'.padStart(64, '0') } };
     this.contacts = {};
     this.requests = [];
@@ -41,7 +41,13 @@ class FirstContactFixture {
         if (path === `/account/${longAddress(RECIPIENT)}`) {
           return { account: { data: { toll, tollUnit: 'LIB' }, publicKey: PUBLIC_KEY, pqPublicKey: 'synthetic-pq' } };
         }
-        if (path === '/messages/synthetic-chat/toll') return { error: 'No account with the given chatId' };
+        if (path === '/messages/synthetic-chat/toll') {
+          if (recipientRequired === null) return { error: 'No account with the given chatId' };
+          const sorted = [longAddress(SENDER), longAddress(RECIPIENT)].sort();
+          const required = [0, 0];
+          required[sorted.indexOf(longAddress(RECIPIENT))] = recipientRequired;
+          return { toll: { required } };
+        }
         if (path === `/account/${longAddress(SENDER)}/balance`) return { balance };
         assert.fail(`Unexpected query: ${path}`);
       },
@@ -118,24 +124,35 @@ test('creates a Connection for a first-time recipient when preparing the confirm
   assert.deepEqual(fixture.savedPayments, [record]);
 });
 
-test('a payment preserves an existing Tolled contact and its receipt profile-sharing policy', async () => {
-  const fixture = new FirstContactFixture();
-  const contact = { address: RECIPIENT, username: 'recipient', friend: 1 };
-  fixture.contacts[RECIPIENT] = contact;
-  fixture.chat.buildEncryptedStructuredChatTx = async (_address, _payment, amount, _keys, cryptoContext) => {
-    assert.equal(cryptoContext.contact, contact);
-    assert.equal(cryptoContext.contact.friend, 1);
-    return {
-      payload: { sent_timestamp: 1000 },
-      chatMessageObj: { amount, fee: fixture.receiptFee },
-      txid: 'synthetic-receipt',
+for (const [friend, status] of [[0, 'Blocked'], [1, 'Tolled']]) {
+  test(`a payment preserves an existing ${status} contact and its receipt profile-sharing policy`, async () => {
+    const fixture = new FirstContactFixture();
+    const contact = { address: RECIPIENT, username: 'recipient', friend };
+    fixture.contacts[RECIPIENT] = contact;
+    const quote = await fixture.chat.prepareEvmPaymentRecipient(fixture.resolution, fixture.account);
+    assert.equal(quote.fee, FEE.toString());
+    assert.equal(quote.toll, TOLL.toString());
+    assert.equal(quote.totalRequired, (FEE + TOLL).toString());
+    assert.equal(fixture.contacts[RECIPIENT], contact);
+    assert.equal(contact.friend, friend);
+    assert.deepEqual(fixture.savedPayments, []);
+    fixture.chat.buildEncryptedStructuredChatTx = async (_address, _payment, amount, _keys, cryptoContext) => {
+      assert.equal(cryptoContext.contact, contact);
+      assert.equal(cryptoContext.contact.friend, friend);
+      return {
+        payload: { sent_timestamp: 1000 },
+        chatMessageObj: { amount, fee: fixture.receiptFee },
+        txid: 'synthetic-receipt',
+      };
     };
-  };
 
-  assert.equal(await fixture.chat.prepareEvmPaymentMessage(fixture.record(), fixture.account), true);
-  assert.equal(fixture.contacts[RECIPIENT], contact);
-  assert.equal(contact.friend, 1);
-});
+    const record = fixture.record();
+    assert.equal(await fixture.chat.prepareEvmPaymentMessage(record, fixture.account), true);
+    assert.equal(fixture.contacts[RECIPIENT], contact);
+    assert.equal(contact.friend, friend);
+    assert.deepEqual(fixture.savedPayments, [record]);
+  });
+}
 
 test('does not create a contact when the prepared receipt exceeds the approved LIB cost', async () => {
   const fixture = new FirstContactFixture();
@@ -146,9 +163,43 @@ test('does not create a contact when the prepared receipt exceeds the approved L
   assert.deepEqual(fixture.savedPayments, []);
 });
 
-test('an exact username cannot bypass an existing local block', async () => {
-  const fixture = new FirstContactFixture();
-  fixture.contacts[RECIPIENT] = { address: RECIPIENT, username: 'recipient', friend: 0 };
-  await assert.rejects(fixture.chat.prepareEvmPaymentRecipient(fixture.resolution, fixture.account), /block/i);
-  assert.deepEqual(fixture.requests, []);
+test('a recipient-side network block still rejects a quote and payment receipt', async () => {
+  const fixture = new FirstContactFixture({ recipientRequired: 2 });
+  const contact = { address: RECIPIENT, username: 'recipient', friend: 1 };
+  fixture.contacts[RECIPIENT] = contact;
+  await assert.rejects(fixture.chat.prepareEvmPaymentRecipient(fixture.resolution, fixture.account), /recipient has blocked messages/i);
+  await assert.rejects(fixture.chat.prepareEvmPaymentMessage(fixture.record(), fixture.account), /recipient has blocked messages/i);
+  assert.equal(fixture.contacts[RECIPIENT], contact);
+  assert.equal(contact.friend, 1);
+  assert.deepEqual(fixture.savedPayments, []);
+});
+
+test('EVM suggestions include locally Blocked contacts without changing other message-payment lists', () => {
+  const blocked = { address: RECIPIENT, username: 'blocked', friend: 0, public: PUBLIC_KEY };
+  const tolled = { address: 'b'.repeat(40), username: 'tolled', friend: 1, public: PUBLIC_KEY };
+  const own = { address: SENDER, username: 'sender', friend: 2, public: PUBLIC_KEY };
+  const faucet = { address: 'f'.repeat(40), username: 'faucet', friend: 1, public: PUBLIC_KEY };
+  const noPublicKey = { address: 'c'.repeat(40), username: 'nokey', friend: 1 };
+  const invalidUsername = { address: 'd'.repeat(40), username: 'not_valid', friend: 1, public: PUBLIC_KEY };
+  const noAddress = { username: 'noaddress', friend: 1, public: PUBLIC_KEY };
+  const context = {
+    myAccount: { keys: { address: SENDER } },
+    myData: { contacts: { blocked, tolled, own, faucet, noPublicKey, invalidUsername, noAddress } },
+    normalizeAddress,
+    isFaucetAddress: address => address === faucet.address,
+    ContactAutocomplete: class { constructor(options) { Object.assign(this, options); } },
+  };
+  const callbacks = runInNewContext(`
+    ${excerpt('function getMessagePaymentContacts(', 'chatPaymentPanel.configure(')}
+    ({
+      ${excerpt('  createContactAutocomplete: (', '  prepareChatPayment:')}
+      messagePaymentContacts: getMessagePaymentContacts,
+    })
+  `, context);
+  const autocomplete = callbacks.createContactAutocomplete({});
+
+  assert.deepEqual(Array.from(autocomplete.getContacts()), [blocked, tolled]);
+  assert.deepEqual(Array.from(callbacks.messagePaymentContacts()), [tolled, own, invalidUsername]);
+  context.myAccount = null;
+  assert.deepEqual(Array.from(autocomplete.getContacts()), []);
 });
