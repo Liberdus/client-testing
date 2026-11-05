@@ -55,6 +55,7 @@ class ElementFixture {
   get options() { return this.children; }
   addEventListener(type, handler) { this.listeners.set(type, handler); }
   emit(type, event = {}) { return this.listeners.get(type)?.(event); }
+  focus() {}
   setAttribute(name, value) { this.attributes.set(name, value); }
   removeAttribute(name) { this.attributes.delete(name); }
   replaceChildren(...children) { this.html = ''; this.children = children; }
@@ -77,11 +78,14 @@ const ODD = { assetId: 'nep141:odd.omft.near', symbol: 'ODD', blockchain: 'base'
 const key = asset => `intents:${asset.assetId}`;
 
 class AssetsModalFixture {
-  constructor(t, { tokens = TOKENS, balances = {}, status = 'connected' } = {}) {
-    documentFixture.elements = new Map([...markup.matchAll(/<([a-z]+)[^>]*\bid="([^"]+)"/g)]
-      .map(([, tagName, id]) => [id, new ElementFixture(tagName)]));
+  constructor(t, { tokens = TOKENS, balances = {}, status = 'connected', heldBefore = [] } = {}) {
+    documentFixture.elements = new Map([...markup.matchAll(/<([a-z]+)([^>]*\bid="([^"]+)"[^>]*)>/g)]
+      .map(([, tagName, attributes, id]) => [id, Object.assign(new ElementFixture(tagName), {
+        hidden: /\shidden(?:\s|$|=)/.test(attributes),
+        disabled: /\sdisabled(?:\s|$|=)/.test(attributes),
+      })]));
     this.controller = new multichain.constructor();
-    this.settings = { heldBefore: [], hideEmpty: false };
+    this.settings = { heldBefore: [...heldBefore], hideEmpty: false };
     this.synced = [];
     this.controller.configure({
       getAccount: () => ({ keys: { address: 'a'.repeat(40) } }),
@@ -97,7 +101,7 @@ class AssetsModalFixture {
     this.modal = this.controller.assetsModal;
     this.modal.load();
     t.after(() => {
-      for (const modal of [this.controller.assetModal.modal, this.controller.receiveModal.modal]) {
+      for (const modal of [this.controller.assetModal.modal, this.controller.receiveModal.modal, this.controller.tokenPicker.modal]) {
         transitions.get('transitionend')({ target: modal, propertyName: 'opacity' });
       }
       intentsAssets.reset();
@@ -158,6 +162,43 @@ test('held assets outside the starter list remain visible and duplicate rows are
   assert.deepEqual(new Set(fixture.rows()), new Set([key(TOKENS[2]), key(ODD)]));
   assert.equal(fixture.modal.totalBalance.textContent, total);
   assert.equal(fixture.settings.hideEmpty, true);
+});
+
+test('a nonstarter remains visible for one raw unit, then leaves the overview at zero without erasing history', t => {
+  const fixture = new AssetsModalFixture(t, {
+    tokens: [...TOKENS, ODD],
+    balances: { [ODD.assetId]: '1' },
+  });
+  intentsAssets.rememberHeld();
+  fixture.modal.render();
+
+  assert.deepEqual(new Set(fixture.rows()), new Set([...TOKENS, ODD].map(key)));
+  assert.deepEqual(fixture.settings.heldBefore, [ODD.assetId]);
+
+  intentsAssets.balances = { [ODD.assetId]: '0' };
+  intentsAssets.rebuildNetwork();
+  const history = intentsAssets.getAssets();
+  const settings = structuredClone(fixture.settings);
+  fixture.modal.render();
+
+  assert.deepEqual(new Set(fixture.rows()), new Set(TOKENS.map(key)));
+  assert.equal(intentsAssets.getAssets(), history, 'Overview filtering leaves discovery rows intact');
+  assert.equal(intentsAssets.getAsset(key(ODD)).rawAmount, '0');
+  assert.deepEqual(fixture.settings, settings, 'Overview filtering preserves heldBefore');
+});
+
+test('an unknown balance does not add a formerly held nonstarter to the starter rows', t => {
+  const fixture = new AssetsModalFixture(t, {
+    tokens: [...TOKENS, ODD],
+    balances: null,
+    status: 'unavailable',
+    heldBefore: [ODD.assetId],
+  });
+  fixture.modal.render();
+
+  assert.deepEqual(new Set(fixture.rows()), new Set(TOKENS.map(key)));
+  assert.equal(intentsAssets.getAsset(key(ODD)).rawAmount, '0');
+  assert.deepEqual(fixture.settings.heldBefore, [ODD.assetId]);
 });
 
 test('hiding empty rows gives an empty result without removing chain choices', t => {
@@ -258,20 +299,62 @@ for (const balances of [{}, null]) {
   });
 }
 
-test('the deposit picker remains available without overview action controls', async t => {
-  const fixture = new AssetsModalFixture(t);
-  t.mock.method(intentsDeposits, 'loadBridgeTokens', async () => {});
-  t.mock.method(intentsDeposits, 'isDepositable', assetId => assetId === TOKENS[0].assetId);
-  const pickers = [];
-  t.mock.method(fixture.controller.tokenPicker, 'open', options => pickers.push(options));
-  const deposits = [];
-  t.mock.method(fixture.controller.receiveModal, 'open', assetKey => deposits.push(assetKey));
+for (const scenario of [
+  { name: 'empty wallet', balances: {} },
+  { name: 'funded wallet', balances: { [TOKENS[0].assetId]: '100000000' } },
+  { name: 'funded wallet on another selected chain', balances: { [TOKENS[0].assetId]: '100000000' }, chain: 'Ethereum' },
+  { name: 'funded wallet with Hide empty leaving no rows on the selected chain', balances: { [TOKENS[0].assetId]: '100000000' }, chain: 'Ethereum', hideEmpty: true },
+]) {
+  test(`Deposit another asset opens the full deposit catalog for ${scenario.name}`, async t => {
+    const unsupported = { ...ODD, assetId: 'nep141:unsupported.omft.near', symbol: 'NOPE' };
+    const superseded = { ...TOKENS[0], assetId: 'nep141:btc.omft.near' };
+    const fixture = new AssetsModalFixture(t, {
+      tokens: [...TOKENS, ODD, unsupported, superseded],
+      balances: scenario.balances,
+    });
+    const picker = fixture.controller.tokenPicker;
+    picker.load();
+    t.mock.method(intentsDeposits, 'loadBridgeTokens', async () => {});
+    t.mock.method(intentsDeposits, 'isDepositable', assetId => assetId !== unsupported.assetId);
+    const deposits = [];
+    t.mock.method(fixture.controller.receiveModal, 'open', assetKey => deposits.push(assetKey));
+    fixture.modal.render();
+    if (scenario.chain) fixture.chooseNetwork(scenario.chain);
+    if (scenario.hideEmpty) fixture.hideEmpty();
+    const overviewRows = fixture.rows();
+    const settings = structuredClone(fixture.settings);
+    const history = intentsAssets.getAssets();
+    assert.ok(!overviewRows.includes(key(ODD)), 'The never-held nonstarter is absent from the overview');
+    if (!scenario.chain) assert.deepEqual(new Set(overviewRows), new Set(TOKENS.map(key)));
+    if (scenario.hideEmpty) {
+      assert.deepEqual(overviewRows, []);
+      assert.equal(fixture.modal.assetsList.hidden, true);
+    }
 
-  await fixture.controller.startDeposit();
+    const button = documentFixture.getElementById('multichainDepositAnother');
+    assert.equal(button.tagName, 'BUTTON');
+    assert.equal(button.hidden, false);
+    assert.equal(button.disabled, false);
+    await button.emit('click');
+    await new Promise(setImmediate);
 
-  assert.equal(pickers.length, 1);
-  assert.equal(pickers[0].accepts({ assetId: TOKENS[0].assetId }), true);
-  assert.equal(pickers[0].accepts({ assetId: ODD.assetId }), false);
-  pickers[0].onPick(key(TOKENS[0]));
-  assert.deepEqual(deposits, [key(TOKENS[0])]);
-});
+    assert.equal(picker.title.textContent, 'Deposit');
+    assert.equal(picker.isActive(), true, 'The overview event opens the real picker');
+    const expected = new Set([...TOKENS, ODD].map(key));
+    assert.deepEqual(new Set(picker.candidates().map(asset => asset.key)), expected);
+    const pickerRows = [...picker.results.innerHTML.matchAll(/data-asset-key="([^"]+)"/g)]
+      .map(([, assetKey]) => assetKey);
+    assert.deepEqual(new Set(pickerRows), expected, 'Bridge-supported assets appear across all chains');
+    assert.equal(pickerRows.length, expected.size, 'Catalog rows are not duplicated');
+    transitions.get('transitionend')({ target: picker.modal, propertyName: 'opacity' });
+    picker.results.emit('click', {
+      target: { closest: () => ({ dataset: { assetKey: key(ODD) } }) },
+    });
+
+    assert.deepEqual(deposits, [key(ODD)], 'Picking a never-held asset reaches its Deposit flow');
+    assert.equal(picker.isActive(), false);
+    assert.deepEqual(fixture.rows(), overviewRows);
+    assert.deepEqual(fixture.settings, settings);
+    assert.equal(intentsAssets.getAssets(), history);
+  });
+}
