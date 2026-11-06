@@ -1,10 +1,13 @@
 # Focused offline client regression
 
 `tests/issue-1880-near-receive.browser.test.mjs` serves the actual client with
-synthetic account, contact, asset, and balance data. It checks the internal NEAR
+synthetic account, asset, and balance data. It checks the internal NEAR
 Intents receive screen, copy controls, rendered QR round trips, optional fields,
-navigation and account reset, and scanned payment requests. It blocks external
-services and signing/broadcast operations; it creates no live account or payment.
+navigation, account reset, and rejection by the existing LIB reader. It blocks
+external services and signing/broadcast operations; it creates no live account or payment.
+
+NEAR Intents request scanning and Send integration are deferred to the later Send
+refactor; this test only decodes generated QR images to validate Receive output.
 
 Use Node.js 20.19 or newer and install the repository's pinned browser dependencies:
 

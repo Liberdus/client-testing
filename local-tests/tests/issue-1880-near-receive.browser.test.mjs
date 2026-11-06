@@ -26,14 +26,11 @@ postAssetTransfer = async () => { window.__broadcasts++; throw Error('Fixture fo
 signObj = async () => { window.__signings++; throw Error('Fixture forbids signing'); };
 queryNetwork = async (path) => {
   if (path.endsWith('/balance')) return { balance: 1000n * wei };
-  if (path.includes('/toll')) return { toll: { required: [0, 0], payOnRead: [0n, 0n], payOnReply: [0n, 0n] } };
-  if (path.startsWith('/account/')) return { account: { private: false, data: { toll: 0n, tollUnit: 'LIB' } } };
   throw Error('Unexpected synthetic query: ' + path);
 };
-getUsernameAddress = async username => ({ receiver: 'a'.repeat(40), payer: 'b'.repeat(40), seconduser: 'c'.repeat(40) })[username] || null;
 window.__fixture = {
   nativeSend: sendAssetFormModal,
-  multichain, chatPaymentPanel,
+  multichain,
   configure(username = 'receiver', address = 'a'.repeat(40)) {
     parameters.current.stabilityFactorStr = '0.2';
     parameters.current.transactionFeeUsdStr = '0.01';
@@ -43,9 +40,6 @@ window.__fixture = {
     myData = newDataRecord(myAccount);
     myData.wallet.assets[0].balance = 1000n * wei;
     myData.wallet.assets[0].price = 0.2;
-    const contactAddress = 'b'.repeat(40);
-    myData.contacts[contactAddress] = { address: contactAddress, username: 'payer', messages: [], friend: 2, public: 'synthetic', unread: 0, timestamp: 0 };
-    myData.contacts['a'.repeat(40)] = { address: 'a'.repeat(40), username: 'receiver', messages: [], friend: 2, public: 'synthetic', unread: 0, timestamp: 0 };
     const discovery = syntheticNear.intentsAssets;
     discovery.activateAccount(intentsAccountIdForAddress(address));
     discovery.tokens = [
@@ -62,7 +56,6 @@ window.__fixture = {
       address: '0x' + 'd'.repeat(40), chain: 'bsc', chainName: 'BNB Chain', assetName: 'BNB', minDepositRaw: '0', siblings: 0,
     });
     chatPaymentPanel.run = async () => { window.__signings++; throw Error('Fixture forbids multichain signing'); };
-    chatPaymentPanel.prepareRecipient = async () => ({ problem: null });
     isOnline = true;
     welcomeScreen.close(); header.open(); footer.open(); walletScreen.screen.classList.add('active');
   },
@@ -70,10 +63,6 @@ window.__fixture = {
   installBack() {
     history.pushState({ state: 1 }, '', '.');
     window.addEventListener('popstate', handleBrowserBackButton, { once: true });
-  },
-  preparePayer() {
-    multichain.requestModal.close(); multichain.assetModal.close();
-    this.configure('payer', 'b'.repeat(40));
   },
   switchAccount() {
     multichain.reset();
@@ -127,16 +116,6 @@ class ReceiveRegression {
     await page.locator('#multichainAssetReceive').click();
     await page.locator('#multichainRequestModal.active.is-transition-complete').waitFor();
     await page.locator('#multichainRequestQr img').waitFor();
-  }
-
-  async dismissToasts(page) {
-    await page.locator('#toastContainer .toast.error .toast-close-btn').last().waitFor();
-    while (await page.locator('#toastContainer .toast.show.sticky').count()) {
-      const toast = page.locator('#toastContainer .toast.show.sticky').last();
-      const id = await toast.getAttribute('id');
-      await page.locator('#' + id).getByRole('button', { name: 'Close', exact: true }).click();
-      await page.locator('#' + id).waitFor({ state: 'detached' });
-    }
   }
 
   async layout(page, name) {
@@ -257,71 +236,26 @@ class ReceiveRegression {
       assert.deepEqual((await this.decode(page)).data, { ...expected, address: '0x' + 'c'.repeat(40), u: 'seconduser' });
       assert.equal(await page.locator('#multichainRequestMemo').inputValue(), '');
 
-      await page.evaluate(() => __fixture.preparePayer());
+      // The existing LIB reader must not interpret this deferred request as LIB.
+      const unsupportedRequest = await this.decode(page);
+      await page.evaluate(() => {
+        __fixture.multichain.requestModal.close();
+        __fixture.multichain.assetModal.close();
+      });
       await page.locator('#openSendAssetFormModal').click();
       await page.locator('#sendAssetFormModal.active.is-transition-complete').waitFor();
-      await page.evaluate(uri => __fixture.nativeSend.fillFromQR(uri), request.uri);
-      await page.locator('#chatSendModal.active.is-transition-complete').waitFor();
-      assert.equal(await page.locator('#sendAssetFormModal.active').count(), 0);
-      assert.match(await page.locator('#chatSendAsset').textContent(), /BNB/);
-      assert.equal(await page.locator('#chatSendAmount').inputValue(), request.data.a);
-      assert.equal(await page.locator('#chatSendNote').inputValue(), request.data.m);
-      assert.equal(await page.evaluate(() => __fixture.chatPaymentPanel.recipientAddress), 'a'.repeat(40));
-      await page.locator('#closeChatSendModal').click();
-      await page.locator('#openSendAssetFormModal').click();
-      await page.locator('#sendAssetFormModal.active.is-transition-complete').waitFor();
-      const mismatched = 'liberdus://' + Buffer.from(JSON.stringify({ ...request.data, address: '0x' + 'e'.repeat(40) })).toString('base64');
-      await page.evaluate(uri => __fixture.nativeSend.fillFromQR(uri), mismatched);
-      assert.equal(await page.locator('#chatSendModal.active').count(), 0, 'username/address mismatch cannot open a payment');
+      await page.evaluate(uri => __fixture.nativeSend.fillFromQR(uri), unsupportedRequest.uri);
+      assert.equal(await page.locator('#chatSendModal.active').count(), 0);
       assert.equal(await page.locator('#sendAssetFormModal.active').count(), 1);
-      assert.equal(await page.locator('#sendAmount').inputValue(), '', 'a rejected request cannot become a LIB amount');
-      const unsupported = 'liberdus://' + Buffer.from(JSON.stringify({ ...request.data, i: 'nep141:unknown.omft.near' })).toString('base64');
-      await page.evaluate(uri => __fixture.nativeSend.fillFromQR(uri), unsupported);
-      assert.equal(await page.locator('#chatSendModal.active').count(), 0, 'unknown asset does not fall back to another balance');
+      assert.equal(await page.locator('#sendToAddress').inputValue(), '');
       assert.equal(await page.locator('#sendAmount').inputValue(), '');
-      await this.dismissToasts(page);
-
-      // A failed lookup from a closed scanner cannot erase a newly opened form.
-      await page.evaluate(uri => {
-        __fixture.chatPaymentPanel.configure({ resolveUsername: () => new Promise((resolve, reject) => { window.__pendingLookup = { resolve, reject }; }) });
-        window.__pendingScan = __fixture.nativeSend.fillFromQR(uri);
-      }, request.uri);
-      await page.locator('#closeSendAssetFormModal').click();
-      await page.locator('#openSendAssetFormModal').click();
-      await page.locator('#sendAssetFormModal.active.is-transition-complete').waitFor();
-      await page.locator('#sendToAddress').fill('freshuser');
-      await page.locator('#sendAmount').fill('7');
-      await page.locator('#sendMemo').fill('Keep these new values');
-      await page.evaluate(async () => { __pendingLookup.reject(Error('Stale lookup failure')); await __pendingScan; });
-      assert.equal(await page.locator('#sendToAddress').inputValue(), 'freshuser');
-      assert.equal(await page.locator('#sendAmount').inputValue(), '7');
-      assert.equal(await page.locator('#sendMemo').inputValue(), 'Keep these new values');
-
-      // Two overlapping scans resolve in reverse order: only the latest wins.
-      const latest = 'liberdus://' + Buffer.from(JSON.stringify({ ...request.data, i: 'nep141:usdc.omft.near', s: 'USDC', a: '2.5', m: 'Latest request' })).toString('base64');
-      await page.evaluate(({ first, second }) => {
-        window.__lookups = [];
-        __fixture.chatPaymentPanel.configure({ resolveUsername: () => new Promise(resolve => __lookups.push(resolve)) });
-        window.__firstScan = __fixture.nativeSend.fillFromQR(first);
-        window.__secondScan = __fixture.nativeSend.fillFromQR(second);
-      }, { first: request.uri, second: latest });
-      await page.evaluate(async () => { __lookups[1]('a'.repeat(40)); await __secondScan; });
-      await page.locator('#chatSendModal.active.is-transition-complete').waitFor();
-      await page.evaluate(async () => { __lookups[0]('a'.repeat(40)); await __firstScan; });
-      assert.match(await page.locator('#chatSendAsset').textContent(), /USDC/);
-      assert.equal(await page.locator('#chatSendAmount').inputValue(), '2.5');
-      assert.equal(await page.locator('#chatSendNote').inputValue(), 'Latest request');
-      await page.locator('#closeChatSendModal').click();
-      await page.evaluate(() => __fixture.chatPaymentPanel.configure({ resolveUsername: async () => 'a'.repeat(40) }));
-      await page.locator('#openSendAssetFormModal').click();
-      await page.locator('#sendAssetFormModal.active.is-transition-complete').waitFor();
-      await page.locator('#closeSendAssetFormModal').click();
+      assert.equal(await page.locator('#sendMemo').inputValue(), '');
 
       assert.equal(await page.evaluate(() => __signings), 0);
       assert.equal(await page.evaluate(() => __broadcasts), 0);
       assert.deepEqual(errors, []);
       assert.deepEqual(external, []);
-      console.log(`PASS ${viewport.name}: grouped actions, actual QR round trip, copy, header/browser Back, asset/account reset, native scan routing/rejections, mobile geometry; zero signing/broadcasts/unmocked external requests`);
+      console.log(`PASS ${viewport.name}: grouped actions, actual QR round trip, copy, header/browser Back, asset/account reset, unsupported LIB request rejection, responsive geometry; zero signing/broadcasts/unmocked external requests`);
     } finally {
       await context.close();
     }
