@@ -140,6 +140,18 @@ class ReceiveRegression {
   }
 
   async layout(page, name) {
+    const address = await page.locator('#multichainRequestAddress').evaluate(element => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const style = getComputedStyle(element);
+      return {
+        lines: range.getClientRects().length,
+        textWidth: range.getBoundingClientRect().width,
+        availableWidth: element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+      };
+    });
+    assert.equal(address.lines, 1, `${name}: the complete address stays on one line`);
+    assert.ok(address.textWidth <= address.availableWidth + 1, `${name}: the complete address fits without clipping`);
     const rects = await page.locator('#multichainRequestModal').evaluate(modal => {
       const measured = [modal, ...modal.querySelectorAll('.address-container, input, textarea, img, .address-copy-button')];
       return measured.map(element => {
@@ -326,6 +338,7 @@ try {
   await regression.start();
   await regression.runViewport({ name: 'desktop-light', width: 1100, colorScheme: 'light' });
   await regression.runViewport({ name: 'mobile-dark-preference', width: 360, colorScheme: 'dark' });
+  await regression.runViewport({ name: 'narrow-mobile', width: 320, colorScheme: 'light' });
   console.log(`Screenshots: ${output}`);
 } finally {
   await regression.close();
