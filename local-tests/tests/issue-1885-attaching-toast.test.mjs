@@ -21,6 +21,8 @@ const methods = [
   assert.ok(method, `ChatModal.${name} must exist`);
   return method;
 });
+// Present once the client waits for the toast to paint before thumbnail work.
+const waitForPaintSource = appSource.match(/^function waitForPaint\([^\n]*\) \{[\s\S]*?^\}$/m)?.[0];
 
 const CONTACT = 'contact-address';
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -40,11 +42,13 @@ function deferred() {
  * Thumbnail generation, encryption and upload are synthetic; each one is held
  * open by a deferred promise so a test can inspect the state while it is in flight.
  */
-function createChat({ attachments = [] } = {}) {
+function createChat({ attachments = [], holdPaint = false } = {}) {
   const events = [];
   const toasts = new Map();
+  const paint = deferred();
   const thumbnail = deferred();
   const upload = deferred();
+  if (!holdPaint) paint.resolve();
   let nextToast = 0;
   let chat;
 
@@ -78,6 +82,11 @@ function createChat({ attachments = [] } = {}) {
       if (!toasts.has(id)) return;
       events.push(`hide:${toasts.get(id).type}`);
       toasts.delete(id);
+    },
+    waitForPaint() {
+      events.push('paint');
+      snapshot('paint');
+      return paint.promise;
     },
     MediaCacheOwnership: { getOwnerKey: () => 'owner' },
     thumbnailCache: {
@@ -133,7 +142,7 @@ function createChat({ attachments = [] } = {}) {
       this.sendButton.disabled = false;
     },
   });
-  return { chat, events, toasts, loadingToasts, snapshots, thumbnail, upload, busy };
+  return { chat, events, toasts, loadingToasts, snapshots, paint, thumbnail, upload, busy };
 }
 
 function select(chat, name, type, size = 4096) {
@@ -155,7 +164,7 @@ for (const [label, name, type, generator] of [
     select(chat, name, type);
     await tick();
 
-    assert.deepEqual(events, ['show:loading', generator], 'thumbnail generation is still in flight');
+    assert.deepEqual(events, ['show:loading', 'paint', generator], 'thumbnail generation is still in flight');
     assert.deepEqual(snapshots[generator].loading, [`Attaching "${name}" to Bob...`]);
     assert.deepEqual(snapshots[generator].busy, allBusy, 'Send and attach are blocked before thumbnail work starts');
 
@@ -167,6 +176,66 @@ for (const [label, name, type, generator] of [
   });
 }
 
+test('thumbnail work does not start until the toast has had a chance to paint', async () => {
+  // Decoding a large photo blocks the main thread, so a toast that is in the DOM but
+  // not yet painted would stay invisible until the thumbnail is done.
+  for (const [name, type, generator] of [
+    ['holiday.jpg', 'image/jpeg', 'generateThumbnail'],
+    ['clip.mp4', 'video/mp4', 'extractVideoThumbnail'],
+  ]) {
+    const { chat, events, snapshots, paint } = createChat({ holdPaint: true });
+    select(chat, name, type);
+    await tick();
+
+    assert.deepEqual(events, ['show:loading', 'paint'], `${name}: waiting for the paint`);
+    assert.deepEqual(snapshots.paint.loading, [`Attaching "${name}" to Bob...`]);
+    assert.deepEqual(snapshots.paint.busy, allBusy);
+
+    paint.resolve();
+    await tick();
+    assert.deepEqual(events, ['show:loading', 'paint', generator], name);
+  }
+});
+
+test('waitForPaint resolves after its delay and a painted frame, or a timeout when frames are paused', async () => {
+  assert.ok(waitForPaintSource, 'waitForPaint must exist');
+  const run = () => {
+    const timers = new Map();
+    const frames = [];
+    let nextTimer = 0;
+    const waitForPaint = new Function('setTimeout', 'clearTimeout', 'requestAnimationFrame', `${waitForPaintSource}\nreturn waitForPaint;`)(
+      (callback, delay) => { timers.set(++nextTimer, { callback, delay }); return nextTimer; },
+      (id) => timers.delete(id),
+      (callback) => frames.push(callback),
+    );
+    let resolved = false;
+    waitForPaint(20).then(() => { resolved = true; });
+    const fire = (id) => { const { callback } = timers.get(id); timers.delete(id); callback(); };
+    return { timers, frames, fire, isResolved: async () => { await tick(); return resolved; } };
+  };
+
+  // Frames running: delay, then two animation frames, i.e. one frame fully painted.
+  let state = run();
+  assert.deepEqual([...state.timers.values()].map((timer) => timer.delay), [20]);
+  assert.equal(state.frames.length, 0, 'no frame is requested before the delay has passed');
+  state.fire(1);
+  assert.equal(state.frames.length, 1);
+  state.frames.shift()();
+  assert.equal(await state.isResolved(), false, 'the first frame callback runs before that frame is painted');
+  state.frames.shift()();
+  assert.equal(await state.isResolved(), true);
+  assert.equal(state.timers.size, 0, 'the fallback timer is cancelled');
+
+  // Frames paused (background tab): the fallback timer resolves it instead.
+  state = run();
+  state.fire(1);
+  assert.equal(await state.isResolved(), false);
+  const [[fallbackId, fallback]] = [...state.timers.entries()];
+  assert.ok(fallback.delay > 0 && fallback.delay <= 250, 'the fallback is short');
+  state.fire(fallbackId);
+  assert.equal(await state.isResolved(), true);
+});
+
 test('the same toast stays until the attachment appears in the composer', async () => {
   const { chat, events, toasts, loadingToasts, snapshots, thumbnail, upload } = createChat();
   const { completion, input } = select(chat, 'holiday.jpg', 'image/jpeg');
@@ -174,7 +243,7 @@ test('the same toast stays until the attachment appears in the composer', async 
   thumbnail.resolve({ size: 16 });
   await tick();
 
-  assert.deepEqual(events, ['show:loading', 'generateThumbnail', 'encrypt', 'upload']);
+  assert.deepEqual(events, ['show:loading', 'paint', 'generateThumbnail', 'encrypt', 'upload']);
   assert.equal(loadingToasts().length, 1, 'encryption and upload reuse the toast shown at selection');
   // Encryption has finished by now; the buttons stay blocked through the upload.
   assert.equal(snapshots.upload.busy.sendDisabled, true);
@@ -202,7 +271,7 @@ test('a thumbnail failure keeps the toast and continues to encryption', async ()
   thumbnail.reject(new Error('synthetic thumbnail failure'));
   await tick();
 
-  assert.deepEqual(events, ['show:loading', 'extractVideoThumbnail', 'encrypt', 'upload']);
+  assert.deepEqual(events, ['show:loading', 'paint', 'extractVideoThumbnail', 'encrypt', 'upload']);
   assert.equal(loadingToasts().length, 1);
   assert.deepEqual(snapshots.encrypt.busy, allBusy);
 });
@@ -225,7 +294,7 @@ test('documents and audio still show the toast at once and skip thumbnail genera
     select(chat, name, type);
     await tick();
 
-    assert.deepEqual(events, ['show:loading', 'encrypt', 'upload'], name);
+    assert.deepEqual(events.filter((event) => event !== 'paint'), ['show:loading', 'encrypt', 'upload'], name);
     assert.deepEqual(snapshots.encrypt.loading, [`Attaching "${name}" to Bob...`]);
     assert.deepEqual(snapshots.encrypt.busy, allBusy, name);
   }
