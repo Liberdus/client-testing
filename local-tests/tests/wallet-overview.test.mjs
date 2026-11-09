@@ -113,6 +113,7 @@ class WalletFixture {
       sendAssetFormModal: { open() {}, reset() {} }, receiveModal: { open() {}, close() {} }, historyModal: { open() {} },
       bridgeModal: { open() {} }, window: { open() {} },
       chatModal: { resetPendingMessageConfirmations() {} },
+      chatPaymentPanel: { close() {} },
       stopEvmPaymentChecks() {}, daoRepo: { reset() {} },
       daoModal: { resetNotificationState() {} }, resetDaoNotificationSummary() {},
       console: { error() {}, warn() {} },
