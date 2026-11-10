@@ -382,7 +382,8 @@ test('the chat Send empty state still opens the dedicated Deposit picker and goe
   assert.equal(chat.empty.hidden, false);
   transitions.get('transitionend')({ target: chat.modal, propertyName: 'opacity' });
 
-  await documentFixture.getElementById('chatSendReceive').emit('click');
+  documentFixture.getElementById('chatSendReceive').emit('click');
+  await new Promise(setImmediate);
   assert.equal(chat.isActive(), false);
   assert.equal(picker.isActive(), true);
   assert.equal(picker.title.textContent, 'Deposit');
@@ -393,4 +394,52 @@ test('the chat Send empty state still opens the dedicated Deposit picker and goe
   assert.equal(deposit.isActive(), true);
   assert.equal(deposit.title.textContent, 'Deposit ODD (Base)');
   assert.deepEqual(requestedAssets, [ODD.assetId]);
+});
+
+test('overlapping Deposit and Other assets requests share a catalog load and use the latest route', async t => {
+  const fixture = new AssetsModalFixture(t, { tokens: [...TOKENS, ODD] });
+  const { controller } = fixture;
+  const { assetModal: detail, receiveModal: deposit, tokenPicker: picker } = controller;
+  detail.load();
+  picker.load();
+  t.mock.method(intentsActivity, 'forAsset', async () => ({ entries: [], depositsUnavailable: false }));
+  t.mock.method(intentsDeposits, 'isDepositable', () => true);
+  const requestedAssets = captureDeposits(t, deposit);
+  let finishCatalog;
+  const pending = new Promise(resolve => { finishCatalog = resolve; });
+  const loadCatalog = t.mock.method(intentsDeposits, 'loadBridgeTokens', () => pending);
+
+  const depositRequest = controller.startDeposit();
+  const otherAssetsRequest = fixture.catalogButton().emit('click');
+  finishCatalog();
+  await Promise.all([depositRequest, otherAssetsRequest]);
+
+  assert.equal(loadCatalog.mock.callCount(), 1);
+  assert.equal(picker.isActive(), true);
+  assert.equal(picker.title.textContent, 'Other assets');
+  transitions.get('transitionend')({ target: picker.modal, propertyName: 'opacity' });
+  await selectRow(picker.results, ODD);
+  assert.equal(detail.isActive(), true);
+  assert.equal(detail.title.textContent, 'ODD (Base)');
+  assert.equal(deposit.isActive(), false);
+  assert.deepEqual(requestedAssets, []);
+});
+
+test('a failed catalog load allows Other assets to retry', async t => {
+  const fixture = new AssetsModalFixture(t);
+  const picker = fixture.controller.tokenPicker;
+  picker.load();
+  t.mock.method(intentsDeposits, 'isDepositable', () => true);
+  const loadCatalog = t.mock.method(intentsDeposits, 'loadBridgeTokens', async () => {});
+  loadCatalog.mock.mockImplementationOnce(async () => { throw new Error('Synthetic bridge failure'); });
+  t.mock.method(console, 'warn', () => {});
+
+  await fixture.catalogButton().emit('click');
+  assert.equal(picker.isActive(), false);
+  assert.match(fixture.modal.statusLine.textContent, /Try again/);
+
+  await fixture.catalogButton().emit('click');
+  assert.equal(loadCatalog.mock.callCount(), 2);
+  assert.equal(picker.isActive(), true);
+  assert.equal(picker.title.textContent, 'Other assets');
 });

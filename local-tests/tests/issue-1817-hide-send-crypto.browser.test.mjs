@@ -47,6 +47,7 @@ window.__fixture = {
     intentsAssets.listCatalogAssets = () => [asset];
     intentsAssets.getCatalogAsset = key => key === asset.key ? asset : null;
     intentsAssets.getAccountId = () => 'synthetic.near';
+    intentsActivity.forAsset = async () => ({ entries: [], depositsUnavailable: false });
     intentsDeposits.loadBridgeTokens = async () => {};
     intentsDeposits.isDepositable = id => id === asset.assetId;
     intentsDeposits.requestDepositTarget = async () => ({ address: '0x' + 'c'.repeat(40), memo: null,
@@ -116,29 +117,31 @@ try {
 
     // The hidden entry point's action and its real payment/receive screens remain usable.
     await page.evaluate(() => __fixture.openPreservedPayment());
-    await page.locator('#chatSendModal.is-transition-complete').waitFor();
+    await page.locator('#nearIntentsSendModal.is-transition-complete').waitFor();
     assert.equal(await page.locator('#chatSendTitle').textContent(), 'Send to recipient');
     await page.locator('#chatSendEmpty').waitFor({ state: 'visible' });
     await page.locator('#chatSendReceive').click();
     await page.locator('#multichainTokenPickerModal.is-transition-complete').waitFor();
-    assert.equal(await page.locator('#multichainTokenPickerTitle').textContent(), 'Receive');
+    assert.equal(await page.locator('#multichainTokenPickerTitle').textContent(), 'Deposit');
     await page.locator('#closeMultichainTokenPickerModal').click();
     await page.locator('#closeChatModal').click();
 
     await page.locator('#multichainSummary').click();
     await page.locator('#multichainModal.is-transition-complete').waitFor();
-    await page.locator('#multichainReceiveAny').click();
+    await page.locator('#multichainOtherAssets').click();
     await page.locator('#multichainTokenPickerModal.is-transition-complete').waitFor();
     await page.locator('#multichainTokenResults [data-asset-key="intents:synthetic-usdc"]').click();
+    await page.locator('#multichainAssetModal.is-transition-complete').waitFor();
+    await page.locator('#multichainAssetDeposit').click();
     await page.locator('#multichainReceiveModal.is-transition-complete').waitFor();
-    assert.equal(await page.locator('#multichainReceiveTitle').textContent(), 'Receive USDC (Ethereum)');
+    assert.equal(await page.locator('#multichainReceiveTitle').textContent(), 'Deposit USDC (Ethereum)');
     assert.match(await page.locator('#multichainReceiveBody').innerText(), /0xcccccccc/);
     assert.equal(await page.locator('#multichainReceiveBody canvas, #multichainReceiveBody img').count(), 1, 'wallet receive still renders its address QR');
     assert.equal(await page.evaluate(() => __transactions), 0);
     assert.deepEqual(external, [], 'regression uses only local synthetic data');
     assert.deepEqual(errors, []);
     await context.close();
-    console.log(`PASS ${viewport.width}px: chat menu hides Send Crypto; attachment actions, retained payment handler and wallet Multichain Receive still work`);
+    console.log(`PASS ${viewport.width}px: chat menu hides Send Crypto; attachment actions, retained payment handler and NEAR Assets Deposit still work`);
   }
 } finally {
   await browser?.close();
