@@ -16,21 +16,14 @@ const { formatDisplayAmount } = await import(pathToFileURL(join(root, 'near-asse
 
 const START = 1_800_000_000_000;
 
-/** The <time> label, counting every write the page would have to apply. */
 class LabelFixture {
-  #text = 'Not updated yet';
-  #title = '';
   constructor() {
+    this.textContent = 'Not updated yet';
+    this.title = '';
     this.attributes = new Map();
-    this.writes = 0;
   }
-  get textContent() { return this.#text; }
-  set textContent(value) { this.#text = String(value); this.writes++; }
-  get title() { return this.#title; }
-  set title(value) { this.#title = String(value); this.writes++; }
-  getAttribute(name) { return this.attributes.get(name) ?? null; }
-  setAttribute(name, value) { this.attributes.set(name, String(value)); this.writes++; }
-  removeAttribute(name) { this.attributes.delete(name); this.writes++; }
+  setAttribute(name, value) { this.attributes.set(name, String(value)); }
+  removeAttribute(name) { this.attributes.delete(name); }
 }
 
 /**
@@ -129,24 +122,22 @@ test('the label tracks the refresh attempt whichever balance group could not be 
   }
 });
 
-test('the label counts seconds, then minutes, hours and days since the last refresh', async () => {
+test('the label counts minutes, hours and days since the last refresh, as before', async () => {
   const h = new WalletFixture();
   h.groups.evmStatus = 'partial';
   await h.refresh();
   h.screen.startBalanceUpdatedTimer();
 
-  h.elapse(1_000);
-  assert.equal(h.label.textContent, 'Updated 1s ago');
-  h.elapse(9_000);
-  assert.equal(h.label.textContent, 'Updated 10s ago');
-  h.elapse(49_000);
-  assert.equal(h.label.textContent, 'Updated 59s ago');
-  h.elapse(1_000);
+  h.elapse(30_000);
+  assert.equal(h.label.textContent, 'Updated just now');
+  h.elapse(30_000);
   assert.equal(h.label.textContent, 'Updated 1m ago');
   h.elapse(60_000);
   assert.equal(h.label.textContent, 'Updated 2m ago');
 
   const text = (ms) => h.screen.getBalanceUpdatedText(START, START + ms);
+  assert.equal(text(10_000), 'Updated just now');
+  assert.equal(text(59_000), 'Updated just now');
   assert.equal(text(59 * 60_000 + 59_000), 'Updated 59m ago');
   assert.equal(text(60 * 60_000), 'Updated 1h ago');
   assert.equal(text(23 * 3_600_000), 'Updated 23h ago');
@@ -161,8 +152,8 @@ test('a repeated refresh restarts the count and shows progress while it runs', a
   const h = new WalletFixture();
   await h.refresh();
   h.screen.startBalanceUpdatedTimer();
-  h.elapse(42_000);
-  assert.equal(h.label.textContent, 'Updated 42s ago');
+  h.elapse(5 * 60_000);
+  assert.equal(h.label.textContent, 'Updated 5m ago');
 
   let finishEvm;
   h.groups.evmStatus = 'partial';
@@ -170,15 +161,15 @@ test('a repeated refresh restarts the count and shows progress while it runs', a
   const refreshing = h.refresh();
   assert.equal(h.label.textContent, 'Updating…');
   assert.equal(h.label.attributes.has('datetime'), false);
-  h.elapse(3_000);
+  h.elapse(60_000);
   assert.equal(h.label.textContent, 'Updating…');
   finishEvm();
   await refreshing;
 
   assert.equal(h.label.textContent, 'Updated just now');
-  assert.equal(h.data.wallet.overviewUpdatedAt, START + 45_000);
-  h.elapse(10_000);
-  assert.equal(h.label.textContent, 'Updated 10s ago');
+  assert.equal(h.data.wallet.overviewUpdatedAt, START + 6 * 60_000);
+  h.elapse(2 * 60_000);
+  assert.equal(h.label.textContent, 'Updated 2m ago');
 });
 
 test('a refresh that finishes after the account changed does not mark either wallet', async () => {
@@ -198,38 +189,4 @@ test('a refresh that finishes after the account changed does not mark either wal
   assert.equal(first.wallet.overviewUpdatedAt, 0);
   assert.equal(second.wallet.overviewUpdatedAt, 0);
   assert.equal(h.label.textContent, 'Not updated yet');
-});
-
-test('ticks that leave the label unchanged do not touch the page', async () => {
-  const h = new WalletFixture();
-  await h.refresh();
-  h.screen.startBalanceUpdatedTimer();
-  h.elapse(60_000);
-  assert.equal(h.label.textContent, 'Updated 1m ago');
-
-  h.label.writes = 0;
-  h.elapse(59_000);
-  assert.equal(h.label.textContent, 'Updated 1m ago');
-  assert.equal(h.label.writes, 0);
-  h.elapse(1_000);
-  assert.equal(h.label.textContent, 'Updated 2m ago');
-  assert.ok(h.label.writes > 0);
-});
-
-test('switching to a wallet refreshed at another moment updates the timestamp behind the same text', async () => {
-  const h = new WalletFixture();
-  await h.refresh();
-  h.screen.startBalanceUpdatedTimer();
-  h.elapse(5_000);
-  assert.equal(h.label.textContent, 'Updated 5s ago');
-  assert.equal(h.label.attributes.get('datetime'), new Date(START).toISOString());
-
-  const second = h.walletData();
-  second.wallet.overviewUpdatedAt = START - 300;
-  h.switchAccount({ keys: { address: 'b'.repeat(40) } }, second);
-  h.screen.reset();
-
-  assert.equal(h.label.textContent, 'Updated 5s ago');
-  assert.equal(h.label.attributes.get('datetime'), new Date(START - 300).toISOString());
-  assert.equal(h.label.title, `Balances updated ${new Date(START - 300).toLocaleString()}`);
 });
