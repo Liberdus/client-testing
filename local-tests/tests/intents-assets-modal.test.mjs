@@ -2,7 +2,7 @@ import '../fixtures/near-rpc.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { intentsActivity, intentsAssets, intentsDeposits, multichain } from '../near-assets.js';
+import { ChatPaymentPanel, intentsActivity, intentsAssets, intentsDeposits, multichain } from '../near-assets.js';
 import { installModalTransitionListeners } from '../lib.js';
 
 const markup = await readFile(new URL('../index.html', import.meta.url), 'utf8');
@@ -36,6 +36,7 @@ class ElementFixture {
     this.classList = {
       add: name => classes.add(name),
       remove: name => classes.delete(name),
+      replace: (oldName, newName) => classes.delete(oldName) && Boolean(classes.add(newName)),
       contains: name => classes.has(name),
       toggle: (name, on) => on ? classes.add(name) : classes.delete(name),
     };
@@ -57,20 +58,48 @@ const TOKENS = [
   { assetId: 'nep141:eth.omft.near', symbol: 'ETH', blockchain: 'eth', decimals: 18, price: 3000 },
   { assetId: 'nep141:sol.omft.near', symbol: 'SOL', blockchain: 'sol', decimals: 9, price: 100 },
   { assetId: 'nep141:xrp.omft.near', symbol: 'XRP', blockchain: 'xrp', decimals: 6, price: 2 },
-  { assetId: 'nep245:v2_1.omni.hot.tg:56_11111111111111111111', symbol: 'BNB', blockchain: 'bsc', decimals: 18, price: 500 },
+  { assetId: 'nep141:bnb.omdep.near', symbol: 'BNB', blockchain: 'bsc', decimals: 18, price: 500 },
   { assetId: 'nep141:eth-0xdac17f958d2ee523a2206206994597c13d831ec7.omft.near', symbol: 'USDT', blockchain: 'eth', decimals: 6, price: 1 },
 ];
 const ODD = { assetId: 'nep141:odd.omft.near', symbol: 'ODD', blockchain: 'base', decimals: 6, price: null };
+const DEPRECATED_BNB = {
+  assetId: 'nep245:v2_1.omni.hot.tg:56_11111111111111111111',
+  symbol: 'BNB(DEPRECATED)', blockchain: 'bsc', decimals: 18, price: 500,
+};
 const key = asset => `intents:${asset.assetId}`;
+const renderedKeys = element =>
+  [...element.innerHTML.matchAll(/data-asset-key="([^"]+)"/g)].map(([, assetKey]) => assetKey);
+const selectRow = (list, asset) => {
+  assert.ok(renderedKeys(list).includes(key(asset)), `Missing row for ${asset.assetId}`);
+  return list.emit('click', { target: { closest: () => ({ dataset: { assetKey: key(asset) } }) } });
+};
+
+function captureDeposits(t, deposit) {
+  const requests = [];
+  deposit.load();
+  t.mock.method(intentsDeposits, 'requestDepositTarget', async (_accountId, assetId) => {
+    requests.push(assetId);
+    return { address: 'synthetic-deposit-address' };
+  });
+  t.mock.method(deposit, 'render', () => {});
+  t.mock.method(deposit, 'startWatching', () => {});
+  return requests;
+}
 
 class AssetsModalFixture {
-  constructor(t, { tokens = TOKENS, balances = {}, status = 'connected', heldBefore = [] } = {}) {
+  constructor(t, {
+    tokens = TOKENS, balances = {}, status = 'connected', heldBefore = [],
+    controller = new multichain.constructor(),
+  } = {}) {
     documentFixture.elements = new Map([...markup.matchAll(/<([a-z]+)([^>]*\bid="([^"]+)"[^>]*)>/g)]
       .map(([, tagName, attributes, id]) => [id, Object.assign(new ElementFixture(tagName), {
         hidden: /\shidden(?:\s|$|=)/.test(attributes),
         disabled: /\sdisabled(?:\s|$|=)/.test(attributes),
       })]));
-    this.controller = new multichain.constructor();
+    for (const [, id, label] of markup.matchAll(/<button\b[^>]*\bid="([^"]+)"[^>]*>([^<]*)<\/button>/g)) {
+      documentFixture.getElementById(id).textContent = label.trim();
+    }
+    this.controller = controller;
     this.settings = { heldBefore: [...heldBefore], hideEmpty: false };
     this.controller.configure({
       getAccount: () => ({ keys: { address: 'a'.repeat(40) } }),
@@ -92,7 +121,12 @@ class AssetsModalFixture {
     });
   }
   rows() {
-    return [...this.modal.assetsList.innerHTML.matchAll(/data-asset-key="([^"]+)"/g)].map(([, assetKey]) => assetKey);
+    return renderedKeys(this.modal.assetsList);
+  }
+  catalogButton() {
+    // The previous hook lets these checks exercise the same entry point on the baseline.
+    return documentFixture.elements.get('multichainOtherAssets')
+      || documentFixture.getElementById('multichainDepositAnother');
   }
   hideEmpty() {
     this.modal.hideEmpty.checked = true;
@@ -100,8 +134,8 @@ class AssetsModalFixture {
   }
 }
 
-test('an empty wallet lists its six starter assets as rows without changing the portfolio', t => {
-  const fixture = new AssetsModalFixture(t);
+test('an empty wallet lists current BNB among its six starters without changing the portfolio', t => {
+  const fixture = new AssetsModalFixture(t, { tokens: [...TOKENS, DEPRECATED_BNB] });
   fixture.modal.render();
 
   assert.deepEqual(new Set(fixture.rows()), new Set(TOKENS.map(key)));
@@ -109,6 +143,29 @@ test('an empty wallet lists its six starter assets as rows without changing the 
   assert.equal(fixture.modal.empty.hidden, true);
   assert.equal(fixture.modal.totalBalance.textContent, '$0.00');
   assert.deepEqual(intentsAssets.getAssets(), []);
+});
+
+test('deprecated BNB appears in the overview while held and leaves it when the balance reaches zero', t => {
+  const fixture = new AssetsModalFixture(t, {
+    tokens: [...TOKENS, DEPRECATED_BNB],
+    balances: { [DEPRECATED_BNB.assetId]: '1000000000000000000' },
+    heldBefore: [DEPRECATED_BNB.assetId],
+  });
+  fixture.modal.render();
+
+  assert.ok(fixture.rows().includes(key(DEPRECATED_BNB)));
+  assert.match(fixture.modal.assetsList.innerHTML, /1 BNB\(DEPRECATED\)/);
+  fixture.hideEmpty();
+  assert.deepEqual(fixture.rows(), [key(DEPRECATED_BNB)]);
+
+  fixture.modal.hideEmpty.checked = false;
+  fixture.modal.hideEmpty.emit('change');
+  intentsAssets.balances = { [DEPRECATED_BNB.assetId]: '0' };
+  intentsAssets.rebuildNetwork();
+  fixture.modal.render();
+
+  assert.deepEqual(new Set(fixture.rows()), new Set(TOKENS.map(key)));
+  assert.equal(intentsAssets.getAsset(key(DEPRECATED_BNB)).rawAmount, '0');
 });
 
 test('held assets outside the starter list remain visible and duplicate rows are omitted', t => {
@@ -216,18 +273,9 @@ for (const balances of [{}, null]) {
       return { entries: [], depositsUnavailable: false };
     });
     const deposit = fixture.controller.receiveModal;
-    deposit.load();
-    const requestedAssets = [];
-    t.mock.method(intentsDeposits, 'requestDepositTarget', async (_accountId, assetId) => {
-      requestedAssets.push(assetId);
-      return { address: 'synthetic-deposit-address' };
-    });
-    t.mock.method(deposit, 'render', () => {});
-    t.mock.method(deposit, 'startWatching', () => {});
+    const requestedAssets = captureDeposits(t, deposit);
     fixture.modal.render();
-    fixture.modal.assetsList.emit('click', {
-      target: { closest: () => ({ dataset: { assetKey: key(TOKENS[0]) } }) },
-    });
+    selectRow(fixture.modal.assetsList, TOKENS[0]);
     await new Promise(setImmediate);
 
     const detail = fixture.controller.assetModal;
@@ -243,10 +291,10 @@ for (const balances of [{}, null]) {
     assert.equal(detail.sendButton.disabled, true);
     assert.equal(detail.withdrawButton.disabled, true);
     assert.equal(detail.swapButton.disabled, true);
-    assert.equal(detail.receiveButton.disabled, false);
+    assert.equal(detail.depositButton.disabled, false);
     assert.deepEqual(activityAssets, [key(TOKENS[0])]);
     transitions.get('transitionend')({ target: detail.modal, propertyName: 'opacity' });
-    await detail.receiveButton.emit('click');
+    await detail.depositButton.emit('click');
     assert.equal(deposit.assetKey, key(TOKENS[0]));
     assert.match(deposit.title.textContent, /Deposit BTC.*Bitcoin/);
     assert.deepEqual(requestedAssets, [TOKENS[0].assetId]);
@@ -259,52 +307,90 @@ for (const scenario of [
   { name: 'empty wallet with Hide empty leaving no rows', balances: {}, hideEmpty: true, overview: [] },
   { name: 'funded wallet with Hide empty', balances: { [TOKENS[0].assetId]: '100000000' }, hideEmpty: true, overview: [TOKENS[0]] },
 ]) {
-  test(`Deposit another asset opens the full deposit catalog for ${scenario.name}`, async t => {
+  test(`Other assets opens the selected asset detail for ${scenario.name}`, async t => {
+    const sameSymbol = { ...ODD, assetId: 'nep141:odd-ethereum.omft.near', blockchain: 'eth' };
     const unsupported = { ...ODD, assetId: 'nep141:unsupported.omft.near', symbol: 'NOPE' };
     const superseded = { ...TOKENS[0], assetId: 'nep141:btc.omft.near' };
     const fixture = new AssetsModalFixture(t, {
-      tokens: [...TOKENS, ODD, unsupported, superseded],
+      tokens: [...TOKENS, ODD, sameSymbol, unsupported, superseded],
       balances: scenario.balances,
     });
-    const picker = fixture.controller.tokenPicker;
+    const { assetModal: detail, receiveModal: deposit, tokenPicker: picker } = fixture.controller;
+    detail.load();
     picker.load();
+    t.mock.method(intentsActivity, 'forAsset', async () => ({ entries: [], depositsUnavailable: false }));
     t.mock.method(intentsDeposits, 'loadBridgeTokens', async () => {});
     t.mock.method(intentsDeposits, 'isDepositable', assetId => assetId !== unsupported.assetId);
-    const deposits = [];
-    t.mock.method(fixture.controller.receiveModal, 'open', assetKey => deposits.push(assetKey));
+    const requestedAssets = captureDeposits(t, deposit);
     fixture.modal.render();
     if (scenario.hideEmpty) fixture.hideEmpty();
     const overviewRows = fixture.rows();
     const settings = structuredClone(fixture.settings);
     const history = intentsAssets.getAssets();
     assert.ok(!overviewRows.includes(key(ODD)), 'The never-held nonstarter is absent from the overview');
-    assert.deepEqual(new Set(overviewRows), new Set((scenario.overview || TOKENS).map(key)));
+    if (scenario.overview) assert.deepEqual(new Set(overviewRows), new Set(scenario.overview.map(key)));
     assert.equal(fixture.modal.assetsList.hidden, overviewRows.length === 0);
 
-    const button = documentFixture.getElementById('multichainDepositAnother');
+    const button = fixture.catalogButton();
     assert.equal(button.tagName, 'BUTTON');
     assert.equal(button.hidden, false);
     assert.equal(button.disabled, false);
     await button.emit('click');
     await new Promise(setImmediate);
 
-    assert.equal(picker.title.textContent, 'Deposit');
     assert.equal(picker.isActive(), true, 'The overview event opens the real picker');
-    const expected = new Set([...TOKENS, ODD].map(key));
-    assert.deepEqual(new Set(picker.candidates().map(asset => asset.key)), expected);
-    const pickerRows = [...picker.results.innerHTML.matchAll(/data-asset-key="([^"]+)"/g)]
-      .map(([, assetKey]) => assetKey);
+    const expected = new Set([...TOKENS, ODD, sameSymbol].map(key));
+    const pickerRows = renderedKeys(picker.results);
     assert.deepEqual(new Set(pickerRows), expected, 'Bridge-supported assets appear across all chains');
     assert.equal(pickerRows.length, expected.size, 'Catalog rows are not duplicated');
     transitions.get('transitionend')({ target: picker.modal, propertyName: 'opacity' });
-    picker.results.emit('click', {
-      target: { closest: () => ({ dataset: { assetKey: key(ODD) } }) },
-    });
+    await selectRow(picker.results, ODD);
 
-    assert.deepEqual(deposits, [key(ODD)], 'Picking a never-held asset reaches its Deposit flow');
+    assert.equal(detail.isActive(), true, 'Picking a never-held asset opens its details');
+    assert.equal(detail.assetKey, key(ODD));
+    assert.equal(detail.title.textContent, 'ODD (Base)');
+    assert.equal(deposit.isActive(), false);
+    assert.deepEqual(requestedAssets, [], 'Choosing an asset does not request a deposit address');
+    assert.equal(button.textContent, 'Other assets');
+    assert.equal(picker.title.textContent, 'Other assets');
     assert.equal(picker.isActive(), false);
+    transitions.get('transitionend')({ target: detail.modal, propertyName: 'opacity' });
+    await detail.depositButton.emit('click');
+    assert.equal(deposit.isActive(), true);
+    assert.equal(deposit.title.textContent, 'Deposit ODD (Base)');
+    assert.deepEqual(requestedAssets, [ODD.assetId], 'Deposit uses the selected asset and network');
     assert.deepEqual(fixture.rows(), overviewRows);
     assert.deepEqual(fixture.settings, settings);
     assert.equal(intentsAssets.getAssets(), history);
   });
 }
+
+test('the chat Send empty state still opens the dedicated Deposit picker and goes directly to Deposit', async t => {
+  const fixture = new AssetsModalFixture(t, { tokens: [...TOKENS, ODD], controller: multichain });
+  const { assetModal: detail, receiveModal: deposit, tokenPicker: picker } = fixture.controller;
+  detail.load();
+  picker.load();
+  t.mock.method(intentsAssets, 'refresh', async () => intentsAssets.getAssets());
+  t.mock.method(intentsDeposits, 'loadBridgeTokens', async () => {});
+  t.mock.method(intentsDeposits, 'isDepositable', () => true);
+  const requestedAssets = captureDeposits(t, deposit);
+  const chat = new ChatPaymentPanel();
+  const account = { keys: { address: 'a'.repeat(40) } };
+  chat.configure({ getAccount: () => account });
+  await chat.open('b'.repeat(40), 'recipient');
+  assert.equal(chat.isActive(), true);
+  assert.equal(chat.empty.hidden, false);
+  transitions.get('transitionend')({ target: chat.modal, propertyName: 'opacity' });
+
+  await documentFixture.getElementById('chatSendReceive').emit('click');
+  assert.equal(chat.isActive(), false);
+  assert.equal(picker.isActive(), true);
+  assert.equal(picker.title.textContent, 'Deposit');
+  transitions.get('transitionend')({ target: picker.modal, propertyName: 'opacity' });
+  await selectRow(picker.results, ODD);
+
+  assert.equal(detail.isActive(), false);
+  assert.equal(deposit.isActive(), true);
+  assert.equal(deposit.title.textContent, 'Deposit ODD (Base)');
+  assert.deepEqual(requestedAssets, [ODD.assetId]);
+});
