@@ -48,10 +48,15 @@ window.chatPayFixture = {
     parameters.current.minTollUsdStr = '0';
     myAccount = { username: 'sender', keys: { address: senderAddress }, netid: network.netid };
     myData = newDataRecord(myAccount);
-    myData.contacts[recipientAddress] = {
-      address: recipientAddress, username: 'recipient', messages: [], friend: 2, unread: 0,
-      timestamp: 0, useAvatar: 'identicon',
-    };
+    for (const [address, username, name] of [
+      [recipientAddress, 'recipient'],
+      [alternateAddress, 'another'],
+      ['e'.repeat(40), null, 'Address-only contact'],
+    ]) {
+      myData.contacts[address] = {
+        address, username, name, messages: [], friend: 2, unread: 0, timestamp: 0, useAvatar: 'identicon',
+      };
+    }
     isOnline = true;
     welcomeScreen.close();
     header.open();
@@ -89,11 +94,27 @@ window.chatPayFixture = {
     chatPaymentPanel.checkReceiptRecipient = async () => ({ problem: null, tollWei: 0n });
     await chatModal.open(recipientAddress);
   },
+  reopenChat() { return chatModal.open(recipientAddress); },
+  async openContactsOutOfOrder() {
+    const renderAvatar = getContactAvatarHtml;
+    let finishFirst;
+    getContactAvatarHtml = (info, size) => info.address === recipientAddress
+      ? new Promise(resolve => { finishFirst = resolve; })
+      : renderAvatar(info, size);
+    try {
+      const first = contactInfoModal.open(createDisplayInfo(myData.contacts[recipientAddress]));
+      await contactInfoModal.open(createDisplayInfo(myData.contacts[alternateAddress]));
+      finishFirst('');
+      await first;
+    } finally {
+      getContactAvatarHtml = renderAvatar;
+    }
+  },
   setUsernameChanged(changed) { currentRecipientAddress = changed ? alternateAddress : recipientAddress; },
 };
 `;
 
-test('Chat Pay opens each send flow with an editable recipient and clears Wallet prefills on exit', { timeout: 45_000 }, async t => {
+test('Pay opens each send flow with an editable recipient and clears Wallet prefills on exit', { timeout: 60_000 }, async t => {
   const app = await readFile(resolve(clientRoot, 'app.js'), 'utf8') + '\n' + fixture;
   const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
   const origin = 'http://127.0.0.1';
@@ -222,6 +243,8 @@ test('Chat Pay opens each send flow with an editable recipient and clears Wallet
   await shown('sendAssetFormModal');
   await waitForStatus('sendToAddressError', /contact changed/i);
   await back('sendAssetFormModal');
+  await page.evaluate(() => window.chatPayFixture.setUsernameChanged(false));
+
   await click('closeChatModal');
   await closed('chatModal');
 
@@ -234,5 +257,80 @@ test('Chat Pay opens each send flow with an editable recipient and clears Wallet
     await click(flow.closeList);
     await closed(flow.overview);
   }
+
+  await t.test('Contact Info uses the displayed contact and stays open when backing out of Pay', async () => {
+    const openContactPay = async username => {
+      await click('contactInfoSendButton');
+      await shown('payChoiceModal');
+      if (username) assert.equal(await input('payChoiceRecipient').textContent(), `To @${username}`);
+    };
+    const closeContactInfo = async () => {
+      await click('closeContactInfoModal');
+      await closed('contactInfoModal');
+    };
+    const openListedContact = async name => {
+      await page.locator('#contactsList').getByText(name, { exact: true }).click();
+      await shown('contactInfoModal');
+    };
+
+    await page.evaluate(() => window.chatPayFixture.reopenChat());
+    await showPayMenu();
+    await page.locator('#chatHeaderContextMenu [data-action="info"]').click();
+    await shown('contactInfoModal');
+    await openContactPay('recipient');
+    await click('cancelPayChoice');
+    await closed('payChoiceModal');
+    assert.equal(await focusedId(), 'contactInfoSendButton');
+
+    await openContactPay('recipient');
+    await click('payChoiceLibBtn');
+    await shown('sendAssetFormModal');
+    assert.equal(await input('sendToAddress').inputValue(), 'recipient');
+    assert.ok(await input('sendToAddress').isEditable());
+    await back('sendAssetFormModal');
+
+    for (const flow of assetFlows) {
+      await openContactPay('recipient');
+      await click(flow.choice);
+      await openAssetSend(flow, flow.first);
+      assert.equal(await input(flow.recipient).inputValue(), 'recipient');
+      assert.ok(await input(flow.recipient).isEditable());
+      await back(flow.send);
+      await back(flow.details);
+      await back(flow.overview);
+      await shown('contactInfoModal');
+    }
+    assert.equal(await input('contactInfoUsername').textContent(), 'recipient');
+    await closeContactInfo();
+    await shown('chatModal');
+    await click('closeChatModal');
+    await closed('chatModal');
+
+    await click('switchToContacts');
+    await openListedContact('another');
+    await openContactPay('another');
+    await click('payChoiceLibBtn');
+    await shown('sendAssetFormModal');
+    assert.equal(await input('sendToAddress').inputValue(), 'another');
+    await back('sendAssetFormModal');
+    await closeContactInfo();
+
+    await openListedContact('Address-only contact');
+    await openContactPay();
+    await waitForStatus('payChoiceRecipient', /no saved username/);
+    await click('payChoiceLibBtn');
+    await shown('sendAssetFormModal');
+    assert.equal(await input('sendToAddress').inputValue(), '');
+    await back('sendAssetFormModal');
+    await closeContactInfo();
+
+    await page.evaluate(() => window.chatPayFixture.openContactsOutOfOrder());
+    await shown('contactInfoModal');
+    assert.equal(await input('contactInfoUsername').textContent(), 'another');
+    await openContactPay('another');
+    await back('payChoiceModal');
+    await closeContactInfo();
+  });
+
   assert.deepEqual(errors, []);
 });
