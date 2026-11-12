@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="../styles.css" />
+    <title>Welcome footer check</title>
+  </head>
+  <body>
+    <div class="container">
+      <main class="welcome-screen" id="welcomeScreen">
+        <a class="logo-link" href="#">
+          <img src="../media/liberdus_logo_250.png" alt="Liberdus Logo" style="margin-bottom: 20px" />
+        </a>
+        <h1>Liberdus<br /><span style="font-size: 0.8rem">Local Test</span></h1>
+        <div class="welcome-buttons">
+          <button class="btn btn--primary btn--pill btn--full">Sign In</button>
+          <button class="btn btn--secondary btn--pill btn--full">Create Account</button>
+          <button class="btn btn--secondary btn--pill btn--full">Menu</button>
+        </div>
+        <div class="welcome-version" id="welcomeVersion">
+          <div>Web Version: 2026.0831.1742 t</div>
+          <div id="nativeVersion">App Version: 2026.0814.1250</div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </main>
+    </div>
+    <script>
+      if (!new URLSearchParams(location.search).has('native')) {
+        document.getElementById('nativeVersion').hidden = true;
+      }
+
+      requestAnimationFrame(() => {
+        const screen = document.getElementById('welcomeScreen');
+        const buttons = document.querySelector('.welcome-buttons').getBoundingClientRect();
+        const footer = document.getElementById('welcomeVersion').getBoundingClientRect();
+        const screenRect = screen.getBoundingClientRect();
+        const paddingBottom = parseFloat(getComputedStyle(screen).paddingBottom);
+        const shortViewport = innerHeight < 500;
+        const noOverlap = footer.top >= buttons.bottom;
+        const correctFlow = shortViewport
+          ? screen.scrollHeight > screen.clientHeight
+          : Math.abs(footer.bottom - (screenRect.bottom - paddingBottom)) < 2;
+        document.documentElement.dataset.layout = noOverlap && correctFlow ? 'pass' : 'fail';
+        document.title = `Welcome footer ${document.documentElement.dataset.layout}`;
+        if (shortViewport) screen.scrollTop = screen.scrollHeight;
+      });
+    </script>
+  </body>
+</html>

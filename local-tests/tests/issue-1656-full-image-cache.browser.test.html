@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Issue 1656 full-image cache test</title>
+  </head>
+  <body>
+    <pre id="result">RUNNING</pre>
+
+    <script type="module">
+      import { normalizeMimeType } from '../lib.js';
+
+      const result = document.getElementById('result');
+      window.addEventListener('error', (event) => {
+        result.dataset.result = 'FAIL';
+        result.textContent = `FAIL: ${event.error?.stack || event.message}`;
+        document.title = 'FAIL';
+      });
+      window.addEventListener('unhandledrejection', (event) => {
+        result.dataset.result = 'FAIL';
+        result.textContent = `FAIL: ${event.reason?.stack || event.reason}`;
+        document.title = 'FAIL';
+      });
+
+      const appRequest = new XMLHttpRequest();
+      appRequest.open('GET', '../app.js', false);
+      appRequest.send();
+      const appSource = appRequest.responseText;
+      const thumbnailStart = appSource.indexOf('\nclass ThumbnailCache');
+      const thumbnailEnd = appSource.indexOf('\nconst thumbnailCache = new ThumbnailCache();', thumbnailStart);
+      const fullMediaStart = appSource.lastIndexOf('\nconst FULL_MEDIA_CACHE_MAX_SIZE');
+      const fullMediaEnd = appSource.lastIndexOf('\nconst fullMediaCache = new FullMediaCache(thumbnailCache);');
+      const ownershipClass = appSource.match(/^class MediaCacheOwnership \{[\s\S]*?^\}/m)?.[0];
+      assert(ownershipClass, 'MediaCacheOwnership class should be present');
+      const { ThumbnailCache, FullMediaCache } = new Function('normalizeMimeType', [
+        'const myAccount = null;',
+        ownershipClass,
+        appSource.slice(thumbnailStart, thumbnailEnd),
+        appSource.slice(fullMediaStart, fullMediaEnd),
+        '\nreturn { ThumbnailCache, FullMediaCache };',
+      ].join('\n'))(normalizeMimeType);
+
+      const dbName = `issue-1656-full-image-cache-${Date.now()}`;
+
+      function assert(condition, message) {
+        if (!condition) throw new Error(message);
+      }
+
+      async function blobText(blob) {
+        return new TextDecoder().decode(await blob.arrayBuffer());
+      }
+
+      function putImage(cache, attachment, text) {
+        return cache.put({ attachment, blob: new Blob([text], { type: attachment.type }), shouldCache: () => true });
+      }
+
+      function deleteDatabase(name) {
+        return new Promise((resolve, reject) => {
+          const request = indexedDB.deleteDatabase(name);
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error);
+          request.onblocked = () => reject(new Error('Database deletion was blocked'));
+        });
+      }
+
+      function createVersionOneDatabase(name) {
+        return new Promise((resolve, reject) => {
+          const request = indexedDB.open(name, 1);
+          request.onupgradeneeded = () => {
+            const store = request.result.createObjectStore('thumbnails', { keyPath: 'url' });
+            store.createIndex('cachedAt', 'cachedAt', { unique: false });
+            store.put({
+              url: 'https://files.example/get/thumbnail',
+              thumbnail: new Blob(['thumbnail'], { type: 'image/jpeg' }),
+              cachedAt: Date.now(),
+            });
+          };
+          request.onsuccess = () => {
+            request.result.close();
+            resolve();
+          };
+          request.onerror = () => reject(request.error);
+        });
+      }
+
+      let database;
+      let reloadedDatabase;
+      try {
+        const firstAttachment = { url: 'https://files.example/get/a', type: 'image/png' };
+        const secondAttachment = { url: 'https://files.example/get/b', type: 'image/png' };
+
+        await createVersionOneDatabase(dbName);
+        database = new ThumbnailCache();
+        database.dbName = dbName;
+        const cache = new FullMediaCache(database, 1024);
+        await database.init();
+
+        assert(database.db.version === 4, 'thumbnail database should upgrade to version 4');
+        assert(await blobText(await database.get('https://new-files.example/get/thumbnail')) === 'thumbnail', 'upgrade should preserve URL-keyed cache records under their attachment ID');
+
+        const store = database.db.transaction('fullImages', 'readonly').objectStore('fullImages');
+        assert(store.keyPath === 'id', 'attachment ID should be the primary key');
+        assert(JSON.stringify(Array.from(store.indexNames)) === '["byOwner","cachedAt"]', 'ownership and eviction indexes should exist');
+
+        await putImage(cache, firstAttachment, 'first');
+        await putImage(cache, secondAttachment, 'second');
+        assert(await blobText(await cache.get(firstAttachment.url)) === 'first', 'first image should round-trip');
+        assert(await blobText(await cache.get(secondAttachment.url)) === 'second', 'different URLs should not collide');
+
+        const firstRecord = await cache.getRecord(firstAttachment.url);
+        assert(firstRecord.id === 'a', 'attachment ID should round-trip');
+        assert(!('url' in firstRecord), 'storage hostname should not be stored');
+        assert(firstRecord.mimeType === firstAttachment.type, 'MIME type should round-trip');
+        assert(firstRecord.size === 5, 'size should round-trip');
+        assert(typeof firstRecord.cachedAt === 'number', 'cache timestamp should be stored');
+        assert(!('scope' in firstRecord), 'scope should not be stored');
+        assert(!('lastAccessedAt' in firstRecord), 'unused access timestamp should not be stored');
+
+        await cache.delete(secondAttachment.url, secondAttachment.type);
+        assert(await cache.get(secondAttachment.url) === null, 'deleted image should be absent');
+
+        database.db.close();
+        database = null;
+        reloadedDatabase = new ThumbnailCache();
+        reloadedDatabase.dbName = dbName;
+        const reloadedCache = new FullMediaCache(reloadedDatabase, 1024);
+        let decryptions = 0;
+        const cachedBlob = await reloadedCache.getOrCache({
+          attachment: { ...firstAttachment, url: 'http://new-files.example:8080/get/a?download=1#preview' },
+          downloadAndDecrypt: async () => {
+            decryptions += 1;
+            throw new Error('network disabled');
+          },
+        });
+
+        assert(decryptions === 0, 'persisted cache hit should not download or decrypt');
+        assert(await blobText(cachedBlob) === 'first', 'persisted cache hit should return full bytes');
+
+        reloadedCache.maxCacheSize = 11;
+        await putImage(reloadedCache, secondAttachment, 'second');
+        const thirdAttachment = { url: 'https://files.example/get/c', type: 'image/png' };
+        await putImage(reloadedCache, thirdAttachment, 'third');
+
+        assert(await reloadedCache.get(firstAttachment.url) === null, 'FIFO eviction should remove the oldest image');
+        assert(await blobText(await reloadedCache.get(secondAttachment.url)) === 'second', 'FIFO eviction should keep newer images');
+        assert(await blobText(await reloadedCache.get(thirdAttachment.url)) === 'third', 'the incoming image should be cached');
+        const records = await new Promise((resolve, reject) => {
+          const request = reloadedDatabase.db.transaction('fullImages').objectStore('fullImages').getAll();
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        assert(records.reduce((total, record) => total + record.size, 0) === 11, 'FIFO eviction should keep the cache within its limit');
+
+        result.dataset.result = 'PASS';
+        result.textContent = 'PASS';
+      } catch (error) {
+        result.dataset.result = 'FAIL';
+        result.textContent = `FAIL: ${error.stack || error.message}`;
+        document.title = 'FAIL';
+      } finally {
+        database?.db?.close();
+        reloadedDatabase?.db?.close();
+        await deleteDatabase(dbName).catch(() => {});
+      }
+    </script>
+  </body>
+</html>
