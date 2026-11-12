@@ -65,16 +65,22 @@ test.describe('Tests requiring recipient user', () => {
     await continueBtn.click();
     await expect(page.locator('#chatModal')).toBeVisible();
 
-    // Open Send Modal
+    // Open the Chat Pay chooser
     await expect(page.locator('#contactInfoModal')).toBeVisible();
     await expect(page.locator('#chatHeaderMenuButton')).toBeVisible();
     await page.click('#chatHeaderMenuButton');
     await expect(page.locator('.context-menu-option[data-action="pay"]')).toBeVisible();
     await page.click('.context-menu-option[data-action="pay"]');
-    await expect(page.locator('#sendAssetFormModal')).toBeVisible();
 
-    const usernameStatus = page.locator('#sendToAddressError');
-    await expect(usernameStatus).toHaveText('found', { timeout: 10_000 });
+    // Choose LIB and wait for Send to open before checking the prefilled recipient
+    const chooser = page.locator('#payChoiceModal.active');
+    await chooser.getByRole('button', { name: 'LIB', exact: true }).click();
+
+    const sendForm = page.locator('#sendAssetFormModal.active');
+    await expect(sendForm).toBeVisible();
+    await expect(sendForm.locator('#sendToAddressError')).toHaveText('found', {
+      timeout: 10_000,
+    });
 
     // Fill and Submit Send Form
     await page.fill('#sendAmount', amount.toString());
