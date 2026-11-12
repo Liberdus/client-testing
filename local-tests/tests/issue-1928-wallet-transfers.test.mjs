@@ -59,38 +59,12 @@ test('self address and malformed address block review', () => {
   }
 });
 
-test('wallet transfer survives reload and verifies outgoing direction', async () => {
-  let saved = [];
-  let options;
-  const activity = new near.IntentsActivity({ verifyClaim: async (claim, expected) => {
-    options = expected;
-    assert.equal(claim.decimals, 9);
-    return { state: 'settled', transactionHash: 'settlementHash' };
-  } });
-  activity.configure({ getTransfers: () => saved, saveTransfers: (_account, transfers) => {
-    saved = JSON.parse(JSON.stringify(transfers));
-  } });
-  activity.recordTransfer(sender, { intentHash: 'intentHash', assetId: asset.assetId, amount: '0.25',
-    decimals: 9, recipientAddress: recipient, initiatedAt: Date.now() });
-  near.intentsDeposits.loadBridgeTokens = async () => {};
-  near.intentsDeposits.describeDepositTarget = () => null;
-  const { entries } = await activity.forAsset(sender, asset);
-  assert.equal(entries.length, 1);
-  assert.equal(entries[0].status, 'checking');
-  assert.equal(await activity.verifyPayment(entries[0], sender), 'done');
-  assert.deepEqual(options, { expectedFrom: sender, expectedTo: recipient });
-  assert.equal(saved[0].verified, 'settled');
-  assert.equal(saved[0].transactionHash, 'settlementHash');
-});
-
-test('review and confirm publish once, save before settlement, and skip Liberdus payment', async (t) => {
+test('review and confirm publish once without a Liberdus Intents payment message', async (t) => {
   const panel = panelFixture();
   let review;
-  let saved = [];
   let publishCount = 0;
   let chatCount = 0;
   panel.onSent = async () => { chatCount++; };
-  near.intentsActivity.configure({ getTransfers: () => saved, saveTransfers: (_id, items) => { saved = items; } });
   t.mock.method(near.multichain.confirmModal, 'open', (value) => { review = value; });
   t.mock.method(near.multichain, 'refreshAfterMove', async () => {});
   t.mock.method(near.intentsTransfers, 'prepare', async (input) => {
@@ -107,8 +81,6 @@ test('review and confirm publish once, save before settlement, and skip Liberdus
       return Response.json({ id, result: { status: 'OK', intent_hash: 'submittedIntent' } });
     }
     assert.equal(method, 'get_status');
-    assert.equal(saved[0].intentHash, 'submittedIntent');
-    assert.equal(saved[0].decimals, 9);
     return Response.json({ id, result: { status: 'SETTLED', data: { hash: 'settlementHash' } } });
   });
   panel.recipientInput.value = recipient;
@@ -122,8 +94,6 @@ test('review and confirm publish once, save before settlement, and skip Liberdus
   await review.run(sheet);
   assert.equal(publishCount, 1);
   assert.equal(chatCount, 0);
-  assert.equal(saved.length, 1);
-  assert.equal(saved[0].transactionHash, 'settlementHash');
   assert.equal(panel.pendingReceipt, null);
 });
 
@@ -155,15 +125,13 @@ test('unknown username blocks review, verified username allows note, stale looku
   assert.equal(panel.noteInput.disabled, true);
 });
 
-test('username confirmation still sends the Liberdus Intents payment with note and toll', async (t) => {
+test('username confirmation still sends the Liberdus Intents payment message with note and toll', async (t) => {
   const panel = panelFixture();
   let review;
-  let savedCount = 0;
   let received;
   panel.lookupUsername = async () => recipient;
   panel.checkReceiptRecipient = async () => ({ tollWei: 2n });
   panel.onSent = async (...args) => { received = args; };
-  near.intentsActivity.configure({ getTransfers: () => [], saveTransfers: () => { savedCount++; } });
   t.mock.method(near.multichain.confirmModal, 'open', (value) => { review = value; });
   t.mock.method(near.multichain, 'refreshAfterMove', async () => {});
   t.mock.method(near.intentsChatPayments, 'prepare', async () => ({ amount: '0.25', symbol: 'SOL' }));
@@ -178,60 +146,24 @@ test('username confirmation still sends the Liberdus Intents payment with note a
   await panel.review();
   assert.equal(review.rows.some(([name]) => name === 'Chat message toll'), true);
   await review.run({ session: {}, shows: () => true, setStatus() {}, close() {}, finish() {} });
-  assert.equal(savedCount, 0);
   assert.equal(received[1].intentHash, 'chatIntent');
   assert.equal(received[2], 2n);
 });
 
-test('shared send simulates before publishing and keeps accepted intent after lookup failure', async (t) => {
+test('shared send simulates before publishing and reports an unconfirmed settlement', async (t) => {
   const service = new near.IntentsTransferService();
   t.mock.method(service, 'sign', async () => ({}));
   t.mock.method(service, 'simulate', async () => ({ ok: false, reason: 'insufficient balance' }));
   await assert.rejects(service.send({}, 'fixture'), { code: 'WOULD_FAIL' });
   service.simulate = async () => ({ ok: true });
-  let persisted = false;
   t.mock.method(globalThis, 'fetch', async (_url, init) => {
     const request = JSON.parse(init.body);
     if (request.method === 'publish_intent') return Response.json({ result: { status: 'OK', intent_hash: 'accepted' } });
-    assert.equal(persisted, true);
     throw new Error('offline');
   });
-  const result = await service.send({}, 'fixture', { onPublished: () => { persisted = true; } });
+  const result = await service.send({}, 'fixture');
   assert.equal(result.intentHash, 'accepted');
   assert.equal(result.settled, false);
-});
-
-test('verification saves discovered hash on archive failure and retries without relay', async () => {
-  const claim = { intentHash: 'accepted', assetId: asset.assetId, amount: '0.25', decimals: 9 };
-  const first = await near.verifyTransferClaim(claim, {
-    getStatus: async () => ({ status: 'SETTLED', transactionHash: 'settlementHash' }),
-    getTransfers: async () => { throw new Error('offline'); },
-  });
-  assert.equal(first.state, 'unverifiable');
-  assert.equal(first.transactionHash, 'settlementHash');
-  const second = await near.verifyTransferClaim({ ...claim, transactionHash: first.transactionHash }, {
-    expectedFrom: sender, expectedTo: recipient,
-    getStatus: async () => { throw new Error('Must use saved transaction hash'); },
-    getTransfers: async () => [{ intentHash: 'accepted', from: sender, to: recipient, tokens: { [asset.assetId]: '250000000' } }],
-  });
-  assert.equal(second.state, 'settled');
-});
-
-test('Activity retries pending after reload and preserves a terminal result against a slow check', async () => {
-  let saved = [{ intentHash: 'pending', assetId: asset.assetId, amount: '0.25', decimals: 9,
-    recipientAddress: recipient, initiatedAt: Date.now(), verified: 'unchecked' }];
-  const activity = new near.IntentsActivity({ verifyClaim: async () => ({ state: 'pending' }) });
-  activity.configure({ getTransfers: () => saved, saveTransfers: (_id, transfers) => { saved = transfers; } });
-  const first = (await activity.forAsset(sender, asset)).entries[0];
-  assert.equal(await activity.verifyPayment(first, sender), 'checking');
-  assert.equal(saved[0].verified, 'pending');
-  const second = (await activity.forAsset(sender, asset)).entries[0];
-  activity.verifyClaim = async () => ({ state: 'settled', transactionHash: 'settled' });
-  assert.equal(await activity.verifyPayment(second, sender), 'done');
-  activity.updateTransfer(sender, 'pending', { verified: 'pending', transactionHash: null });
-  assert.equal(saved[0].verified, 'settled');
-  assert.equal(saved[0].transactionHash, 'settled');
-  assert.equal((await activity.forAsset(sender, asset)).entries[0].status, 'done');
 });
 
 test('camera and uploaded address QR use the same recipient flow', async (t) => {

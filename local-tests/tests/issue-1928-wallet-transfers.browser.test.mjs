@@ -41,7 +41,7 @@ window.__fixture = {
     intentsTransfers.prepare = async ({ recipientAddress, amount }) => ({
       senderId: '0x' + account.keys.address, recipientId: recipientAddress, assetId: asset.assetId, amount, symbol: 'SOL',
     });
-    // Only the signing and network boundaries are simulated. Submission and persistence use production code.
+    // Only the signing and network boundaries are simulated. The send and Activity use production code.
     intentsTransfers.sign = async () => ({ fixture: true });
     intentsTransfers.simulate = async () => ({ ok: true });
     window.__publishCount = 0;
@@ -52,12 +52,6 @@ window.__fixture = {
         return Response.json({ result: { status: 'OK', intent_hash: 'fixtureIntent' } });
       }
       if (req.method === 'get_status') return Response.json({ result: { status: 'SETTLED', data: { hash: 'fixtureTransaction' } } });
-      if (req.method === 'tx') return Response.json({ result: { receipts_outcome: [{ outcome: {
-        executor_id: 'intents.near', logs: ['EVENT_JSON:' + JSON.stringify({ standard: 'dip4', event: 'transfer', data: [{
-          intent_hash: 'fixtureIntent', account_id: '0x' + '1'.repeat(40), receiver_id: '0x' + '2'.repeat(40),
-          tokens: { [asset.assetId]: '250000000' },
-        }] })],
-      } }] } });
       throw Error('Unexpected network request');
     };
     multichain.updateSummary = async () => {};
@@ -66,11 +60,16 @@ window.__fixture = {
     await new Promise(resolve => setTimeout(resolve, 1100));
     await chatPaymentPanel.open(null, null, { assetKey: asset.key });
   },
-  state() { return { transfers: myData.intentsTransfers, contacts: myData.contacts, pending: myData.pending, publishes: window.__publishCount }; },
-  async reloadActivity() {
-    myData.intentsTransfers = JSON.parse(JSON.stringify(myData.intentsTransfers));
-    await multichain.assetModal.loadActivity();
+  state() {
+    const savedAccount = stringify(myData);
+    return {
+      savedTransfer: savedAccount.includes('fixtureIntent') || savedAccount.includes('fixtureTransaction'),
+      contacts: Object.keys(myData.contacts).length,
+      pending: myData.pending.length,
+      publishes: window.__publishCount,
+    };
   },
+  async reloadActivity() { await multichain.assetModal.loadActivity(); },
 };
 `;
 const app = (await readFile(resolve(root, 'app.js'), 'utf8'))
@@ -127,18 +126,16 @@ try {
     await page.locator('#multichainConfirmAction').click();
     await page.waitForFunction(() => document.querySelector('#multichainConfirmStatus').textContent.includes('Sent 0.25 SOL'));
     await page.evaluate(() => __fixture.reloadActivity());
-    await page.waitForFunction(() => __fixture.state().transfers[0].verified === 'settled');
-    const state = await page.evaluate(() => __fixture.state());
-    assert.equal(state.publishes, 1);
-    assert.equal(state.transfers.length, 1);
-    assert.equal(Object.keys(state.contacts).length, 0);
-    assert.equal((state.pending || []).length, 0);
+    assert.equal(await page.locator('#multichainAssetActivity [data-entry-id]').count(), 0);
+    assert.deepEqual(await page.evaluate(() => __fixture.state()), {
+      savedTransfer: false, contacts: 0, pending: 0, publishes: 1,
+    });
     await page.locator('#multichainConfirmAction').click();
     await page.waitForFunction(() => !document.querySelector('#multichainConfirmModal').classList.contains('active'));
     await page.evaluate(() => Promise.all(document.getAnimations().map(animation => animation.finished.catch(() => {}))));
     await page.screenshot({ path: `${out}/activity-${viewport.width}.png`, animations: 'disabled' });
     assert.deepEqual(errors, []);
-    console.log(`PASS ${viewport.width}px: typed address, username, real QR upload decode, simulated camera, confirmation, single publish, saved Activity verification`);
+    console.log(`PASS ${viewport.width}px: typed address, username, real QR upload decode, simulated camera, confirmation, single publish, no saved transfer or Activity entry`);
     await context.close();
   }
 } finally { await browser?.close(); server.close(); }
