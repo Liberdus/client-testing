@@ -4,7 +4,8 @@ const {
     generateUsername,
     signInWithAccountCard,
     unlockDevice,
-    waitForLockUpdate
+    waitForLockUpdate,
+    waitForWelcomeScreen
 } = require('../helpers/userHelpers');
 const { newContext: createContext } = require('../helpers/toastHelpers');
 const path = require('path');
@@ -33,7 +34,7 @@ async function waitForRestoreReload(page) {
     const navigationPromise = page.waitForNavigation({ waitUntil: 'domcontentloaded' });
     await successToast.locator('.toast-close-btn').click();
     await navigationPromise;
-    await expect(page.locator('#welcomeScreen')).toBeVisible();
+    await waitForWelcomeScreen(page);
 }
 
 async function submitRestore(page) {
@@ -50,8 +51,8 @@ async function restoreAccount(page, backupFilePath, options = {}) {
         overwrite = false
     } = options;
 
-    await page.goto('');
-    await expect(page.locator('#welcomeScreen')).toBeVisible();
+    await page.goto('', { waitUntil: 'domcontentloaded' });
+    await waitForWelcomeScreen(page);
     await page.click('#openWelcomeMenu');
     if (deviceLockPassword) {
         await unlockDevice(page, deviceLockPassword);
@@ -182,8 +183,8 @@ test.describe('Backup and Restore Scenarios', () => {
                 const username2 = generateUsername(browserName);
                 await createAndSignInUser(page, username1);
                 await createAndSignInUser(page, username2);
-                await page.goto('');
-                await expect(page.locator('#welcomeScreen')).toBeVisible();
+                await page.goto('', { waitUntil: 'domcontentloaded' });
+                await waitForWelcomeScreen(page);
                 await page.click('#openWelcomeMenu');
                 await page.click('#welcomeOpenBackup');
                 await expect(page.locator('#backupModal')).toBeVisible();
@@ -216,8 +217,8 @@ test.describe('Backup and Restore Scenarios', () => {
                 const username2 = generateUsername(browserName);
                 await createAndSignInUser(page, username1);
                 await createAndSignInUser(page, username2);
-                await page.goto('');
-                await expect(page.locator('#welcomeScreen')).toBeVisible();
+                await page.goto('', { waitUntil: 'domcontentloaded' });
+                await waitForWelcomeScreen(page);
                 await signInWithAccountCard(page, username1, {
                     expectedAccountUsernames: [username1, username2]
                 });
@@ -242,8 +243,8 @@ test.describe('Backup and Restore Scenarios', () => {
                     await signInWithAccountCard(newPage, username1, {
                         expectedAccountUsernames: restoredUsernames
                     });
-                    await newPage.goto('');
-                    await expect(newPage.locator('#welcomeScreen')).toBeVisible();
+                    await newPage.goto('', { waitUntil: 'domcontentloaded' });
+                    await waitForWelcomeScreen(newPage);
                     await signInWithAccountCard(newPage, username2, {
                         expectedAccountUsernames: restoredUsernames
                     });

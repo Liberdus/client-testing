@@ -3,12 +3,15 @@ const { expect } = require("@playwright/test");
 const SIGN_IN_AFTER_REGISTRATION_TIMEOUT = 90_000;
 const LOCK_OPERATION_TIMEOUT = 60_000;
 
+async function waitForWelcomeScreen(page) {
+    // A fresh profile can reload for a version update before revealing the welcome screen.
+    await expect(page.locator('#welcomeScreen:not(.is-booting)')).toBeVisible({ timeout: 30_000 });
+}
+
 async function createUser(page, username) {
     await page.goto('', { waitUntil: 'domcontentloaded' });
-    // A fresh profile can reload for a version update before revealing the welcome screen.
-    const welcome = page.locator('#welcomeScreen:not(.is-booting)');
-    await expect(welcome).toBeVisible({ timeout: 30_000 });
-    await welcome.locator('#createAccountButton').click();
+    await waitForWelcomeScreen(page);
+    await page.locator('#welcomeScreen #createAccountButton').click();
     await expect(page.locator('#createAccountModal')).toBeVisible();
     await page.locator('#newUsername').pressSequentially(username);
     await expect(page.locator('#newUsernameAvailable')).toHaveText('available', { timeout: 10_000 });
@@ -75,7 +78,7 @@ async function waitForLockUpdate(page, confirmation) {
 async function signInWithAccountCard(page, username, options = {}) {
     const { expectedAccountUsernames = [username], lockPassword = '' } = options;
 
-    await expect(page.locator('#welcomeScreen')).toBeVisible();
+    await waitForWelcomeScreen(page);
     const signInButton = page.locator('#signInButton');
     await expect(signInButton).toBeVisible();
     await signInButton.click();
@@ -109,5 +112,6 @@ module.exports = {
     createUser,
     signInWithAccountCard,
     unlockDevice,
-    waitForLockUpdate
+    waitForLockUpdate,
+    waitForWelcomeScreen
 };
