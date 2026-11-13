@@ -29,7 +29,28 @@ async function expectLiberdusBalanceToEqual(page, expected, timeout = 30000) {
     }).toPass({ timeout });
 }
 
+async function ensureLiberdusBalance(page, minimum) {
+    let balance = await getLiberdusBalance(page);
+    if (balance >= minimum) return balance;
+
+    const faucet = page.getByRole('button', { name: 'Faucet', exact: true });
+    const faucetResult = page.locator('.toast.show', {
+        hasText: /^(?:Faucet (?:request successful|request failed|error|not available)|Balance exceeds 100 LIB|You must be online to request from faucet)/
+    });
+    await faucet.click();
+    await expect(faucetResult).toBeVisible({ timeout: 30_000 });
+    const result = await faucetResult.innerText();
+    expect(result, 'Wallet Faucet response').toContain('Faucet request successful');
+
+    await expect(async () => {
+        balance = await getLiberdusBalance(page);
+        expect(balance, 'LIB balance after the Faucet request').toBeGreaterThanOrEqual(minimum);
+    }).toPass({ timeout: 60_000 });
+    return balance;
+}
+
 module.exports = {
     getLiberdusBalance,
-    expectLiberdusBalanceToEqual
+    expectLiberdusBalanceToEqual,
+    ensureLiberdusBalance
 };
