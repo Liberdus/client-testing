@@ -15,6 +15,9 @@ async function sendMessageTo(page, recipientUsername, message) {
   await continueBtn.click();
 
   await expect(page.locator('#chatModal')).toBeVisible();
+  // Allow background toll lookups and new-contact status updates time to settle.
+  // This is a timing mitigation, not confirmation that either request succeeded.
+  await page.waitForTimeout(10_000);
   await page.type('#chatModal .message-input', message);
   await page.click('#handleSendMessage');
   await page.waitForTimeout(3_000);
