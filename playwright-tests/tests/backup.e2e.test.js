@@ -3,7 +3,8 @@ const {
     createAndSignInUser,
     generateUsername,
     signInWithAccountCard,
-    unlockDevice
+    unlockDevice,
+    waitForLockUpdate
 } = require('../helpers/userHelpers');
 const { newContext: createContext } = require('../helpers/toastHelpers');
 const path = require('path');
@@ -84,7 +85,7 @@ async function setLock(page, password) {
     await page.fill('#newPassword', password);
     await page.fill('#confirmNewPassword', password);
     await page.click('#lockForm button[type="submit"]');
-    await expect(page.locator('.toast.success.show')).toBeVisible({ timeout: 15_000 });
+    await waitForLockUpdate(page, 'Password updated');
 }
 
 // Profile helpers
@@ -348,7 +349,7 @@ test.describe('Backup and Restore Scenarios', () => {
                     await page.fill('#newPassword', newLock);
                     await page.fill('#confirmNewPassword', newLock);
                     await page.click('#lockForm button[type="submit"]');
-                    await expect(page.locator('.toast.success.show')).toBeVisible({ timeout: 15_000 });
+                    await waitForLockUpdate(page, 'Password updated');
 
                     await page.click('#handleSignOutSettings');
                     await expect(page.locator('#welcomeScreen')).toBeVisible();
