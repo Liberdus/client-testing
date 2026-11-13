@@ -27,11 +27,12 @@ test.describe('Account creation with a private key', () => {
     await expect(page.locator('#newUsernameAvailable')).toHaveText('available', { timeout: 10_000 });
     
     // Open advanced options
-    await page.locator('#toggleMoreOptions').click();
-    await expect(page.locator('#togglePrivateKeyInput')).toBeVisible();
+    await page.locator('#advancedOptionsSummary').click();
+    await expect(page.locator('label.create-account-option-toggle[for="togglePrivateKeyInput"]')).toBeVisible();
     
     // Enable private key input field
-    await page.locator('#togglePrivateKeyInput').click();
+    await page.locator('label.create-account-option-toggle[for="togglePrivateKeyInput"]').click();
+    await expect(page.locator('#togglePrivateKeyInput')).toBeChecked();
     await expect(page.locator('#newPrivateKey')).toBeVisible();
     
     // Enter the generated private key
@@ -80,11 +81,12 @@ test.describe('Account creation with a private key', () => {
     await expect(page.locator('#newUsernameAvailable')).toHaveText('available', { timeout: 10_000 });
     
     // Open advanced options
-    await page.locator('#toggleMoreOptions').click();
-    await expect(page.locator('#togglePrivateKeyInput')).toBeVisible();
+    await page.locator('#advancedOptionsSummary').click();
+    await expect(page.locator('label.create-account-option-toggle[for="togglePrivateKeyInput"]')).toBeVisible();
     
     // Enable private key input field
-    await page.locator('#togglePrivateKeyInput').click();
+    await page.locator('label.create-account-option-toggle[for="togglePrivateKeyInput"]').click();
+    await expect(page.locator('#togglePrivateKeyInput')).toBeChecked();
     await expect(page.locator('#newPrivateKey')).toBeVisible();
     
     const createBtn = page.locator('#createAccountForm button[type="submit"]');
