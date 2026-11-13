@@ -38,13 +38,13 @@ const test = base.extend({
           username: userA, 
           page: pageA, 
           ctx: ctxA,
-          balance: parseFloat(balanceA)
+          balance: balanceA
         },
         b: { 
           username: userB, 
           page: pageB, 
           ctx: ctxB,
-          balance: parseFloat(balanceB)
+          balance: balanceB
         }
       });
     } finally {
@@ -99,10 +99,10 @@ test.describe('Transfer Tests', () => {
     await a.page.click('#closeHistoryModal');
     
     // Verify sender's balance has been updated
-    await expectLiberdusBalanceToEqual(a.page, expectedBalanceA.toFixed(6), 30_000);
+    await expectLiberdusBalanceToEqual(a.page, expectedBalanceA, 30_000);
     
     // Verify recipient received the funds
-    await expectLiberdusBalanceToEqual(b.page, expectedBalanceB.toFixed(6), 30_000);
+    await expectLiberdusBalanceToEqual(b.page, expectedBalanceB, 30_000);
     
     // Check that recipient sees the transfer message in chat
     await b.page.click('#switchToChats');
@@ -169,10 +169,10 @@ test.describe('Transfer Tests', () => {
     await a.page.click('#closeHistoryModal');
     
     // Verify sender's balance has been updated
-    await expectLiberdusBalanceToEqual(a.page, expectedBalanceA.toFixed(6), 30_000);
+    await expectLiberdusBalanceToEqual(a.page, expectedBalanceA, 30_000);
     
     // Verify recipient received the funds
-    await expectLiberdusBalanceToEqual(b.page, expectedBalanceB.toFixed(6), 30_000);
+    await expectLiberdusBalanceToEqual(b.page, expectedBalanceB, 30_000);
     
     // Check that recipient sees the transfer message in chat
     await b.page.click('#switchToChats');
