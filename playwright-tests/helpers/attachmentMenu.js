@@ -1,16 +1,21 @@
 const { expect } = require('@playwright/test');
 
 class AttachmentMenu {
-  static async open(attachmentLink) {
-    await attachmentLink.scrollIntoViewIfNeeded();
-    await attachmentLink.evaluate(AttachmentMenu.waitForScrollSettled);
-    await attachmentLink.click();
+  static attachmentRow(page, direction, fileName) {
+    const encodedName = encodeURIComponent(fileName);
+    return page.locator(`#chatModal .message.${direction} .attachment-row[data-name="${encodedName}"]`);
+  }
 
-    const saveOption = attachmentLink.page().locator(
-      '#imageAttachmentContextMenu .context-menu-option[data-action="save"]'
+  static async open(attachmentRow, action) {
+    await attachmentRow.scrollIntoViewIfNeeded();
+    await attachmentRow.evaluate(AttachmentMenu.waitForScrollSettled);
+    await attachmentRow.click();
+
+    const option = attachmentRow.page().locator(
+      `#imageAttachmentContextMenu .context-menu-option[data-action="${action}"]`
     );
-    await expect(saveOption).toBeVisible();
-    return saveOption;
+    await expect(option).toBeVisible();
+    return option;
   }
 
   // Runs in the page: allow queued scroll events and layout changes to settle
