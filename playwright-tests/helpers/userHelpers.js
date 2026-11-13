@@ -1,12 +1,14 @@
 const { expect } = require("@playwright/test");
 
+const SIGN_IN_AFTER_REGISTRATION_TIMEOUT = 90_000;
 const LOCK_OPERATION_TIMEOUT = 60_000;
 
 async function createUser(page, username) {
-    await page.goto('', { waitUntil: 'networkidle' });
-    await expect(page.locator('#welcomeScreen')).toBeVisible();
-    await expect(page.locator('#createAccountButton')).toBeVisible();
-    await page.click('#createAccountButton');
+    await page.goto('', { waitUntil: 'domcontentloaded' });
+    // A fresh profile can reload for a version update before revealing the welcome screen.
+    const welcome = page.locator('#welcomeScreen:not(.is-booting)');
+    await expect(welcome).toBeVisible({ timeout: 30_000 });
+    await welcome.locator('#createAccountButton').click();
     await expect(page.locator('#createAccountModal')).toBeVisible();
     await page.locator('#newUsername').pressSequentially(username);
     await expect(page.locator('#newUsernameAvailable')).toHaveText('available', { timeout: 10_000 });
@@ -18,13 +20,37 @@ async function createUser(page, username) {
 // Helper to create and sign in a new user
 async function createAndSignInUser(page, username) {
     await createUser(page, username);
-    // expect loading toast to appear
-    await expect(page.locator('.toast.loading.show')).toBeVisible({ timeout: 20_000 });
-    // wait for the loading toast to disappear
-    await page.waitForSelector('.toast.loading.show', { state: 'detached' });
-    await expect(page.locator('#chatsScreen')).toBeVisible({ timeout: 20_000 });
-    const appName = await page.locator('.app-name').textContent();
-    await expect(appName.trim()).toBe(username);
+
+    let outcome;
+    try {
+        const result = await page.waitForFunction(expectedUsername => {
+            const chats = document.querySelector('#chatsScreen.active');
+            const name = document.querySelector('#header .app-name');
+            if (chats?.getClientRects().length && getComputedStyle(chats).visibility === 'visible' &&
+                name?.getClientRects().length && getComputedStyle(name).visibility === 'visible' &&
+                name.textContent.trim() === expectedUsername) {
+                return 'signed-in';
+            }
+
+            const setupError = /^(account creation failed|error injecting transaction|failed to fetch network parameters, try again later|unable to sign in right now)/i;
+            for (const toast of document.querySelectorAll('.toast.error.show')) {
+                const match = toast.textContent.trim().match(setupError);
+                if (match) return match[0];
+            }
+            return null;
+        }, username, { timeout: SIGN_IN_AFTER_REGISTRATION_TIMEOUT });
+        outcome = await result.jsonValue();
+    } catch (cause) {
+        const creating = await page.locator('.toast.loading.show')
+            .filter({ hasText: /^Creating account\.{3}$/ }).isVisible().catch(() => false);
+        const state = creating ? ' The app still shows "Creating account...".' : '';
+        const deadline = cause.name === 'TimeoutError' ? ` within ${SIGN_IN_AFTER_REGISTRATION_TIMEOUT / 1000}s` : '';
+        throw new Error(`Failed to sign in as ${username}${deadline} after submitting account registration.${state}`, { cause });
+    }
+
+    if (outcome !== 'signed-in') {
+        throw new Error(`Account setup failed for ${username}. The app reported "${outcome}".`);
+    }
 }
 
 function signInAccountCard(page, username) {
