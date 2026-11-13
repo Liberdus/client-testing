@@ -26,11 +26,22 @@ const appSource = [
 ].join('\n');
 
 const username = 'offlineuser';
-const address = 'a'.repeat(40);
-const contactAddress = 'b'.repeat(40);
+const address = 'b'.repeat(40);
+const contactAddress = 'a'.repeat(40);
 const registrationTx = { txid: 'registration', type: 'register', username, address: address.padEnd(64, '0') };
 const contactTx = { txid: 'contact-update', type: 'update_toll_required', to: contactAddress };
 const contactHistory = { type: contactTx.type, txid: contactTx.txid };
+const contactChatId = 'c'.repeat(64);
+const signedContactUpdate = {
+  from: registrationTx.address,
+  to: contactAddress.padEnd(64, '0'),
+  chatId: contactChatId,
+  type: contactTx.type,
+  required: 0,
+  previousRequired: 1,
+  timestamp: 100_000,
+};
+const contactTollPath = `/messages/${contactChatId}/toll`;
 const aliasPath = '/address/synthetic-alias-hash';
 const transportError = () => { throw new TypeError('Synthetic receipt connection failure'); };
 
@@ -173,12 +184,12 @@ function createFixture(t) {
       await setImmediate();
     },
     submitRegistration() { return modal.handleSubmit({ preventDefault() {} }); },
-    seedContactUpdate() {
+    seedContactUpdate(updateTollRequiredTx) {
       context.myAccount = { username, netid: 'synthetic', keys: { address } };
       context.myData = {
         account: context.myAccount,
         contacts: { [contactAddress]: contact },
-        pending: [{ ...contactTx, submittedts: Date.now() }],
+        pending: [{ ...contactTx, submittedts: Date.now(), updateTollRequiredTx }],
       };
     },
   };
@@ -223,6 +234,61 @@ test('a collector absence and an unavailable node preserve the contact update un
   assert.deepEqual(fixture.contact.messages, [contactHistory]);
 
   fixture.respondWith(() => ({ transaction: null }));
+  await fixture.poll();
+
+  assert.equal(fixture.context.myData.pending.length, 0);
+  assert.equal(fixture.contact.friend, 1);
+  assert.equal(fixture.contact.messages.length, 0);
+  assert.deepEqual(fixture.contactSettlements, [contactAddress]);
+  assert.match([...fixture.toasts.keys()].join('\n'), /contact status timed out/i);
+});
+
+test('a matching on-chain toll setting settles a contact update whose receipts are absent', async (t) => {
+  const fixture = createFixture(t);
+  fixture.seedContactUpdate(signedContactUpdate);
+  await fixture.advance(35_000);
+  // The sender sorts second, and only the sender's setting matches the requested change.
+  fixture.respondWith((endpoint) => endpoint === contactTollPath ? { toll: { required: [1, 0] } } : { transaction: null });
+  await fixture.poll();
+
+  assert.ok(fixture.requests.includes(contactTollPath));
+  assert.equal(fixture.context.myData.pending.length, 0);
+  assert.equal(fixture.contact.friend, 2);
+  assert.equal(fixture.contact.friendOld, 2);
+  assert.deepEqual(fixture.contact.messages, [contactHistory]);
+  assert.deepEqual(fixture.contactSettlements, [contactAddress]);
+  assert.equal(fixture.stateWrites, 1);
+  assert.equal([...fixture.toasts.values()].includes('error'), false);
+});
+
+test('an unavailable toll setting retains the contact update until a confirmed mismatch permits rollback', async (t) => {
+  const fixture = createFixture(t);
+  fixture.seedContactUpdate(signedContactUpdate);
+  await fixture.advance(35_000);
+  fixture.respondWith((endpoint) => endpoint === contactTollPath ? transportError() : { transaction: null });
+  await fixture.poll();
+
+  assert.ok(fixture.requests.includes(contactTollPath));
+  assert.equal(fixture.context.myData.pending.length, 1);
+  assert.equal(fixture.contact.friend, 2);
+  assert.deepEqual(fixture.contact.messages, [contactHistory]);
+  assert.deepEqual(fixture.contactSettlements, []);
+  assert.equal(fixture.stateWrites, 0);
+  assert.equal([...fixture.toasts.values()].includes('error'), false);
+
+  // Only the other party's requirement matches. The sender's toll is still required.
+  fixture.respondWith((endpoint) => endpoint === contactTollPath ? { toll: { required: [0, 1] } } : { transaction: null });
+  await fixture.poll();
+
+  assert.equal(fixture.context.myData.pending.length, 1, 'one stale network read must leave the update pending');
+  assert.equal(fixture.contact.friend, 2);
+
+  await fixture.advance(16_000);
+  fixture.respondWith((endpoint) => endpoint === contactTollPath ? transportError() : { transaction: null });
+  await fixture.poll();
+  assert.equal(fixture.context.myData.pending.length, 1, 'an unavailable lookup cannot roll back an update after the grace window');
+
+  fixture.respondWith((endpoint) => endpoint === contactTollPath ? { toll: { required: [0, 1] } } : { transaction: null });
   await fixture.poll();
 
   assert.equal(fixture.context.myData.pending.length, 0);
