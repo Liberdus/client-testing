@@ -193,19 +193,16 @@ test.describe('Offline Tests', () => {
 
     });
 
-    test('should disable asset sending when offline', async ({ twoUsers }) => {
-        const { user1, user2 } = twoUsers;
-        const { page, context } = user1;
+    test('should disable asset sending when offline', async ({ user }) => {
+        const { page, context } = user;
 
-        // Navigate to wallet screen while online
+        // Confirm offline mode on Chats before Wallet hides the header indicator.
+        await setUserOfflineAndWaitForIndicator(context, page);
         await page.locator('#switchToWallet').click();
         await expect(page.locator('#walletScreen.active')).toBeVisible();
 
-        // Set user offline
-        await setUserOfflineAndWaitForIndicator(context, page);
-
-        // Click on send assets button
         await page.locator('#openSendAssetFormModal').click();
+        await expect(page.locator('#sendAssetFormModal.active')).toBeVisible();
 
         // Verify sendToAddress field is disabled
         await expectButtonDisabledOffline(page.locator('#sendToAddress'));
