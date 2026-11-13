@@ -1,14 +1,14 @@
 const { test: base, expect } = require('../fixtures/base');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
-const { getLiberdusBalance, expectLiberdusBalanceToEqual } = require('../helpers/walletHelpers');
+const { ensureLiberdusBalance, expectLiberdusBalanceToEqual } = require('../helpers/walletHelpers');
 const { FriendStatus, setFriendStatus } = require('../helpers/friendStatusHelpers');
 const networkParams = require('../helpers/networkParams');
-const { fundUserFromPage } = require('../helpers/send-create');
 const { sendMessageTo } = require('../helpers/messageHelpers');
 const { newContext } = require('../helpers/toastHelpers');
 
 // Constants
 const TOLL_USD = networkParams.defaultTollUsd + 0.01;
+const TOLL_LIB = TOLL_USD / networkParams.stabilityFactor;
 
 async function setToll(page, amount) {
     await page.click('#toggleSettings');
@@ -43,12 +43,9 @@ const test = base.extend({
                 createAndSignInUser(pageB, userB)
             ]);
 
-            // Fund User A with 35 LIB
-            await fundUserFromPage(pageA, userA, 35);
-
-            // Get initial balances
-            const balanceA = await getLiberdusBalance(pageA);
-            const balanceB = await getLiberdusBalance(pageB);
+            // Cover three tolled messages and contact creation for A, and two status updates for B.
+            const balanceA = await ensureLiberdusBalance(pageA, TOLL_LIB * 3 + networkParams.networkFeeLib * 4);
+            const balanceB = await ensureLiberdusBalance(pageB, networkParams.networkFeeLib * 2);
 
             await use({
                 a: { username: userA, page: pageA, ctx: ctxA, balance: balanceA },
@@ -67,7 +64,6 @@ test(`Toll is charged for messages, then refunded for Connection`, async ({ user
 
     // User B sets toll in USD in the UI
     await setToll(b.page, TOLL_USD);
-    const tollInLib = TOLL_USD / networkParams.stabilityFactor;
     await a.page.click('#switchToChats');
 
     let tollText = '';
@@ -127,7 +123,7 @@ test(`Toll is charged for messages, then refunded for Connection`, async ({ user
     await a.page.click('#refreshBalance');
     await expect(a.page.locator('#walletScreen.active')).toBeVisible();
     let expectedBalance = a.balance;
-    expectedBalance -= (tollInLib * 3);
+    expectedBalance -= (TOLL_LIB * 3);
     expectedBalance -= (networkParams.networkFeeLib * 4); // 3 messages + 1 for creating contact
 
     await expectLiberdusBalanceToEqual(a.page, expectedBalance);
@@ -140,7 +136,7 @@ test(`Toll is charged for messages, then refunded for Connection`, async ({ user
     await a.page.waitForTimeout(5_000);
 
     // User A's balance should be refunded 5*3
-    const expectedAfterRefund = expectedBalance + (tollInLib * 3);
+    const expectedAfterRefund = expectedBalance + (TOLL_LIB * 3);
     await expectLiberdusBalanceToEqual(a.page, expectedAfterRefund);
 });
 
@@ -152,10 +148,9 @@ test('Toll is charged when sender has blocked recipient', async ({ users }) => {
 
     // User B sets toll in USD
     await setToll(b.page, TOLL_USD);
-    const tollInLib = TOLL_USD / networkParams.stabilityFactor;
 
     await sendMessageTo(a.page, b.username, 'Hello B!');
-    let expectedBalance = a.balance - tollInLib - networkParams.networkFeeLib * 2;
+    let expectedBalance = a.balance - TOLL_LIB - networkParams.networkFeeLib * 2;
     await expectLiberdusBalanceToEqual(a.page, expectedBalance);
 
 
@@ -163,7 +158,7 @@ test('Toll is charged when sender has blocked recipient', async ({ users }) => {
     expectedBalance -= networkParams.networkFeeLib;
     // User A sends a message to B
     await sendMessageTo(a.page, b.username, 'Hello B Blocked!');
-    expectedBalance -= tollInLib + networkParams.networkFeeLib;
+    expectedBalance -= TOLL_LIB + networkParams.networkFeeLib;
 
     // Check A's balance
     await expectLiberdusBalanceToEqual(a.page, expectedBalance);
