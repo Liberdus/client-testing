@@ -48,7 +48,14 @@ async function checkReceivedMessage(page, senderUsername, message) {
   // Updated selector to match chat item by username text
   const chatItem = page.locator('.chat-name', { hasText: senderUsername });
   await expect(chatItem).toBeVisible({ timeout: 15_000 });
-  await chatItem.click();
+  // A sticky wallet refresh error can overlap the chat list.
+  const balanceError = page.locator('#toastContainer .toast.error.show.sticky', {
+    hasText: /^Error fetching balance\. Try again later\./,
+  }).first();
+  if (await balanceError.isVisible()) {
+    await balanceError.locator('.toast-close-btn').click({ timeout: 5_000 });
+  }
+  await chatItem.click({ timeout: 15_000 });
   await expect(page.locator('#chatModal')).toBeVisible();
   await expect(page.locator('.message.received .message-content', { hasText: message })).toBeVisible({ timeout: 30_000 });
   await page.click('#closeChatModal');
