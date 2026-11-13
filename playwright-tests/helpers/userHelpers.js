@@ -1,6 +1,7 @@
 const { expect } = require("@playwright/test");
 
 const SIGN_IN_AFTER_REGISTRATION_TIMEOUT = 90_000;
+const LOCK_OPERATION_TIMEOUT = 60_000;
 
 async function waitForWelcomeScreen(page) {
     // A fresh profile can reload for a version update before revealing the welcome screen.
@@ -64,7 +65,14 @@ async function unlockDevice(page, password) {
     await expect(unlockModal).toBeVisible();
     await unlockModal.locator('#password').fill(password);
     await unlockModal.locator('#unlockForm button[type="submit"]').click();
-    await expect(unlockModal).not.toBeVisible();
+    await expect(unlockModal, 'Device unlock did not complete').toHaveCount(0, { timeout: LOCK_OPERATION_TIMEOUT });
+}
+
+async function waitForLockUpdate(page, confirmation) {
+    await Promise.all([
+        expect(page.locator('#lockModal.active')).toHaveCount(0, { timeout: LOCK_OPERATION_TIMEOUT }),
+        expect(page.locator('.toast.success.show', { hasText: confirmation })).toBeVisible({ timeout: LOCK_OPERATION_TIMEOUT })
+    ]);
 }
 
 async function signInWithAccountCard(page, username, options = {}) {
@@ -104,5 +112,6 @@ module.exports = {
     createUser,
     signInWithAccountCard,
     unlockDevice,
+    waitForLockUpdate,
     waitForWelcomeScreen
 };
