@@ -19,17 +19,23 @@ async function sendMessageTo(page, recipientUsername, message) {
   // This is a timing mitigation, not confirmation that either request succeeded.
   await page.waitForTimeout(10_000);
   await page.type('#chatModal .message-input', message);
+  const errorToasts = page.locator('#toastContainer .toast.error');
+  const previousErrorIds = await errorToasts.evaluateAll(toasts => toasts.map(toast => toast.id));
   await page.click('#handleSendMessage');
   await page.waitForTimeout(3_000);
 
-  // If an error toast appears, fail fast
-  if (await page.locator('.toast.error.show').count()) {
-    const errText = await page.locator('.toast.error.show').textContent();
-    throw new Error(`Error toast displayed after sending message: ${errText}`);
+  // Ignore sticky errors that were already present before Send.
+  const newError = await errorToasts.evaluateAll((toasts, previousIds) =>
+    toasts.find(toast => !previousIds.includes(toast.id))?.textContent?.trim(), previousErrorIds
+  );
+  if (newError) {
+    throw new Error(`Error toast displayed after sending message: ${newError}`);
   }
 
-  // Replace waitForFunction with expect for sent message
-  const sentMsg = page.locator('#chatModal .messages-list .message.sent .message-content', { hasText: message });
+  // A rejected injection can still leave an optimistic message in the chat.
+  const sentMsg = page.locator('#chatModal .messages-list .message.sent:not([data-status="failed"]) .message-content', {
+    hasText: message,
+  });
   await expect(sentMsg).toBeVisible({ timeout: 15_000 });
   await page.click('#closeChatModal');
   await expect(page.locator('#newChatButton')).toBeVisible();
@@ -42,7 +48,14 @@ async function checkReceivedMessage(page, senderUsername, message) {
   // Updated selector to match chat item by username text
   const chatItem = page.locator('.chat-name', { hasText: senderUsername });
   await expect(chatItem).toBeVisible({ timeout: 15_000 });
-  await chatItem.click();
+  // A sticky wallet refresh error can overlap the chat list.
+  const balanceError = page.locator('#toastContainer .toast.error.show.sticky', {
+    hasText: /^Error fetching balance\. Try again later\./,
+  }).first();
+  if (await balanceError.isVisible()) {
+    await balanceError.locator('.toast-close-btn').click({ timeout: 5_000 });
+  }
+  await chatItem.click({ timeout: 15_000 });
   await expect(page.locator('#chatModal')).toBeVisible();
   await expect(page.locator('.message.received .message-content', { hasText: message })).toBeVisible({ timeout: 30_000 });
   await page.click('#closeChatModal');
