@@ -128,7 +128,7 @@ jobs:
             echo "- Browser: \`${{ inputs.browser }}\`"
             echo "- Test path: \`${{ inputs.test_path }}\`"
             echo "- Workers: \`${{ inputs.workers }}\`"
-            echo "- Target site: \`https://liberdus.com/dev/\` (from Playwright config)"
+            echo "- Target site: \`https://app-dev.liberdus.com/\` (from Playwright config)"
             echo "- Artifacts uploaded: HTML report zip and raw test results."
             echo "- GitHub Pages hosts only the latest HTML report."
           } >> "$GITHUB_STEP_SUMMARY"
