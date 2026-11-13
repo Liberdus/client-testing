@@ -261,7 +261,7 @@ test('a matching on-chain toll setting settles a contact update whose receipts a
   assert.equal([...fixture.toasts.values()].includes('error'), false);
 });
 
-test('an unavailable toll setting retains the contact update until a confirmed mismatch permits rollback', async (t) => {
+test('an unavailable toll lookup restarts the grace period for a confirmed mismatch', async (t) => {
   const fixture = createFixture(t);
   fixture.seedContactUpdate(signedContactUpdate);
   await fixture.advance(35_000);
@@ -289,6 +289,11 @@ test('an unavailable toll setting retains the contact update until a confirmed m
   assert.equal(fixture.context.myData.pending.length, 1, 'an unavailable lookup cannot roll back an update after the grace window');
 
   fixture.respondWith((endpoint) => endpoint === contactTollPath ? { toll: { required: [0, 1] } } : { transaction: null });
+  await fixture.poll();
+  assert.equal(fixture.context.myData.pending.length, 1, 'a new mismatch after the outage must start a fresh grace period');
+  assert.equal(fixture.contact.friend, 2);
+
+  await fixture.advance(16_000);
   await fixture.poll();
 
   assert.equal(fixture.context.myData.pending.length, 0);
