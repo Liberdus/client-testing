@@ -54,6 +54,19 @@ function fetchText(url, timeoutMs = 15000, maxRedirects = 5) {
   });
 }
 
+function parseNumber(value) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function requirePositiveNetworkNumber(current, fieldName) {
+  const value = parseNumber(current[fieldName]);
+  if (!(value > 0)) {
+    throw new Error(`Missing or invalid positive network parameter: ${fieldName}`);
+  }
+  return value;
+}
+
 /** @param {import('@playwright/test').FullConfig} config */
 async function globalSetup(config) {
   // All browser projects share one app and network-parameter cache.
@@ -98,9 +111,9 @@ async function globalSetup(config) {
   const account = JSON.parse(acctText);
   const current = account && account.account && account.account.current ? account.account.current : {};
 
-  const stabilityFactor = parseFloat(current.stabilityFactorStr || '0');
-  const feeUsd = parseFloat(current.transactionFeeUsdStr || '0');
-  const minTollUsd = parseFloat(current.minTollUsdStr || '0');
+  const stabilityFactor = requirePositiveNetworkNumber(current, 'stabilityFactorStr');
+  const feeUsd = requirePositiveNetworkNumber(current, 'transactionFeeUsdStr');
+  const minTollUsd = requirePositiveNetworkNumber(current, 'minTollUsdStr');
   const networkTollTaxPercent = Number(current.tollNetworkTaxPercent || 0);
 
   // USD → LIB conversions using: LIB = USD / stabilityFactor
