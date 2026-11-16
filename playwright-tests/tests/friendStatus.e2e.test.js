@@ -1,6 +1,6 @@
 const { test: base, expect } = require('../fixtures/base');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
-const { getLiberdusBalance } = require('../helpers/walletHelpers');
+const { expectLiberdusBalanceToEqual } = require('../helpers/walletHelpers');
 const { FriendStatus, getCurrentFriendStatus, setFriendStatus } = require('../helpers/friendStatusHelpers');
 const { getInjectedTransaction } = require('../helpers/injectHelpers');
 const { sendMessageTo } = require('../helpers/messageHelpers');
@@ -198,15 +198,9 @@ test.describe('Friend Status E2E', () => {
         // close chat modal to send read receipt
         await a.page.click('#closeChatModal');
 
-        await expect(async () => {
-            const actualBalanceA = await getLiberdusBalance(a.page);
-            expect(actualBalanceA).toEqual(expectedBalanceA.toFixed(6));
-        }).toPass({ timeout: 30000 });
+        await expectLiberdusBalanceToEqual(a.page, expectedBalanceA);
         // User B should have paid only the network fee for sending the message and gets the original toll back
-        await expect(async () => {
-            const actualBalanceB = await getLiberdusBalance(b.page);
-            expect(actualBalanceB).toEqual(expectedBalanceB.toFixed(6));
-        }).toPass({ timeout: 30000 });
+        await expectLiberdusBalanceToEqual(b.page, expectedBalanceB);
     });
 
     test('Connection: A fills profile, sets status Connection, B sees full profile', async ({ users }) => {

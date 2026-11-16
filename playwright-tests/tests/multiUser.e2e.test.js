@@ -103,10 +103,9 @@ test.describe('Multi User Tests', () => {
       const readToll = (tollInLib / 2);
       const readTollAfterTax = readToll - (readToll * networkParams.networkTollTax); // 1% network fee on tolls
 
-      const balanceBeforeNum = parseFloat(balanceBefore);
-      const expectedBalance = balanceBeforeNum + readTollAfterTax - networkParams.networkFeeLib;
+      const expectedBalance = balanceBefore + readTollAfterTax - networkParams.networkFeeLib;
       // Confirm the read reward at the UI's six-decimal precision before replying.
-      await expectLiberdusBalanceToEqual(pg1, expectedBalance.toFixed(6));
+      await expectLiberdusBalanceToEqual(pg1, expectedBalance);
 
       // reply to message to get the other half of the toll
       const replyMsg = 'Replying to get the other half of the toll';
@@ -115,7 +114,7 @@ test.describe('Multi User Tests', () => {
 
       // User1 check wallet balance again for the second half of the toll
       const expectedFinalBalance = expectedBalance + readTollAfterTax - networkParams.networkFeeLib;
-      await expectLiberdusBalanceToEqual(pg1, expectedFinalBalance.toFixed(6));
+      await expectLiberdusBalanceToEqual(pg1, expectedFinalBalance);
     } finally {
       await ctx1.close();
       await ctx2.close();
