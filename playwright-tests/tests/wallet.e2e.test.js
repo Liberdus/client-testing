@@ -104,11 +104,10 @@ test('QR Code: Receive from A, scan and send from B', async ({ users }, testInfo
         expect(transactionAddress).toContain(`To: ${a.username}`);
         await b.page.click('#closeHistoryModal');
 
-        // expect balances to have changed by the amount sent using bignumber comparison at fixed 6 precision
-        const expectedABalance = parseFloat(userABalanceBefore) + parseFloat(qrAmount);
-        const expectedBBalance = parseFloat(userBBalanceBefore) - parseFloat(qrAmount) - networkParams.networkFeeLib;
-        await expectLiberdusBalanceToEqual(a.page, expectedABalance.toFixed(6));
-        await expectLiberdusBalanceToEqual(b.page, expectedBBalance.toFixed(6));
+    const expectedABalance = userABalanceBefore + Number(qrAmount);
+    const expectedBBalance = userBBalanceBefore - Number(qrAmount) - networkParams.networkFeeLib;
+    await expectLiberdusBalanceToEqual(a.page, expectedABalance);
+    await expectLiberdusBalanceToEqual(b.page, expectedBBalance);
     } finally {
         // delete the QR file after test
         if (fs.existsSync(qrPath)) {

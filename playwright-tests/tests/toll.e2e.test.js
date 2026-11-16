@@ -47,8 +47,8 @@ const test = base.extend({
             await fundUserFromPage(pageA, userA, 35);
 
             // Get initial balances
-            const balanceA = parseFloat(await getLiberdusBalance(pageA));
-            const balanceB = parseFloat(await getLiberdusBalance(pageB));
+            const balanceA = await getLiberdusBalance(pageA);
+            const balanceB = await getLiberdusBalance(pageB);
 
             await use({
                 a: { username: userA, page: pageA, ctx: ctxA, balance: balanceA },
@@ -130,7 +130,7 @@ test(`Toll is charged for messages, then refunded for Connection`, async ({ user
     expectedBalance -= (tollInLib * 3);
     expectedBalance -= (networkParams.networkFeeLib * 4); // 3 messages + 1 for creating contact
 
-    await expectLiberdusBalanceToEqual(a.page, expectedBalance.toFixed(6));
+    await expectLiberdusBalanceToEqual(a.page, expectedBalance);
 
     // User B sets User A's status to Connection
     await setFriendStatus(b.page, a.username, FriendStatus.CONNECTION);
@@ -141,7 +141,7 @@ test(`Toll is charged for messages, then refunded for Connection`, async ({ user
 
     // User A's balance should be refunded 5*3
     const expectedAfterRefund = expectedBalance + (tollInLib * 3);
-    await expectLiberdusBalanceToEqual(a.page, expectedAfterRefund.toFixed(6));
+    await expectLiberdusBalanceToEqual(a.page, expectedAfterRefund);
 });
 
 
@@ -156,7 +156,7 @@ test('Toll is charged when sender has blocked recipient', async ({ users }) => {
 
     await sendMessageTo(a.page, b.username, 'Hello B!');
     let expectedBalance = a.balance - tollInLib - networkParams.networkFeeLib * 2;
-    await expectLiberdusBalanceToEqual(a.page, expectedBalance.toFixed(6));
+    await expectLiberdusBalanceToEqual(a.page, expectedBalance);
 
 
     await setFriendStatus(a.page, b.username, FriendStatus.BLOCKED);
@@ -166,5 +166,5 @@ test('Toll is charged when sender has blocked recipient', async ({ users }) => {
     expectedBalance -= tollInLib + networkParams.networkFeeLib;
 
     // Check A's balance
-    await expectLiberdusBalanceToEqual(a.page, expectedBalance.toFixed(6));
+    await expectLiberdusBalanceToEqual(a.page, expectedBalance);
 });
