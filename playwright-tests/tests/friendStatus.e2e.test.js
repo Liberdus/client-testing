@@ -353,19 +353,16 @@ test.describe('Friend Status E2E', () => {
         await sendButton.click();
 
         // A gets confirmation modal, submits again
-        await expect(a.page.locator('#sendAssetConfirmModal')).toBeVisible();
-        await a.page.click('#confirmSendButton');
+        const confirmation = a.page.locator('#sendAssetConfirmModal');
+        await expect(confirmation).toHaveClass(/\bactive\b/);
+        await confirmation.locator('#confirmSendButton').click();
 
         // Should get error toast - full 18 decimal precision
         await expect(a.page.locator('.toast.error.show', { hasText: new RegExp(`${tollInLibFull.replace('.', '\\.')}\\s*LIB`, 'i') })).toBeVisible({ timeout: 10_000 });
 
-        // Close confirmation modal if still open
-        if (await a.page.locator('#sendAssetConfirmModal').isVisible()) {
-            await a.page.click('#closeSendAssetConfirmModal');
-        }
-
-        // Should return to send asset modal with same values
-        await expect(a.page.locator('#sendAssetFormModal')).toBeVisible();
+        // A toll rejection closes confirmation and restores the Send form.
+        await expect(confirmation).not.toHaveClass(/\bactive\b/);
+        await expect(a.page.locator('#sendAssetFormModal.active')).toBeVisible();
         await expect(a.page.locator('#sendToAddress')).toHaveValue(b.username);
         await expect(a.page.locator('#sendAmount')).toHaveValue(sendAmount);
         await expect(a.page.locator('#sendMemo')).toHaveValue(memo);
