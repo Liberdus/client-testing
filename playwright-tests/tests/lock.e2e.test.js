@@ -1,5 +1,11 @@
 const { test: base, expect } = require('../fixtures/base');
-const { generateUsername, createAndSignInUser } = require('../helpers/userHelpers');
+const {
+    generateUsername,
+    createAndSignInUser,
+    signInWithAccountCard,
+    unlockDevice,
+    waitForLockUpdate
+} = require('../helpers/userHelpers');
 const { newContext } = require('../helpers/toastHelpers');
 
 async function lockAccount(page, password) {
@@ -10,7 +16,7 @@ async function lockAccount(page, password) {
     await page.fill('#newPassword', password);
     await page.fill('#confirmNewPassword', password);
     await page.click('#lockForm button[type="submit"]');
-    await expect(page.locator('.toast.success.show')).toBeVisible({ timeout: 15_000 });
+    await waitForLockUpdate(page, 'Password updated');
 }
 
 async function signOut(page) {
@@ -59,11 +65,7 @@ test('Lock and Unlock Account', async ({ browser, browserName}) => {
         await signOut(page);
 
         // 4 sign in with the locked account
-        await page.click('#signInButton');
-        await expect(page.locator('#unlockModal')).toBeVisible();
-        await page.fill('#password', password);
-        await page.click('#unlockForm button[type="submit"]');
-        await expect(page.locator('#header .app-name')).toHaveText(username);
+        await signInWithAccountCard(page, username, { lockPassword: password });
     } finally {
         await ctx.close();
     }
@@ -96,16 +98,13 @@ test('Change Lock Password', async ({ lockedUser }) => {
     await page.fill('#newPassword', newPassword);
     await page.fill('#confirmNewPassword', newPassword);
     await page.click('#lockForm button[type="submit"]');
+    await waitForLockUpdate(page, 'Password updated');
 
     // 4 sign out
     await signOut(page);
 
     // 5 sign in with the new password
-    await page.click('#signInButton');
-    await expect(page.locator('#unlockModal')).toBeVisible();
-    await page.fill('#password', newPassword);
-    await page.click('#unlockForm button[type="submit"]');
-    await expect(page.locator('#header .app-name')).toHaveText(username);
+    await signInWithAccountCard(page, username, { lockPassword: newPassword });
 });
 
 test('Remove Lock', async ({ lockedUser }) => {
@@ -115,11 +114,7 @@ test('Remove Lock', async ({ lockedUser }) => {
     await signOut(page);
 
     // 4 sign in with the locked account
-    await page.click('#signInButton');
-    await expect(page.locator('#unlockModal')).toBeVisible();
-    await page.fill('#password', password);
-    await page.click('#unlockForm button[type="submit"]');
-    await expect(page.locator('#header .app-name')).toHaveText(username);
+    await signInWithAccountCard(page, username, { lockPassword: password });
 
     // 5 remove the password
     await page.click('#toggleSettings');
@@ -128,13 +123,13 @@ test('Remove Lock', async ({ lockedUser }) => {
     await page.click('#removeLockButton');
     await page.fill('#oldPassword', password);
     await page.click('#lockForm button[type="submit"]');
+    await waitForLockUpdate(page, 'Password removed');
 
     // 6 sign out
     await signOut(page);
 
     // 7 sign in without a password
-    await page.click('#signInButton');
-    await expect(page.locator('#header .app-name')).toHaveText(username);
+    await signInWithAccountCard(page, username);
 });
 
 test('Should require unlock before creating new account when locked', async ({ lockedUser }) => {
@@ -146,12 +141,8 @@ test('Should require unlock before creating new account when locked', async ({ l
     // Attempt to create new account
     await page.click('#createAccountButton');
     
-    // Should show unlock modal first
-    await expect(page.locator('#unlockModal')).toBeVisible();
-    
-    // Enter correct password
-    await page.fill('#password', password);
-    await page.click('#unlockForm button[type="submit"]');
+    // The app prompts for the device password before creating an account.
+    await unlockDevice(page, password);
     
     // After unlock, create account modal should appear
     await expect(page.locator('#createAccountModal.active')).toBeVisible({ timeout: 5000 });
@@ -166,12 +157,8 @@ test('Should require unlock before restoring account when locked', async ({ lock
     // Attempt to restore account
     await page.click('#openWelcomeMenu');
     
-    // Should show unlock modal first
-    await expect(page.locator('#unlockModal.active')).toBeVisible();
-    
-    // Enter correct password
-    await page.fill('#password', password);
-    await page.click('#unlockForm button[type="submit"]');
+    // The app prompts for the device password before opening the welcome menu.
+    await unlockDevice(page, password);
     
     await page.click('#welcomeOpenRestore');
     await expect(page.locator('#importModal.active')).toBeVisible({ timeout: 5000 });
