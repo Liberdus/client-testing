@@ -5,6 +5,7 @@ const { AttachmentMenu } = require('../helpers/attachmentMenu');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const imageFixturePath = path.join(__dirname, '..', 'fixtures', 'attachment-preview.png');
 
 function waitForNamedDownload(page, expectedFileName) {
   return page.waitForEvent('download', {
@@ -30,14 +31,8 @@ async function createTestFile(baseFileName, sizeInMB = 0.5, type = 'image/png', 
   // Generate file with appropriate size and type
   const sizeInBytes = sizeInMB * 1024 * 1024;
 
-  if (type.includes('image')) {
-    // Create a simple PNG file
-    const buffer = Buffer.alloc(sizeInBytes, 0);
-    // PNG header
-    buffer.write('\x89PNG\r\n\x1A\n', 0);
-    // Add some data to make it a valid PNG
-    buffer.write('IHDR', 8);
-    fs.writeFileSync(filePath, buffer);
+  if (type === 'image/png') {
+    fs.copyFileSync(imageFixturePath, filePath);
   } else if (baseFileName.endsWith('.pdf')) {
     // Create a simple PDF file
     const buffer = Buffer.alloc(sizeInBytes, 0);
@@ -48,9 +43,8 @@ async function createTestFile(baseFileName, sizeInMB = 0.5, type = 'image/png', 
     buffer.write('%%EOF', eofOffset);
     fs.writeFileSync(filePath, buffer);
   } else {
-    // Create a generic file
-    const buffer = Buffer.alloc(sizeInBytes, 0);
-    fs.writeFileSync(filePath, buffer);
+    fs.writeFileSync(filePath, '');
+    fs.truncateSync(filePath, Math.floor(sizeInBytes));
   }
 
   return { filePath, fileName: uniqueFileName };
@@ -101,7 +95,7 @@ test.describe('File Attachment Tests', () => {
     // Create test files with unique names for this test run
     const imageResult = await createTestFile('test-image.png', 0.5, 'image/png', testRunUniqueId);
     const pdfResult = await createTestFile('test-pdf.pdf', 0.5, 'application/pdf', testRunUniqueId);
-    const largeResult = await createTestFile('test-large.png', 101, 'image/png', testRunUniqueId); // Over the 100MB limit
+    const largeResult = await createTestFile('test-large.png', 101, 'application/octet-stream', testRunUniqueId); // Over the 100MB limit
     const invalidResult = await createTestFile('test-invalid.xyz', 0.1, 'application/octet-stream', testRunUniqueId);
     
     // Store file info for this test run
@@ -191,9 +185,15 @@ test.describe('File Attachment Tests', () => {
       }
 
       // Verify message with attachment was sent
-      const attachmentLink = page.locator('.message.sent .attachment-label');
-      await expect(attachmentLink).toBeVisible({ timeout: 15000 });
-      await expect(attachmentLink).toHaveText(fileName);
+      const attachment = AttachmentMenu.attachmentRow(page, 'sent', fileName);
+      await expect(attachment).toBeVisible({ timeout: 15_000 });
+      if (testCase.fileKey === 'image') {
+        const preview = attachment.getByAltText(`Preview of ${fileName}`, { exact: true });
+        await expect(preview).toBeVisible();
+        await expect.poll(() => preview.evaluate(image => image.naturalWidth)).toBeGreaterThan(0);
+      } else {
+        await expect(attachment.locator('.attachment-label')).toHaveText(fileName);
+      }
     });
   });
 
@@ -287,9 +287,6 @@ test.describe('File Attachment Tests', () => {
     const fileName = fileInfo.fileName;
     const testFilePath = fileInfo.filePath;
 
-    // Start waiting for the named download before clicking
-    const downloadPromise = waitForNamedDownload(page, fileName);
-
     // Open New Chat
     await page.click('#newChatButton');
     await expect(page.locator('#newChatModal')).toBeVisible();
@@ -317,17 +314,14 @@ test.describe('File Attachment Tests', () => {
     }
 
     // Verify message with attachment was sent
-    const attachmentLink = page.locator('.message.sent .attachment-label');
-    await expect(attachmentLink).toBeVisible({ timeout: 15000 });
-    await expect(attachmentLink).toHaveText(fileName);
+    const attachment = AttachmentMenu.attachmentRow(page, 'sent', fileName);
+    await expect(attachment).toBeVisible({ timeout: 15_000 });
 
-    // Click the attachment link - should trigger download
-    await attachmentLink.click();
-    await expect(page.locator('#imageAttachmentContextMenu .context-menu-option[data-action="save"]')).toBeVisible();
-    await page.click('#imageAttachmentContextMenu .context-menu-option[data-action="save"]');
-
-    // Wait for the download to start
-    const download = await downloadPromise;
+    const saveOption = await AttachmentMenu.open(attachment, 'save');
+    const [download] = await Promise.all([
+      waitForNamedDownload(page, fileName),
+      saveOption.click(),
+    ]);
 
     // Verify the downloaded file has the correct name
     expect(download.suggestedFilename()).toBe(fileName);
@@ -393,15 +387,12 @@ test.describe('File Attachment Tests', () => {
     }
 
     // Verify message was sent
-    await expect(page.locator('.message.sent .attachment-label', { hasText: fileName })).toBeVisible({ timeout: 15000 });
+    await expect(AttachmentMenu.attachmentRow(page, 'sent', fileName)).toBeVisible({ timeout: 15_000 });
 
     // Reuse the recipient context that was created in beforeAll
     const recipientPage = await testRecipient.context.newPage();
 
     try {
-      // Start waiting for the named download before clicking
-      const downloadPromise = waitForNamedDownload(recipientPage, fileName);
-      
       // Sign in as recipient
       await recipientPage.goto('');
       await recipientPage.locator('#signInButton').click();
@@ -417,16 +408,14 @@ test.describe('File Attachment Tests', () => {
 
       // Verify recipient received both the message text and attachment
       await expect(recipientPage.locator('.message.received .message-content', { hasText: testMessage })).toBeVisible({ timeout: 15000 });
-      const recipientAttachmentLink = recipientPage.locator('.message.received .attachment-label', { hasText: fileName });
-      await expect(recipientAttachmentLink).toBeVisible({ timeout: 15000 });
-      
-      // Click on the attachment link to open context menu and download it
-      await recipientAttachmentLink.click();
-      await expect(recipientPage.locator('#imageAttachmentContextMenu .context-menu-option[data-action="save"]')).toBeVisible();
-      await recipientPage.click('#imageAttachmentContextMenu .context-menu-option[data-action="save"]');
-      
-      // Wait for the download to start
-      const download = await downloadPromise;
+      const attachment = AttachmentMenu.attachmentRow(recipientPage, 'received', fileName);
+      await expect(attachment).toBeVisible({ timeout: 15_000 });
+
+      const saveOption = await AttachmentMenu.open(attachment, 'save');
+      const [download] = await Promise.all([
+        waitForNamedDownload(recipientPage, fileName),
+        saveOption.click(),
+      ]);
       
       // Verify the downloaded file has the correct name
       expect(download.suggestedFilename()).toBe(fileName);
@@ -524,8 +513,8 @@ test.describe('File Attachment Tests', () => {
     
     // Verify messages with attachments were sent
     for (const attachment of attachments) {
-      const attachmentLink = page.locator('.message.sent .attachment-label', { hasText: attachment.fileName });
-      await expect(attachmentLink).toBeVisible({ timeout: 15000 });
+      const attachmentRow = AttachmentMenu.attachmentRow(page, 'sent', attachment.fileName);
+      await expect(attachmentRow).toBeVisible({ timeout: 15_000 });
     }
     
     // STEP 2: RECIPIENT RECEIVES AND DOWNLOADS ALL ATTACHMENTS
@@ -551,10 +540,10 @@ test.describe('File Attachment Tests', () => {
       // Verify and download each attachment
       for (const attachment of attachments) {        
         // Verify the attachment link is visible
-        const attachmentLink = recipientPage.locator('.message.received .attachment-label', { hasText: attachment.fileName });
-        await expect(attachmentLink).toBeVisible({ timeout: 15000 });
+        const attachmentRow = AttachmentMenu.attachmentRow(recipientPage, 'received', attachment.fileName);
+        await expect(attachmentRow).toBeVisible({ timeout: 15_000 });
         
-        const saveOption = await AttachmentMenu.open(attachmentLink);
+        const saveOption = await AttachmentMenu.open(attachmentRow, 'save');
         const [download] = await Promise.all([
           waitForNamedDownload(recipientPage, attachment.fileName),
           saveOption.click(),
@@ -631,16 +620,11 @@ test.describe('File Attachment Tests', () => {
     await page.click('#handleSendMessage');
 
     // Verify attachment was sent
-    const attachmentLink = page.locator('.message.sent .attachment-label');
-    await expect(attachmentLink).toBeVisible({ timeout: 15000 });
-    await expect(attachmentLink).toHaveText(fileName);
+    const attachment = AttachmentMenu.attachmentRow(page, 'sent', fileName);
+    await expect(attachment).toBeVisible({ timeout: 15_000 });
 
-    // Right-click on the attachment to open context menu
-    await attachmentLink.click();
-    await expect(page.locator('#imageAttachmentContextMenu')).toBeVisible();
-
-    // Click Share option
-    await page.click('#imageAttachmentContextMenu .context-menu-option[data-action="share"]');
+    const shareOption = await AttachmentMenu.open(attachment, 'share');
+    await shareOption.click();
     
     // Verify Share Attachment modal opens
     await expect(page.locator('#shareAttachmentModal')).toHaveClass(/active/);
@@ -689,17 +673,15 @@ test.describe('File Attachment Tests', () => {
 
     // Verify attachment is visible in chat
     await expect(thirdUserPage.locator('#chatModal')).toBeVisible();
-    const receivedAttachment = thirdUserPage.locator('.message.received .attachment-label').last();
+    const receivedAttachment = AttachmentMenu.attachmentRow(thirdUserPage, 'received', fileName);
     await expect(receivedAttachment).toBeVisible({ timeout: 10_000 });
-    await expect(receivedAttachment).toHaveText(fileName);
 
     // Test download on third user's side
-    const downloadPromise = waitForNamedDownload(thirdUserPage, fileName);
-    await receivedAttachment.click();
-    await expect(thirdUserPage.locator('#imageAttachmentContextMenu .context-menu-option[data-action="save"]')).toBeVisible();
-    await thirdUserPage.click('#imageAttachmentContextMenu .context-menu-option[data-action="save"]');
-
-    const download = await downloadPromise;
+    const saveOption = await AttachmentMenu.open(receivedAttachment, 'save');
+    const [download] = await Promise.all([
+      waitForNamedDownload(thirdUserPage, fileName),
+      saveOption.click(),
+    ]);
     expect(download.suggestedFilename()).toBe(fileName);
 
     const downloadPath = path.join(__dirname, '..', 'test-results', 'downloads', testRunUniqueId, `shared-${download.suggestedFilename()}`);
