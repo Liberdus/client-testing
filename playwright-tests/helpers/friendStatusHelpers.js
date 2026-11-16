@@ -14,6 +14,7 @@ const FRIEND_STATUS_LABELS = Object.freeze({
 });
 
 const FRIEND_STATUS_STATE_TIMEOUT = 15_000;
+const FRIEND_STATUS_PENDING_TIMEOUT = 30_000;
 const FRIEND_STATUS_SETTLEMENT_TIMEOUT = 60_000;
 
 function isFriendStatusInjection(response) {
@@ -43,15 +44,26 @@ async function readFriendStatusState(page) {
 }
 
 async function waitForFriendStatusState(page) {
+  const start = performance.now();
   let currentState;
-  // A selected pending value is optimistic; wait for confirmed, usable controls.
-  await expect.poll(async () => {
+  const readState = async () => {
     currentState = await readFriendStatusState(page);
     return currentState;
-  }, {
-    message: 'Contact Status did not finish settling and refreshing',
+  };
+
+  await expect.poll(readState, {
+    message: 'Contact Status did not finish refreshing',
     timeout: FRIEND_STATUS_STATE_TIMEOUT,
-  }).toMatch(/^(ready|offline|failed)$/);
+  }).not.toBe('checking');
+
+  if (currentState === 'pending') {
+    // Give the client time to check the collector and refresh the controls.
+    const remaining = Math.max(1, FRIEND_STATUS_PENDING_TIMEOUT - (performance.now() - start));
+    await expect.poll(readState, {
+      message: 'Pending Contact Status did not finish settling and refreshing',
+      timeout: remaining,
+    }).toMatch(/^(ready|offline|failed)$/);
+  }
   return currentState;
 }
 
