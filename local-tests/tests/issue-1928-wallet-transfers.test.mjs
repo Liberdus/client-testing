@@ -335,6 +335,10 @@ test('unconfirmed address settlement warns that retrying can transfer funds twic
       response: () => { throw new Error('Connection dropped'); },
     },
     {
+      name: 'settlement lookup reports NOT_FOUND_OR_NOT_VALID',
+      response: (id) => Response.json({ id, result: { status: 'NOT_FOUND_OR_NOT_VALID' } }),
+    },
+    {
       name: 'settlement result lacks the request ID',
       response: () => Response.json({ result: settled }),
     },
