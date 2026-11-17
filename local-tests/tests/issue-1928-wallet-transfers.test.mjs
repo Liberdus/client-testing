@@ -158,6 +158,74 @@ test('address transfer result stays on Send when confirmation closes during sett
   assert.equal(publishCount, 1);
 });
 
+test('signing out during address settlement closes the old form and its confirmation', async (t) => {
+  const panel = panelFixture();
+  let account = panel.getAccount();
+  panel.getAccount = () => account;
+  let review;
+  t.mock.method(near.multichain.confirmModal, 'open', (value) => { review = value; });
+  const refresh = t.mock.method(near.multichain, 'refreshAfterMove', async () => {});
+  t.mock.method(near.intentsTransfers, 'prepare', async () => ({ amount: '0.25', symbol: 'SOL' }));
+  let publicationStarted;
+  const published = new Promise((resolve) => { publicationStarted = resolve; });
+  let settle;
+  const settlement = new Promise((resolve) => { settle = resolve; });
+  t.mock.method(near.intentsTransfers, 'send', async (_prepared, _key, { beforePublish }) => {
+    beforePublish();
+    publicationStarted();
+    return settlement;
+  });
+
+  panel.recipientInput.value = recipient;
+  panel.handleRecipientInput();
+  await panel.review();
+  let showing = true;
+  let finished = false;
+  const sheet = {
+    session: 1,
+    shows: () => showing,
+    setStatus() {},
+    finish() { finished = true; },
+    close() { showing = false; review.onClose(); },
+    action: element(),
+  };
+  const sending = review.run(sheet);
+  await published;
+  account = null;
+  settle({ status: 'SETTLED', settled: true });
+  await sending;
+
+  assert.equal(panel.session, null, 'The old account’s Send form closes');
+  assert.equal(panel.sending, false, 'The send lock is released');
+  assert.equal(showing, false, 'The old confirmation closes');
+  assert.equal(finished, false, 'No completion is shown for the old account');
+  assert.equal(refresh.mock.callCount(), 0);
+});
+
+test('unconfirmed address settlement warns that retrying can transfer funds twice', async (t) => {
+  const panel = panelFixture();
+  let review;
+  t.mock.method(near.multichain.confirmModal, 'open', (value) => { review = value; });
+  t.mock.method(near.multichain, 'refreshAfterMove', async () => {});
+  t.mock.method(near.intentsTransfers, 'prepare', async () => ({ amount: '0.25', symbol: 'SOL' }));
+  t.mock.method(near.intentsTransfers, 'send', async (_prepared, _key, { beforePublish }) => {
+    beforePublish();
+    return { status: 'TIMED_OUT', settled: false };
+  });
+  panel.recipientInput.value = recipient;
+  panel.handleRecipientInput();
+  await panel.review();
+  let message;
+  await review.run({
+    session: 1,
+    shows: () => true,
+    setStatus() {},
+    finish(value) { message = value; },
+    action: element(),
+  });
+  assert.equal(message, 'Transfer submitted. It may still settle. Sending again could transfer the funds twice.');
+});
+
 test('unknown username blocks review, verified username allows note, stale lookup cannot replace address', async () => {
   const panel = panelFixture();
   panel.lookupUsername = async () => null;
