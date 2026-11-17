@@ -104,6 +104,106 @@ test('review and confirm publish once without a Liberdus Intents payment message
   assert.equal(panel.pendingReceipt, null);
 });
 
+test('address send can retry after a definite publish refusal but not an uncertain submission', async (t) => {
+  const refusedReason = 'The relay refused this transfer';
+  const refusedResponse = () => Response.json({
+    result: { status: 'FAILED', reason: refusedReason, intent_hash: 'refusedIntent' },
+  });
+  const cases = [
+    { name: 'explicit relay refusal', firstResponse: refusedResponse, canRetry: true },
+    {
+      name: 'explicit refusal after closing confirmation',
+      firstResponse: refusedResponse,
+      dismissConfirmation: true,
+      canRetry: true,
+    },
+    {
+      name: 'relay says the intent was already processed',
+      firstResponse: () => Response.json({
+        result: { status: 'FAILED', reason: 'already processed', intent_hash: 'submittedIntent' },
+      }),
+      canRetry: false,
+    },
+    {
+      name: 'missing relay response result',
+      firstResponse: () => Response.json({}),
+      canRetry: false,
+    },
+    {
+      name: 'missing hash in the success response',
+      firstResponse: () => Response.json({ result: { status: 'OK' } }),
+      canRetry: false,
+    },
+    {
+      name: 'connection dropped during submission',
+      firstResponse: () => { throw new Error('Connection dropped'); },
+      canRetry: false,
+    },
+  ];
+  for (const { name, firstResponse, canRetry, dismissConfirmation } of cases) {
+    await t.test(name, async (t) => {
+      const panel = panelFixture();
+      const sheet = new near.multichain.confirmModal.constructor({});
+      for (const key of ['modal', 'title', 'hero', 'rows', 'action', 'note', 'status']) {
+        sheet[key] = element();
+      }
+      t.mock.method(sheet, 'show', () => {});
+      t.mock.method(near.multichain.confirmModal, 'open', (review) => sheet.open(review));
+      t.mock.method(near.multichain, 'refreshAfterMove', async () => {});
+      t.mock.method(near.intentsTransfers, 'prepare', async () => ({ amount: '0.25', symbol: 'SOL' }));
+      t.mock.method(near.intentsTransfers, 'sign', async () => ({ fixture: true }));
+      t.mock.method(near.intentsTransfers, 'simulate', async () => ({ ok: true }));
+      t.mock.method(console, 'warn', () => {});
+
+      const requests = [];
+      t.mock.method(globalThis, 'fetch', async (_url, init) => {
+        const { method, id } = JSON.parse(init.body);
+        requests.push(method);
+        if (method === 'publish_intent') {
+          if (requests.length === 1) {
+            if (dismissConfirmation) sheet.close();
+            return firstResponse();
+          }
+          return Response.json({ id, result: { status: 'OK', intent_hash: 'submittedIntent' } });
+        }
+        assert.equal(method, 'get_status');
+        return Response.json({ id, result: { status: 'SETTLED', data: { hash: 'settlementHash' } } });
+      });
+
+      panel.recipientInput.value = recipient;
+      panel.handleRecipientInput();
+      await panel.review();
+      await sheet.confirm();
+      assert.deepEqual(requests, ['publish_intent']);
+      if (dismissConfirmation) {
+        assert.equal(panel.statusLine.textContent, refusedReason);
+        assert.equal(panel.statusLine.dataset.kind, 'error');
+        assert.equal(panel.recipientInput.disabled, false);
+        assert.equal(panel.sendButton.disabled, false);
+        await panel.primaryAction();
+        assert.equal(sheet.action.textContent, 'Send SOL');
+        await sheet.confirm();
+        assert.deepEqual(requests, ['publish_intent', 'publish_intent', 'get_status']);
+        assert.equal(sheet.status.textContent, 'Sent 0.25 SOL.');
+        return;
+      }
+      assert.equal(sheet.action.disabled, false);
+      assert.equal(sheet.status.dataset.kind, 'error');
+      if (canRetry) {
+        assert.equal(sheet.status.textContent, refusedReason);
+        assert.equal(sheet.action.textContent, 'Send SOL');
+        await sheet.confirm();
+        assert.deepEqual(requests, ['publish_intent', 'publish_intent', 'get_status']);
+        assert.equal(sheet.status.textContent, 'Sent 0.25 SOL.');
+        assert.equal(sheet.action.textContent, 'Done');
+      } else {
+        assert.equal(sheet.action.textContent, 'Done');
+        assert.match(sheet.status.textContent, /Sending again could transfer the funds twice/);
+      }
+    });
+  }
+});
+
 test('address transfer result stays on Send when confirmation closes during settlement', async (t) => {
   const panel = panelFixture();
   let review;
