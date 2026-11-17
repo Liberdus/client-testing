@@ -106,9 +106,8 @@ test('review and confirm publish once without a Liberdus Intents payment message
 
 test('address send can retry after a definite publish refusal but not an uncertain submission', async (t) => {
   const refusedReason = 'The relay refused this transfer';
-  const refusedResponse = () => Response.json({
-    result: { status: 'FAILED', reason: refusedReason, intent_hash: 'refusedIntent' },
-  });
+  const refusal = { status: 'FAILED', reason: refusedReason, intent_hash: 'refusedIntent' };
+  const refusedResponse = (id) => Response.json({ id, result: refusal });
   const cases = [
     { name: 'explicit relay refusal', firstResponse: refusedResponse, canRetry: true },
     {
@@ -118,20 +117,41 @@ test('address send can retry after a definite publish refusal but not an uncerta
       canRetry: true,
     },
     {
+      name: 'relay refusal is missing the request ID',
+      firstResponse: () => Response.json({ result: refusal }),
+      canRetry: false,
+    },
+    {
+      name: 'relay refusal belongs to a different request',
+      firstResponse: (id) => refusedResponse(id + 1),
+      canRetry: false,
+    },
+    {
       name: 'relay says the intent was already processed',
-      firstResponse: () => Response.json({
+      firstResponse: (id) => Response.json({
+        id,
         result: { status: 'FAILED', reason: 'already processed', intent_hash: 'submittedIntent' },
       }),
       canRetry: false,
     },
     {
       name: 'missing relay response result',
-      firstResponse: () => Response.json({}),
+      firstResponse: (id) => Response.json({ id }),
       canRetry: false,
     },
     {
       name: 'missing hash in the success response',
-      firstResponse: () => Response.json({ result: { status: 'OK' } }),
+      firstResponse: (id) => Response.json({ id, result: { status: 'OK' } }),
+      canRetry: false,
+    },
+    {
+      name: 'object hash in the success response',
+      firstResponse: (id) => Response.json({ id, result: { status: 'OK', intent_hash: {} } }),
+      canRetry: false,
+    },
+    {
+      name: 'blank hash in the success response',
+      firstResponse: (id) => Response.json({ id, result: { status: 'OK', intent_hash: '   ' } }),
       canRetry: false,
     },
     {
@@ -162,7 +182,7 @@ test('address send can retry after a definite publish refusal but not an uncerta
         if (method === 'publish_intent') {
           if (requests.length === 1) {
             if (dismissConfirmation) sheet.close();
-            return firstResponse();
+            return firstResponse(id);
           }
           return Response.json({ id, result: { status: 'OK', intent_hash: 'submittedIntent' } });
         }
@@ -420,7 +440,7 @@ test('shared send simulates before publishing and reports an unconfirmed settlem
   service.simulate = async () => ({ ok: true });
   t.mock.method(globalThis, 'fetch', async (_url, init) => {
     const request = JSON.parse(init.body);
-    if (request.method === 'publish_intent') return Response.json({ result: { status: 'OK', intent_hash: 'accepted' } });
+    if (request.method === 'publish_intent') return Response.json({ id: request.id, result: { status: 'OK', intent_hash: 'accepted' } });
     throw new Error('offline');
   });
   const result = await service.send({}, 'fixture');

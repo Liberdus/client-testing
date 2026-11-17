@@ -49,7 +49,7 @@ window.__fixture = {
       const req = JSON.parse(init.body);
       if (req.method === 'publish_intent') {
         window.__publishCount++;
-        return Response.json({ result: { status: 'OK', intent_hash: 'fixtureIntent' } });
+        return Response.json({ id: req.id, result: { status: 'OK', intent_hash: 'fixtureIntent' } });
       }
       if (req.method === 'get_status') return Response.json({ result: { status: 'SETTLED', data: { hash: 'fixtureTransaction' } } });
       throw Error('Unexpected network request');
