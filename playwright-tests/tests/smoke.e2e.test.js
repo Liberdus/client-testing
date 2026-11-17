@@ -1,6 +1,7 @@
 // liberdus.e2e.spec.js
 
 const { test, expect } = require('../fixtures/newUserFixture');
+const { openNewChat } = require('../helpers/messageHelpers');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 
 let RECIPIENT;
@@ -17,35 +18,15 @@ test.describe('Tests requiring recipient user', () => {
   });
 
   test('should open New Chat modal, start a chat, and send a message', async ({ page }) => {
-    const recipient = RECIPIENT;
+    const chatModal = await openNewChat(page, RECIPIENT);
+    const testMessage = 'Hello from E2E test!';
+    await chatModal.locator('.message-input').fill(testMessage);
+    await chatModal.locator('#handleSendMessage').click({ timeout: 15_000 });
 
-    await page.click('#newChatButton');
-    await expect(page.locator('#newChatModal')).toBeVisible();
+    const sentMessage = chatModal.locator('.messages-list .message.sent .message-content', { hasText: testMessage });
+    await expect(sentMessage).toBeVisible({ timeout: 15_000 });
 
-    await page.fill('#chatRecipient', recipient);
-    await page.waitForTimeout(3_000);
-    const recipientStatus = await page.locator('#chatRecipientError').textContent().catch(() => '');
-    expect(recipientStatus).toBe('found');
-
-    const continueBtn = page.locator('#newChatForm button[type="submit"]');
-    await expect(continueBtn).toBeEnabled();
-    await continueBtn.click();
-
-    await expect(page.locator('#chatModal')).toBeVisible();
-    const testMessage = 'Hello from E2E test!'
-    await page.fill('#chatModal .message-input', testMessage);
-    await page.click('#handleSendMessage');
-    await page.waitForTimeout(3_000);
-
-    // Ensure message appears
-    await page.waitForFunction(
-      txt => [...document.querySelectorAll('#chatModal .messages-list .message.sent .message-content')]
-        .some(m => m.textContent.includes(txt)),
-      testMessage,
-      { timeout: 15_000 }
-    );
-
-    await page.click('#closeChatModal');
+    await chatModal.locator('#closeChatModal').click();
     await expect(page.locator('#newChatButton')).toBeVisible();
   });
 
