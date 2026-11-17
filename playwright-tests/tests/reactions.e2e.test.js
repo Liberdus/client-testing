@@ -52,7 +52,7 @@ async function openChat(page, contactUsername) {
 
   const chatItem = page.locator('#chatList .chat-name', { hasText: contactUsername });
   await expect(chatItem).toBeVisible({ timeout: 30_000 });
-  await chatItem.click();
+  await chatItem.click({ timeout: 15_000 });
   await expect(page.locator('#chatModal')).toBeVisible();
 }
 
@@ -250,10 +250,13 @@ test.describe('Message reactions', () => {
     // Act and assert: the toll gate blocks the reaction and leaves the message
     // without any optimistic reaction chip.
     await chooseQuickReaction(a.page, 'sent', message, 'React with thumbs up');
-    await expect(a.page.locator('.toast.info.show', {
+    const connectionHint = a.page.locator('.toast.info.show', {
       hasText: 'You can only send reactions to people who have added you as a connection',
-    })).toBeVisible({ timeout: 10_000 });
+    });
+    await expect(connectionHint).toBeVisible({ timeout: 10_000 });
     await expectNoReactionChips(a.page, 'sent', message);
+    await connectionHint.locator('.toast-close-btn').click();
+    await expect(connectionHint).not.toBeVisible();
 
     // Arrange: B opens the inbound chat so the contact exists locally, then
     // blocks A to exercise the stronger blocked-user gate.
