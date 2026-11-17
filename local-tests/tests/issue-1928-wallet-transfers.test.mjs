@@ -116,6 +116,12 @@ test('address send can retry after a definite publish refusal but not an uncerta
   const cases = [
     { name: 'explicit relay refusal', firstResponse: refusedResponse, canRetry: true },
     {
+      name: 'temporary relay refusal explains the transfer was not submitted',
+      firstResponse: (id) => Response.json({ id, result: { ...refusal, reason: 'internal' } }),
+      expectedReason: 'Your transfer wasn’t submitted. Try again in a moment.',
+      canRetry: true,
+    },
+    {
       name: 'explicit refusal after closing confirmation',
       firstResponse: refusedResponse,
       dismissConfirmation: true,
@@ -165,7 +171,7 @@ test('address send can retry after a definite publish refusal but not an uncerta
       canRetry: false,
     },
   ];
-  for (const { name, firstResponse, canRetry, dismissConfirmation } of cases) {
+  for (const { name, firstResponse, canRetry, dismissConfirmation, expectedReason = refusedReason } of cases) {
     await t.test(name, async (t) => {
       const panel = panelFixture();
       const sheet = new near.multichain.confirmModal.constructor({});
@@ -201,7 +207,7 @@ test('address send can retry after a definite publish refusal but not an uncerta
       await sheet.confirm();
       assert.deepEqual(requests, ['publish_intent']);
       if (dismissConfirmation) {
-        assert.equal(panel.statusLine.textContent, refusedReason);
+        assert.equal(panel.statusLine.textContent, expectedReason);
         assert.equal(panel.statusLine.dataset.kind, 'error');
         assert.equal(panel.recipientInput.disabled, false);
         assert.equal(panel.sendButton.disabled, false);
@@ -215,7 +221,7 @@ test('address send can retry after a definite publish refusal but not an uncerta
       assert.equal(sheet.action.disabled, false);
       assert.equal(sheet.status.dataset.kind, 'error');
       if (canRetry) {
-        assert.equal(sheet.status.textContent, refusedReason);
+        assert.equal(sheet.status.textContent, expectedReason);
         assert.equal(sheet.action.textContent, 'Send SOL');
         await sheet.confirm();
         assert.deepEqual(requests, ['publish_intent', 'publish_intent', 'get_status']);
