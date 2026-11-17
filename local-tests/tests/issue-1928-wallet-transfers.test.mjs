@@ -67,6 +67,7 @@ test('review and confirm publish once without a Liberdus Intents payment message
   let review;
   let publishCount = 0;
   let chatCount = 0;
+  let polledHash;
   panel.onSent = async () => { chatCount++; };
   t.mock.method(near.multichain.confirmModal, 'open', (value) => { review = value; });
   t.mock.method(near.multichain, 'refreshAfterMove', async () => {});
@@ -78,12 +79,13 @@ test('review and confirm publish once without a Liberdus Intents payment message
   t.mock.method(near.intentsTransfers, 'sign', async () => ({ fixture: true }));
   t.mock.method(near.intentsTransfers, 'simulate', async () => ({ ok: true }));
   t.mock.method(globalThis, 'fetch', async (_url, init) => {
-    const { method, id } = JSON.parse(init.body);
+    const { method, id, params } = JSON.parse(init.body);
     if (method === 'publish_intent') {
       publishCount++;
-      return Response.json({ id, result: { status: 'OK', intent_hash: 'submittedIntent' } });
+      return Response.json({ id, result: { status: 'OK', intent_hash: '  submittedIntent  ' } });
     }
     assert.equal(method, 'get_status');
+    polledHash = params[0].intent_hash;
     return Response.json({ id, result: { status: 'SETTLED', data: { hash: 'settlementHash' } } });
   });
   panel.recipientInput.value = recipient;
@@ -96,8 +98,11 @@ test('review and confirm publish once without a Liberdus Intents payment message
   assert.equal(review.rows.some(([name]) => name === 'Chat message toll' || name === 'Note'), false);
   assert.match(review.note, /Asset transfer only/);
   assert.ok(review.note.includes('To send to an external wallet, use Withdraw.'));
-  const sheet = { session: {}, shows: () => true, setStatus() {}, finish() {}, action: element() };
+  const results = [];
+  const sheet = { session: {}, shows: () => true, setStatus() {}, finish(message) { results.push(message); }, action: element() };
   await review.run(sheet);
+  assert.equal(polledHash, 'submittedIntent');
+  assert.equal(results[0], 'Sent 0.25 SOL.');
   await review.run(sheet);
   assert.equal(publishCount, 1);
   assert.equal(chatCount, 0);
@@ -323,27 +328,51 @@ test('signing out during address settlement closes the old form and its confirma
 });
 
 test('unconfirmed address settlement warns that retrying can transfer funds twice', async (t) => {
-  const panel = panelFixture();
-  let review;
-  t.mock.method(near.multichain.confirmModal, 'open', (value) => { review = value; });
-  t.mock.method(near.multichain, 'refreshAfterMove', async () => {});
-  t.mock.method(near.intentsTransfers, 'prepare', async () => ({ amount: '0.25', symbol: 'SOL' }));
-  t.mock.method(near.intentsTransfers, 'send', async (_prepared, _key, { beforePublish }) => {
-    beforePublish();
-    return { status: 'TIMED_OUT', settled: false };
-  });
-  panel.recipientInput.value = recipient;
-  panel.handleRecipientInput();
-  await panel.review();
-  let message;
-  await review.run({
-    session: 1,
-    shows: () => true,
-    setStatus() {},
-    finish(value) { message = value; },
-    action: element(),
-  });
-  assert.equal(message, 'Transfer submitted. It may still settle. Sending again could transfer the funds twice.');
+  const settled = { status: 'SETTLED', data: { hash: 'settlementHash' } };
+  const cases = [
+    {
+      name: 'settlement lookup loses its connection',
+      response: () => { throw new Error('Connection dropped'); },
+    },
+    {
+      name: 'settlement result lacks the request ID',
+      response: () => Response.json({ result: settled }),
+    },
+    {
+      name: 'settlement result belongs to a different request',
+      response: (id) => Response.json({ id: id + 1, result: settled }),
+    },
+  ];
+  for (const { name, response } of cases) {
+    await t.test(name, async (t) => {
+      const panel = panelFixture();
+      const sheet = new near.multichain.confirmModal.constructor({});
+      for (const key of ['modal', 'title', 'hero', 'rows', 'action', 'note', 'status']) {
+        sheet[key] = element();
+      }
+      t.mock.method(sheet, 'show', () => {});
+      t.mock.method(near.multichain.confirmModal, 'open', (review) => sheet.open(review));
+      t.mock.method(near.multichain, 'refreshAfterMove', async () => {});
+      t.mock.method(near.intentsTransfers, 'prepare', async () => ({ amount: '0.25', symbol: 'SOL' }));
+      t.mock.method(near.intentsTransfers, 'sign', async () => ({ fixture: true }));
+      t.mock.method(near.intentsTransfers, 'simulate', async () => ({ ok: true }));
+      t.mock.method(globalThis, 'fetch', async (_url, init) => {
+        const { method, id } = JSON.parse(init.body);
+        if (method === 'publish_intent') {
+          return Response.json({ id, result: { status: 'OK', intent_hash: 'submittedIntent' } });
+        }
+        assert.equal(method, 'get_status');
+        return response(id);
+      });
+
+      panel.recipientInput.value = recipient;
+      panel.handleRecipientInput();
+      await panel.review();
+      await sheet.confirm();
+      assert.equal(sheet.status.textContent, 'Transfer submitted. It may still settle. Sending again could transfer the funds twice.');
+      assert.equal(sheet.action.textContent, 'Done');
+    });
+  }
 });
 
 test('unknown username blocks review, verified username allows note, stale lookup cannot replace address', async () => {

@@ -51,7 +51,7 @@ window.__fixture = {
         window.__publishCount++;
         return Response.json({ id: req.id, result: { status: 'OK', intent_hash: 'fixtureIntent' } });
       }
-      if (req.method === 'get_status') return Response.json({ result: { status: 'SETTLED', data: { hash: 'fixtureTransaction' } } });
+      if (req.method === 'get_status') return Response.json({ id: req.id, result: { status: 'SETTLED', data: { hash: 'fixtureTransaction' } } });
       throw Error('Unexpected network request');
     };
     multichain.updateSummary = async () => {};
