@@ -25,9 +25,10 @@ function panelFixture() {
   panel.session = { account, fromWallet: true, loading: false };
   panel.loaded = true;
   for (const key of ['modal', 'recipientInput', 'recipientStatus', 'receiptToll', 'receiptTollAmount',
-    'noteInput', 'noteToggle', 'qrFileInput', 'scanQRButton', 'uploadQRButton', 'sendButton', 'statusLine', 'assetPicker']) {
+    'recipientHint', 'noteLabel', 'noteInput', 'noteToggle', 'qrFileInput', 'scanQRButton', 'uploadQRButton', 'sendButton', 'statusLine', 'assetPicker']) {
     panel[key] = element();
   }
+  panel.noteToggle.hidden = true;
   panel.assetKey = asset.key;
   panel.selectedAsset = () => asset;
   panel.amount = { problem: () => null, tokenAmount: () => '0.25', setLocked() {}, reset() {} };
@@ -36,7 +37,7 @@ function panelFixture() {
   return panel;
 }
 
-test('typed address enables review and disables the note', () => {
+test('typed address enables review and hides the note', () => {
   const panel = panelFixture();
   panel.noteInput.value = 'old note';
   panel.recipientInput.value = recipient;
@@ -44,8 +45,10 @@ test('typed address enables review and disables the note', () => {
   assert.equal(near.intentsAccountIdForAddress(panel.recipientAddress), recipient);
   assert.equal(panel.sendButton.disabled, false);
   assert.equal(panel.noteInput.disabled, true);
+  assert.equal(panel.noteInput.hidden, true);
+  assert.equal(panel.noteLabel.hidden, true);
   assert.equal(panel.noteInput.value, '');
-  assert.match(panel.noteInput.placeholder, /address/i);
+  assert.equal(panel.recipientStatus.textContent, 'Asset transfer only');
   assert.equal(panel.receiptToll.hidden, true);
 });
 
@@ -103,14 +106,19 @@ test('unknown username blocks review, verified username allows note, stale looku
   panel.recipientInput.value = 'missing';
   await panel.handleRecipientInput(recipient);
   assert.equal(panel.sendButton.disabled, true);
-  assert.match(panel.noteInput.placeholder, /invalid username/);
+  assert.equal(panel.noteInput.hidden, true);
+  assert.equal(panel.noteLabel.hidden, true);
   panel.lookupUsername = async () => recipient;
   panel.checkReceiptRecipient = async () => ({ tollWei: 1n });
   panel.recipientInput.value = 'alice';
   await panel.handleRecipientInput(recipient);
   assert.equal(panel.sendButton.disabled, false);
   assert.equal(panel.noteInput.disabled, false);
+  assert.equal(panel.noteInput.hidden, false);
+  assert.equal(panel.noteLabel.hidden, false);
+  assert.equal(panel.noteToggle.hidden, true);
   assert.equal(panel.receiptToll.hidden, false);
+  panel.noteInput.value = 'For Alice';
   let finishLookup;
   panel.lookupUsername = () => new Promise((resolve) => { finishLookup = resolve; });
   const checking = panel.handleRecipientInput(recipient);
@@ -120,6 +128,8 @@ test('unknown username blocks review, verified username allows note, stale looku
   await checking;
   assert.equal(panel.recipientLookup.kind, 'address');
   assert.equal(panel.noteInput.disabled, true);
+  assert.equal(panel.noteInput.hidden, true);
+  assert.equal(panel.noteInput.value, '');
   panel.lockForm(true);
   panel.lockForm(false);
   assert.equal(panel.noteInput.disabled, true);
@@ -172,14 +182,14 @@ test('camera and uploaded address QR use the same recipient flow', async (t) => 
   scanned.openQRScanner = (finish) => { finish(recipient); return true; };
   scanned.scanQR();
   assert.equal(scanned.recipientAddress, recipient);
-  assert.equal(scanned.noteInput.disabled, true);
+  assert.equal(scanned.noteInput.hidden, true);
   const uploaded = panelFixture();
   uploaded.qrFileInput.files = [{}];
   t.mock.method(lib.QRImageDecoder, 'decode', async () => recipient);
   await uploaded.readQRFile({ target: uploaded.qrFileInput });
   assert.equal(uploaded.recipientAddress, recipient);
   assert.equal(uploaded.recipientLookup.kind, 'address');
-  assert.equal(uploaded.noteInput.disabled, true);
+  assert.equal(uploaded.noteInput.hidden, true);
 });
 
 test('structured QR verifies username, address, and asset, retaining its amount and note', async () => {
@@ -194,7 +204,7 @@ test('structured QR verifies username, address, and asset, retaining its amount 
   const request = { t: 'intents', u: 'alice', address: recipient, i: asset.assetId, s: 'SOL', a: '0.1', m: 'Lunch' };
   await panel.fillFromQR(PaymentQR.encode(request), panel.session);
   assert.equal(panel.recipientName, '@alice');
-  assert.equal(panel.noteInput.disabled, false);
+  assert.equal(panel.noteInput.hidden, false);
   assert.equal(panel.noteInput.value, 'Lunch');
   assert.equal(amount, '0.1');
   await panel.fillFromQR(PaymentQR.encode({ ...request, address: '0x' + '3'.repeat(40) }), panel.session);

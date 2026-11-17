@@ -99,16 +99,38 @@ try {
     await page.goto(origin);
     await page.waitForFunction(() => window.__fixtureReady);
     await page.evaluate(() => __fixture.open());
-    await page.locator('#chatSendRecipient').fill('missing');
+    const recipientField = page.locator('#chatSendRecipient');
+    const note = page.locator('#chatSendNote');
+    const noteToggle = page.locator('#chatSendNoteToggle');
+    const optionalNote = page.getByText('Note (optional)', { exact: true });
+    const recipientHint = page.getByText(
+      'Send to a username to include an optional note. Username sends include a Liberdus Intents payment message.',
+      { exact: true },
+    );
+    const address = '0x' + '2'.repeat(40);
+    assert.equal(await recipientHint.isVisible(), true);
+    assert.equal(await note.isHidden(), true);
+    assert.equal(await noteToggle.isHidden(), true);
+    await recipientField.fill('missing');
     await page.waitForFunction(() => document.querySelector('#chatSendRecipientStatus').textContent.includes('not found'));
-    assert.equal(await page.locator('#chatSendNote').isDisabled(), true);
-    await page.locator('#chatSendRecipient').fill('alice');
-    await page.waitForFunction(() => !document.querySelector('#chatSendNote').disabled);
-    await page.locator('#chatSendNoteToggle').click();
-    await page.locator('#chatSendNote').fill('Lunch');
-    await page.locator('#chatSendRecipient').fill('0x' + '2'.repeat(40));
-    assert.equal(await page.locator('#chatSendNote').inputValue(), '');
-    assert.equal(await page.locator('#chatSendNote').isDisabled(), true);
+    assert.equal(await note.isHidden(), true);
+    await recipientField.fill('alice');
+    await note.waitFor({ state: 'visible' });
+    assert.equal(await optionalNote.isVisible(), true);
+    assert.equal(await noteToggle.isHidden(), true);
+    await note.fill('Lunch');
+    await recipientField.fill(address);
+    assert.equal(await page.locator('#chatSendRecipientStatus').textContent(), 'Asset transfer only');
+    assert.equal(await note.inputValue(), '');
+    assert.equal(await note.isHidden(), true);
+    assert.equal(await optionalNote.isHidden(), true);
+    assert.equal(await recipientHint.isHidden(), true);
+    await recipientField.fill('');
+    assert.equal(await recipientHint.isVisible(), true);
+    await recipientField.fill('alice');
+    await note.waitFor({ state: 'visible' });
+    assert.equal(await note.inputValue(), '');
+    await recipientField.fill(address);
     await page.locator('#chatSendAmount').fill('0.25');
     await page.waitForFunction(() => !document.querySelector('#chatSendButton').disabled);
     await page.screenshot({ path: `${out}/send-${viewport.width}.png`, animations: 'disabled' });
@@ -135,7 +157,7 @@ try {
     await page.evaluate(() => Promise.all(document.getAnimations().map(animation => animation.finished.catch(() => {}))));
     await page.screenshot({ path: `${out}/activity-${viewport.width}.png`, animations: 'disabled' });
     assert.deepEqual(errors, []);
-    console.log(`PASS ${viewport.width}px: typed address, username, real QR upload decode, simulated camera, confirmation, single publish, no saved transfer or Activity entry`);
+    console.log(`PASS ${viewport.width}px: typed address, optional username note, real QR upload decode, simulated camera, confirmation, single publish, no saved transfer or Activity entry`);
     await context.close();
   }
 } finally { await browser?.close(); server.close(); }
