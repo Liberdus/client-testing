@@ -327,7 +327,7 @@ test('signing out during address settlement closes the old form and its confirma
   assert.equal(refresh.mock.callCount(), 0);
 });
 
-test('unconfirmed address settlement warns that retrying can transfer funds twice', async (t) => {
+test('address settlement distinguishes definitive failure from unconfirmed replies', async (t) => {
   const settled = { status: 'SETTLED', data: { hash: 'settlementHash' } };
   const cases = [
     {
@@ -346,8 +346,33 @@ test('unconfirmed address settlement warns that retrying can transfer funds twic
       name: 'settlement result belongs to a different request',
       response: (id) => Response.json({ id: id + 1, result: settled }),
     },
+    {
+      name: 'settlement failure status is an array',
+      response: (id) => Response.json({ id, result: { status: ['FAILED'] } }),
+    },
+    {
+      name: 'settled status is an array',
+      response: (id) => Response.json({ id, result: { ...settled, status: ['SETTLED'] } }),
+    },
+    {
+      name: 'settled status lacks a transaction hash',
+      response: (id) => Response.json({ id, result: { status: 'SETTLED' } }),
+    },
+    {
+      name: 'settled status has a non-string transaction hash',
+      response: (id) => Response.json({ id, result: { status: 'SETTLED', data: { hash: {} } } }),
+    },
+    {
+      name: 'settled status has a blank transaction hash',
+      response: (id) => Response.json({ id, result: { status: 'SETTLED', data: { hash: '  ' } } }),
+    },
+    {
+      name: 'settlement reply explicitly reports failure',
+      response: (id) => Response.json({ id, result: { status: 'FAILED' } }),
+      message: 'The transfer did not go through.',
+    },
   ];
-  for (const { name, response } of cases) {
+  for (const { name, response, message } of cases) {
     await t.test(name, async (t) => {
       const panel = panelFixture();
       const sheet = new near.multichain.confirmModal.constructor({});
@@ -373,7 +398,7 @@ test('unconfirmed address settlement warns that retrying can transfer funds twic
       panel.handleRecipientInput();
       await panel.review();
       await sheet.confirm();
-      assert.equal(sheet.status.textContent, 'Transfer submitted. It may still settle. Sending again could transfer the funds twice.');
+      assert.equal(sheet.status.textContent, message ?? 'Transfer submitted. It may still settle. Sending again could transfer the funds twice.');
       assert.equal(sheet.action.textContent, 'Done');
     });
   }
