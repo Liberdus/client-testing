@@ -89,15 +89,73 @@ test('review and confirm publish once without a Liberdus Intents payment message
   panel.recipientInput.value = recipient;
   panel.handleRecipientInput();
   await panel.review();
-  assert.equal(review.rows.find(([name]) => name === 'To')[1], recipient);
+  assert.deepEqual(review.rows.slice(0, 2), [
+    ['To', recipient],
+    ['Destination network', 'NEAR Intents'],
+  ]);
   assert.equal(review.rows.some(([name]) => name === 'Chat message toll' || name === 'Note'), false);
   assert.match(review.note, /Asset transfer only/);
+  assert.ok(review.note.includes('To send to an external wallet, use Withdraw.'));
   const sheet = { session: {}, shows: () => true, setStatus() {}, finish() {}, action: element() };
   await review.run(sheet);
   await review.run(sheet);
   assert.equal(publishCount, 1);
   assert.equal(chatCount, 0);
   assert.equal(panel.pendingReceipt, null);
+});
+
+test('address transfer result stays on Send when confirmation closes during settlement', async (t) => {
+  const panel = panelFixture();
+  let review;
+  t.mock.method(near.multichain.confirmModal, 'open', (value) => { review = value; });
+  t.mock.method(near.multichain, 'refreshAfterMove', async () => {});
+  t.mock.method(near.intentsTransfers, 'prepare', async () => ({ amount: '0.25', symbol: 'SOL' }));
+  t.mock.method(near.intentsTransfers, 'sign', async () => ({ fixture: true }));
+  t.mock.method(near.intentsTransfers, 'simulate', async () => ({ ok: true }));
+  let statusRequested;
+  const checkingStatus = new Promise((resolve) => { statusRequested = resolve; });
+  let settle;
+  const settlement = new Promise((resolve) => { settle = resolve; });
+  let publishCount = 0;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const { method, id } = JSON.parse(init.body);
+    if (method === 'publish_intent') {
+      publishCount++;
+      return Response.json({ id, result: { status: 'OK', intent_hash: 'submittedIntent' } });
+    }
+    assert.equal(method, 'get_status');
+    statusRequested();
+    await settlement;
+    return Response.json({ id, result: { status: 'SETTLED', data: { hash: 'settlementHash' } } });
+  });
+  panel.recipientInput.value = recipient;
+  panel.handleRecipientInput();
+  await panel.review();
+  let showing = true;
+  const sheet = {
+    session: 1,
+    shows: () => showing,
+    setStatus() {},
+    finish() { assert.fail('A dismissed confirmation must not receive the result'); },
+    action: element(),
+  };
+  const sending = review.run(sheet);
+  await checkingStatus;
+  showing = false;
+  review.onClose();
+  const lockedDuringSettlement = panel.sendButton.disabled;
+  settle();
+  await sending;
+
+  assert.equal(lockedDuringSettlement, true);
+  assert.ok(panel.session, 'Send remains open for the transfer result');
+  assert.equal(panel.statusLine.textContent, 'Sent 0.25 SOL.');
+  assert.equal(panel.recipientInput.disabled, true);
+  assert.equal(panel.sendButton.textContent, 'Done');
+  assert.equal(panel.sendButton.disabled, false);
+  await panel.primaryAction();
+  assert.equal(panel.session, null, 'Done closes Send');
+  assert.equal(publishCount, 1);
 });
 
 test('unknown username blocks review, verified username allows note, stale lookup cannot replace address', async () => {

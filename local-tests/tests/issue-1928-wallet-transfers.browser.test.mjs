@@ -143,6 +143,10 @@ try {
     await page.locator('#chatSendButton').click();
     await page.locator('#multichainConfirmModal.is-transition-complete').waitFor();
     assert.ok((await page.locator('#multichainConfirmRows').textContent()).includes('0x' + '2'.repeat(40)));
+    const confirmationRows = page.locator('#multichainConfirmRows');
+    assert.equal(await confirmationRows.locator('dt', { hasText: 'Destination network' }).count(), 1);
+    assert.equal(await confirmationRows.locator('dd').filter({ hasText: 'NEAR Intents' }).count(), 1);
+    assert.ok((await page.locator('#multichainConfirmNote').textContent()).includes('To send to an external wallet, use Withdraw.'));
     assert.equal((await page.locator('#multichainConfirmRows').textContent()).includes('Chat message toll'), false);
     await page.screenshot({ path: `${out}/confirm-${viewport.width}.png`, animations: 'disabled' });
     await page.locator('#multichainConfirmAction').click();
