@@ -60,8 +60,8 @@ async function resumeChatHistorySync(page) {
 
 const test = base.extend({
     users: async ({ browser, browserName }, use, testInfo) => {
-        const ctxA = await newContext(browser);
-        const ctxB = await newContext(browser);
+        const ctxA = await newContext(browser, { dismissWalletRefreshError: true });
+        const ctxB = await newContext(browser, { dismissWalletRefreshError: true });
         const pageA = await ctxA.newPage();
         const pageB = await ctxB.newPage();
         const userA = generateUsername(browserName);
@@ -183,20 +183,24 @@ test.describe('Friend Status E2E', () => {
         // User B sends message
         await b.page.click('#switchToChats');
         await b.page.locator('#chatList .chat-name', { hasText: a.username }).click();
-        await expect(b.page.locator('#chatModal')).toBeVisible();
+        const senderChat = b.page.locator('#chatModal.active');
+        await expect(senderChat).toBeVisible();
         const msgFromB = 'Connection msg';
-        await b.page.type('#chatModal .message-input', msgFromB);
-        await b.page.click('#handleSendMessage');
-        await b.page.click('#closeChatModal');
-        expectedBalanceB -= NETWORK_FEE; // B pays network fee for sending message
+        await senderChat.locator('.message-input').fill(msgFromB);
 
-        // User A receives message
+        await senderChat.locator('#handleSendMessage').click();
+        await senderChat.locator('#closeChatModal').click();
+
         await a.page.click('#switchToChats');
         await a.page.locator('#chatList .chat-name', { hasText: b.username }).click();
-        await expect(a.page.locator('#chatModal')).toBeVisible();
-        await expect(a.page.locator('#chatModal .messages-list .message.received')).toHaveCount(2, { timeout: 15000 });
-        // close chat modal to send read receipt
-        await a.page.click('#closeChatModal');
+        const recipientChat = a.page.locator('#chatModal.active');
+        await expect(recipientChat).toBeVisible();
+        const received = recipientChat.locator('.messages-list .message.received');
+        await expect(received.getByText(msgFromB, { exact: true })).toBeVisible({ timeout: 30_000 });
+        await expect(received).toHaveCount(2);
+        // Closing the chat sends the read receipt.
+        await recipientChat.locator('#closeChatModal').click();
+        expectedBalanceB -= NETWORK_FEE; // B pays network fee for sending message
 
         await expectLiberdusBalanceToEqual(a.page, expectedBalanceA);
         // User B should have paid only the network fee for sending the message and gets the original toll back

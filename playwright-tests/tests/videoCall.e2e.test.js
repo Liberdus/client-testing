@@ -1,24 +1,8 @@
 const { test: base, expect } = require('../fixtures/base');
-const { sendMessageTo, checkReceivedMessage } = require('../helpers/messageHelpers');
+const { openNewChat: addContact, sendMessageTo, checkReceivedMessage } = require('../helpers/messageHelpers');
 const { FriendStatus, setFriendStatusInChat } = require('../helpers/friendStatusHelpers');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
 const { newContext } = require('../helpers/toastHelpers');
-
-// opens a new chat with a new user to create the contact
-async function addContact(page, username) {
-    // Ensure we are on Chats screen
-    await page.click('#switchToChats');
-    await expect(page.locator('#newChatButton')).toBeVisible();
-    await page.click('#newChatButton');
-    await expect(page.locator('#newChatModal')).toBeVisible();
-    await page.locator('#chatRecipient').pressSequentially(username);
-    await expect(page.locator('#chatRecipientError')).toHaveText('found');
-
-    const continueBtn = page.locator('#newChatForm button[type="submit"]');
-    await expect(continueBtn).toBeEnabled();
-    await continueBtn.click();
-    await expect(page.locator('#chatModal.active')).toBeVisible();
-}
 
 const test = base.extend({
     users: async ({ browserName, browser }, use) => {

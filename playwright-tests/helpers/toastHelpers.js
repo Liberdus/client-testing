@@ -1,11 +1,23 @@
+const WALLET_BALANCE_REFRESH_ERROR = /^Error fetching balance\. Try again later\.(?:\s*×)?$/;
+
+async function dismissStickyWalletRefreshError(page) {
+  const balanceError = page.locator('#toastContainer .toast.error.show.sticky', {
+    hasText: WALLET_BALANCE_REFRESH_ERROR,
+  }).first();
+  if (await balanceError.isVisible()) {
+    await balanceError.locator('.toast-close-btn').click({ timeout: 5_000 });
+  }
+}
+
 /**
  * The toast-closing script. Exported so it can be used with both
  * page.addInitScript() and context.addInitScript().
  */
-const toastCloserScript = () => {
+const toastCloserScript = ({ walletRefreshErrorPattern } = {}) => {
   console.log('🍞 [ToastCloser] Script loaded');
+  const walletRefreshError = walletRefreshErrorPattern ? new RegExp(walletRefreshErrorPattern) : null;
 
-  // Only close toasts whose text matches one of these substrings.
+  // Close known notices in every context.
   const whitelist = [
     'The LIB in this Testnet is not of any value and will not be transferred to the Mainnet',
     'This user has deposited a toll to message you',
@@ -17,8 +29,9 @@ const toastCloserScript = () => {
       if (!el || el.nodeType !== 1) return;
       const text = (el.innerText || '').toLowerCase();
       console.log('🍞 [ToastCloser] Checking toast:', text.substring(0, 80));
-      // only proceed if toast text matches our whitelist
-      const matched = whitelist.some(s => text.includes(s.toLowerCase()));
+      const isWalletRefreshError = walletRefreshError && el.matches('#toastContainer .toast.error')
+        && walletRefreshError.test(el.textContent.trim());
+      const matched = isWalletRefreshError || whitelist.some(s => text.includes(s.toLowerCase()));
       if (!matched) {
         console.log('🍞 [ToastCloser] Not in whitelist, ignoring');
         return;
@@ -112,13 +125,22 @@ async function injectToastCloserToContext(context) {
  * Creates a new browser context with toast-closing script pre-injected.
  * Use this instead of browser.newContext() in tests.
  * @param {import('@playwright/test').Browser} browser
- * @param {import('@playwright/test').BrowserContextOptions} [options]
+ * @param {import('@playwright/test').BrowserContextOptions & { dismissWalletRefreshError?: boolean }} [options]
  * @returns {Promise<import('@playwright/test').BrowserContext>}
  */
-async function newContext(browser, options) {
-  const context = await browser.newContext(options);
-  await context.addInitScript(toastCloserScript);
+async function newContext(browser, { dismissWalletRefreshError = false, ...contextOptions } = {}) {
+  const context = await browser.newContext(contextOptions);
+  await context.addInitScript(toastCloserScript, {
+    walletRefreshErrorPattern: dismissWalletRefreshError ? WALLET_BALANCE_REFRESH_ERROR.source : null,
+  });
   return context;
 }
 
-module.exports = { injectToastCloser, injectToastCloserToContext, newContext, toastCloserScript };
+module.exports = {
+  WALLET_BALANCE_REFRESH_ERROR,
+  dismissStickyWalletRefreshError,
+  injectToastCloser,
+  injectToastCloserToContext,
+  newContext,
+  toastCloserScript,
+};

@@ -14,70 +14,62 @@ const FRIEND_STATUS_LABELS = Object.freeze({
 });
 
 const FRIEND_STATUS_STATE_TIMEOUT = 15_000;
+const FRIEND_STATUS_PENDING_TIMEOUT = 30_000;
 const FRIEND_STATUS_SETTLEMENT_TIMEOUT = 60_000;
-const USABLE_FRIEND_STATUS_STATES = new Set(['ready', 'offline', 'failed', 'pending']);
 
 function isFriendStatusInjection(response) {
   return getInjectedTransaction(response.request())?.type === 'update_toll_required';
 }
 
 async function readFriendStatusState(page) {
-  const modal = page.locator('#friendModal');
-  const declaredState = await modal.getAttribute('data-status-state');
-  if (USABLE_FRIEND_STATUS_STATES.has(declaredState)) {
-    return declaredState;
-  }
-
   const firstStatusInput = page.locator('#friendForm input[name="friendStatus"]').first();
   if (await firstStatusInput.isEnabled()) {
     return 'ready';
   }
+
+  // Pending and refreshing use loading toasts; only errors appear inside the modal.
+  const pendingToast = page.locator('#toastContainer .toast.loading.show', {
+    hasText: /^Status update pending\u2026$/,
+  });
+  if (await pendingToast.isVisible()) return 'pending';
 
   const refreshMessage = page.locator('#friendStatusRefreshMessage');
   if (await refreshMessage.isVisible()) {
     const message = await refreshMessage.textContent();
     if (/offline/i.test(message)) return 'offline';
     if (/could not refresh|failed/i.test(message)) return 'failed';
-    if (/pending/i.test(message)) return 'pending';
   }
 
   return 'checking';
 }
 
 async function waitForFriendStatusState(page) {
-  let currentState = 'checking';
-
-  await expect.poll(async () => {
+  const start = performance.now();
+  let currentState;
+  const readState = async () => {
     currentState = await readFriendStatusState(page);
     return currentState;
-  }, {
+  };
+
+  await expect.poll(readState, {
     message: 'Contact Status did not finish refreshing',
     timeout: FRIEND_STATUS_STATE_TIMEOUT,
   }).not.toBe('checking');
 
+  if (currentState === 'pending') {
+    // Give the client time to check the collector and refresh the controls.
+    const remaining = Math.max(1, FRIEND_STATUS_PENDING_TIMEOUT - (performance.now() - start));
+    await expect.poll(readState, {
+      message: 'Pending Contact Status did not finish settling and refreshing',
+      timeout: remaining,
+    }).toMatch(/^(ready|offline|failed)$/);
+  }
   return currentState;
 }
 
-function readStatusFromButtonClass(className) {
-  const match = className.match(/(?:^|\s)status-([012])(?:\s|$)/);
-  return match ? Number(match[1]) : null;
-}
-
 async function openFriendStatusModal(page, openButton) {
-  const modal = page.locator('#friendModal');
   await openButton.click();
-
-  if (await modal.isVisible()) {
-    return 'open';
-  }
-
-  const pendingToast = page.locator('.toast.warning.show', {
-    hasText: /pending transaction.*friend status/i,
-  });
-  await expect(pendingToast).toBeVisible({ timeout: 5_000 }).catch(() => {
-    throw new Error('Contact Status did not open and no pending-status warning was shown');
-  });
-  return 'pending';
+  await expect(page.locator('#friendModal.active')).toBeVisible();
 }
 
 async function closeFriendStatusModal(page) {
@@ -136,16 +128,12 @@ async function waitForFriendStatusSettlement(page, status, txid) {
 }
 
 async function updateFriendStatus(page, openButton, status) {
-  const openResult = await openFriendStatusModal(page, openButton);
-  if (openResult === 'pending') {
-    const currentStatus = readStatusFromButtonClass(await openButton.getAttribute('class') || '');
-    if (currentStatus === status) {
-      return;
-    }
-    throw friendStatusUnavailableError('pending', status);
+  await openFriendStatusModal(page, openButton);
+  const state = await waitForFriendStatusState(page);
+  if (state !== 'ready') {
+    throw friendStatusUnavailableError(state, status);
   }
 
-  const state = await waitForFriendStatusState(page);
   const checkedStatus = Number(await page
     .locator('#friendForm input[name="friendStatus"]:checked')
     .getAttribute('value'));
@@ -153,10 +141,6 @@ async function updateFriendStatus(page, openButton, status) {
   if (checkedStatus === status) {
     await closeFriendStatusModal(page);
     return;
-  }
-
-  if (state !== 'ready') {
-    throw friendStatusUnavailableError(state, status);
   }
 
   const statusInput = page.locator(`#friendForm input[name="friendStatus"][value="${status}"]`);
@@ -203,7 +187,10 @@ async function getCurrentFriendStatus(page, username) {
   await expect(page.locator('#contactInfoModal.active')).toBeVisible();
   await page.locator('#addFriendButtonContactInfo').click();
   await expect(page.locator('#friendModal.active')).toBeVisible();
-  await waitForFriendStatusState(page);
+  const state = await waitForFriendStatusState(page);
+  if (state !== 'ready') {
+    throw new Error(`Cannot read confirmed Contact Status while the modal is ${state}`);
+  }
 
   const checked = await page.locator('#friendForm input[name="friendStatus"]:checked').getAttribute('value');
 

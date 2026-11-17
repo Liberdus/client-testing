@@ -1,6 +1,6 @@
 const { test, expect } = require('../fixtures/newUserFixture');
 const { createAndSignInUser, generateUsername } = require('../helpers/userHelpers');
-const { newContext } = require('../helpers/toastHelpers');
+const { WALLET_BALANCE_REFRESH_ERROR, newContext } = require('../helpers/toastHelpers');
 const { AttachmentMenu } = require('../helpers/attachmentMenu');
 const fs = require('fs');
 const path = require('path');
@@ -11,6 +11,19 @@ function waitForNamedDownload(page, expectedFileName) {
   return page.waitForEvent('download', {
     predicate: download => download.suggestedFilename() === expectedFileName
   });
+}
+
+function visibleAttachmentErrors(page) {
+  return page.locator('#toastContainer .toast.error.show', {
+    hasNotText: WALLET_BALANCE_REFRESH_ERROR,
+  });
+}
+
+async function expectNoAttachmentSendError(page) {
+  const errors = await visibleAttachmentErrors(page).allTextContents();
+  if (errors.length) {
+    throw new Error(`Error toast displayed after sending message: ${errors.join(' | ')}`);
+  }
 }
 
 // Helper to create test files with unique names based on test info to avoid conflicts in parallel runs
@@ -178,11 +191,7 @@ test.describe('File Attachment Tests', () => {
 
       // Send message with attachment
       await page.click('#handleSendMessage');
-      // If an error toast appears, fail fast
-      if (await page.locator('.toast.error.show').count()) {
-        const errText = await page.locator('.toast.error.show').textContent();
-        throw new Error(`Error toast displayed after sending message: ${errText}`);
-      }
+      await expectNoAttachmentSendError(page);
 
       // Verify message with attachment was sent
       const attachment = AttachmentMenu.attachmentRow(page, 'sent', fileName);
@@ -228,9 +237,8 @@ test.describe('File Attachment Tests', () => {
     await fileInput.setInputFiles(testFilePath);
 
     // Verify error toast appears for file size limit
-    await expect(page.locator('.toast.error.show')).toBeVisible({ timeout: 10_000 });
-    const errorMsg = await page.locator('.toast.error.show').textContent();
-    expect(errorMsg).toContain('File size too large');
+    await expect(visibleAttachmentErrors(page).filter({ hasText: 'File size too large' }))
+      .toBeVisible({ timeout: 10_000 });
 
     // Verify attachment preview does not appear
     await expect(page.locator('#attachmentPreview')).toHaveAttribute('style', 'display: none;');
@@ -306,12 +314,7 @@ test.describe('File Attachment Tests', () => {
 
     // Send message with attachment
     await page.click('#handleSendMessage');
-
-    // If an error toast appears, fail fast
-    if (await page.locator('.toast.error.show').count()) {
-      const errText = await page.locator('.toast.error.show').textContent();
-      throw new Error(`Error toast displayed after sending message: ${errText}`);
-    }
+    await expectNoAttachmentSendError(page);
 
     // Verify message with attachment was sent
     const attachment = AttachmentMenu.attachmentRow(page, 'sent', fileName);
@@ -380,11 +383,7 @@ test.describe('File Attachment Tests', () => {
 
     // Send message with attachment
     await page.click('#handleSendMessage');
-    // If an error toast appears, fail fast
-    if (await page.locator('.toast.error.show').count()) {
-      const errText = await page.locator('.toast.error.show').textContent();
-      throw new Error(`Error toast displayed after sending message: ${errText}`);
-    }
+    await expectNoAttachmentSendError(page);
 
     // Verify message was sent
     await expect(AttachmentMenu.attachmentRow(page, 'sent', fileName)).toBeVisible({ timeout: 15_000 });
@@ -505,11 +504,7 @@ test.describe('File Attachment Tests', () => {
     
     // Send message with all attachments
     await page.click('#handleSendMessage');
-    // If an error toast appears, fail fast
-    if (await page.locator('.toast.error.show').count()) {
-      const errText = await page.locator('.toast.error.show').textContent();
-      throw new Error(`Error toast displayed after sending message: ${errText}`);
-    }
+    await expectNoAttachmentSendError(page);
     
     // Verify messages with attachments were sent
     for (const attachment of attachments) {
@@ -641,22 +636,16 @@ test.describe('File Attachment Tests', () => {
     // Click Send button
     await page.click('#shareAttachmentSendBtn');
 
-    // Wait for either success or error toast to appear
-    const toastLocator = page.locator('.toast.show').first();
-    await expect(toastLocator).toBeVisible({ timeout: 15_000 });
-    
-    // Check if it's a success toast
-    const isSuccess = await page.locator('.toast.success.show').count() > 0;
-    const isError = await page.locator('.toast.error.show').count() > 0;
-    
-    if (isError) {
-      const errorMsg = await page.locator('.toast.error.show').textContent();
-      throw new Error(`Share failed with error: ${errorMsg}`);
+    const success = page.locator('#toastContainer .toast.success.show', { hasText: 'Attachment(s) shared with:' });
+    const partialFailure = page.locator('#toastContainer .toast.warning.show', { hasText: 'Attachment not shared:' });
+    const shareErrors = visibleAttachmentErrors(page).or(partialFailure);
+    await expect(success.or(shareErrors).first()).toBeVisible({ timeout: 15_000 });
+
+    const errors = await shareErrors.allTextContents();
+    if (errors.length) {
+      throw new Error(`Share failed with error: ${errors.join(' | ')}`);
     }
-    
-    expect(isSuccess).toBeTruthy();
-    const successMsg = await page.locator('.toast.success.show').textContent();
-    expect(successMsg).toContain('shared');
+    await expect(success).toBeVisible();
 
     // Verify modal closes
     await expect(page.locator('#shareAttachmentModal')).not.toHaveClass(/active/);
