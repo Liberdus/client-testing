@@ -193,6 +193,32 @@ test('unknown username blocks review, verified username allows note, stale looku
   assert.equal(panel.noteInput.disabled, true);
 });
 
+test('editing the spelling of the same username preserves its note, but a different username clears it', async () => {
+  const panel = panelFixture();
+  const bobAddress = '0x' + '3'.repeat(40);
+  panel.lookupUsername = async (username) => ({ alice: recipient, bob: bobAddress })[username] ?? null;
+  panel.checkReceiptRecipient = async () => ({ tollWei: 0n });
+
+  panel.recipientInput.value = 'alice';
+  await panel.handleRecipientInput(recipient);
+  panel.noteInput.value = 'For Alice';
+
+  panel.recipientInput.value = '@alice';
+  await panel.handleRecipientInput(recipient);
+  assert.equal(panel.noteInput.hidden, false);
+  assert.equal(panel.noteInput.value, 'For Alice');
+
+  panel.recipientInput.value = '  @ALICE  ';
+  await panel.handleRecipientInput(recipient);
+  assert.equal(panel.noteInput.value, 'For Alice');
+
+  panel.recipientInput.value = 'bob';
+  await panel.handleRecipientInput(bobAddress);
+  assert.equal(panel.recipientName, '@bob');
+  assert.equal(panel.noteInput.hidden, false);
+  assert.equal(panel.noteInput.value, '');
+});
+
 test('username confirmation still sends the Liberdus Intents payment message with note and toll', async (t) => {
   const panel = panelFixture();
   let review;

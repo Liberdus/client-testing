@@ -119,6 +119,9 @@ try {
     assert.equal(await optionalNote.isVisible(), true);
     assert.equal(await noteToggle.isHidden(), true);
     await note.fill('Lunch');
+    await recipientField.fill('@alice');
+    await note.waitFor({ state: 'visible' });
+    assert.equal(await note.inputValue(), 'Lunch');
     await recipientField.fill(address);
     assert.equal(await page.locator('#chatSendRecipientStatus').textContent(), 'Asset transfer only');
     assert.equal(await note.inputValue(), '');
