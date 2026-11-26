@@ -29,13 +29,13 @@ let browser, page, confirmations;
 before(async () => { browser = await chromium.launch(); });
 after(async () => { await browser?.close(); });
 
-beforeEach(async () => {
-  page = await browser.newPage({
+async function newAndroidProfile() {
+  const profile = await browser.newPage({
     userAgent: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/113.0 Mobile Safari/537.36',
     serviceWorkers: 'block',
   });
   // The app, crypto and UI are real. Only checked-out assets and a synthetic network account can load.
-  await page.route('**/*', async route => {
+  await profile.route('**/*', async route => {
     const { origin: target, pathname } = new URL(route.request().url());
     if (route.request().method() !== 'GET') return route.abort();
     if (target !== origin) {
@@ -48,6 +48,16 @@ beforeEach(async () => {
     if (!path.startsWith(client + sep)) return route.abort();
     await route.fulfill({ path }).catch(() => route.abort());
   });
+  profile.on('dialog', async dialog => {
+    if (dialog.type() === 'confirm') confirmations++;
+    await dialog.accept();
+  });
+  return profile;
+}
+
+beforeEach(async () => {
+  confirmations = 0;
+  page = await newAndroidProfile();
   await page.addInitScript(({ netid, version, local }) => {
     localStorage.setItem('version_' + netid, version);
     localStorage.setItem('local_' + netid, JSON.stringify(local));
@@ -55,17 +65,15 @@ beforeEach(async () => {
       local: { address: local.account.keys.address },
     } } } }));
   }, { netid, version, local });
-  confirmations = 0;
-  page.on('dialog', async dialog => {
-    if (dialog.type() === 'confirm') confirmations++;
-    await dialog.accept();
-  });
   await page.goto(origin);
   await page.locator('#openWelcomeMenu').click();
-  await page.locator('#welcomeOpenRestore').click();
-  await expect(page.locator('#importModal')).toBeVisible();
 });
 afterEach(async () => { await page?.close(); });
+
+async function openRestore(profile) {
+  await profile.locator('#welcomeOpenRestore').click();
+  await expect(profile.locator('#importModal')).toBeVisible();
+}
 
 async function selectFile(contents, mimeType = 'application/json') {
   await page.locator('#importFile').setInputFiles({
@@ -90,6 +98,7 @@ async function restore(...users) {
 }
 
 test('Android permits a legacy backup labelled as plain text in the local picker', async () => {
+  await openRestore(page);
   const accept = await page.locator('#importFile').getAttribute('accept');
   assert.ok(!accept || accept.includes('*/*'), 'Android must allow files of any reported MIME type');
   await selectFile(JSON.stringify(alice), 'text/plain');
@@ -97,6 +106,7 @@ test('Android permits a legacy backup labelled as plain text in the local picker
 });
 
 test('a generic binary file restores all accounts in a multi-account backup', async () => {
+  await openRestore(page);
   await selectFile(JSON.stringify({
     [accountKey(alice)]: JSON.stringify(alice),
     [accountKey(bob)]: JSON.stringify(bob),
@@ -106,6 +116,7 @@ test('a generic binary file restores all accounts in a multi-account backup', as
 });
 
 test('invalid selected files show a backup error and leave existing accounts untouched', async () => {
+  await openRestore(page);
   await page.locator('#overwriteAccountsCheckbox').check();
   const invalid = [
     '{}', '[]', 'null', '', '{broken json', 'ordinary notes here',
@@ -129,6 +140,7 @@ test('invalid selected files show a backup error and leave existing accounts unt
 });
 
 test('a password-protected file containing a locked account restores with both passwords', async () => {
+  await openRestore(page);
   const encrypted = await page.evaluate(async ({ key, alice }) => {
     const { encryptData, passwordToKey } = await import('/crypto.js');
     const accountKey = await passwordToKey('account passwordliberdusData');
@@ -154,4 +166,41 @@ test('a password-protected file containing a locked account restores with both p
   // Correct the password immediately and click as soon as Load Account is enabled.
   await page.locator('#backupAccountLock').fill('account password');
   await restore(alice);
+});
+
+test('an encrypted All Accounts backup with a newline in another network’s version restores on a fresh profile', async t => {
+  const otherNetwork = '8'.repeat(64);
+  await page.evaluate(netid => {
+    localStorage.setItem('version_' + netid, '2026.05.06.10.40\n');
+  }, otherNetwork);
+  await page.locator('#welcomeOpenBackup').click();
+  await expect(page.locator('#backupAllAccounts')).toBeChecked();
+  const password = 'sample file password';
+  await page.locator('#backupPassword').fill(password);
+  await page.locator('#backupPasswordConfirm').fill(password);
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('#backupForm button[type=submit]').click(),
+  ]);
+
+  const fresh = await newAndroidProfile();
+  t.after(() => fresh.close());
+  await fresh.goto(origin);
+  await fresh.locator('#openWelcomeMenu').click();
+  assert.equal(await fresh.evaluate(() => localStorage.getItem('accounts')), null);
+  await openRestore(fresh);
+  await fresh.locator('#importFile').setInputFiles({
+    name: download.suggestedFilename(), mimeType: 'application/json', buffer: await readFile(await download.path()),
+  });
+  await fresh.locator('#importPassword').fill(password);
+  const load = fresh.locator('#restoreSubmitButton');
+  await expect(load).toBeEnabled();
+  await load.click();
+  await expect(fresh.locator('.toast.success')).toHaveText(/1 account restored/);
+  assert.equal(confirmations, 1);
+  await fresh.locator('#importModal .modal-title').click();
+  await fresh.locator('#signInButton').click();
+  await expect(fresh.locator('#signInAccountList .sign-in-account-name')).toHaveText([local.account.username]);
+  const restored = await fresh.evaluate(key => JSON.parse(localStorage.getItem(key)), accountKey(local));
+  assert.deepEqual(restored, local);
 });
