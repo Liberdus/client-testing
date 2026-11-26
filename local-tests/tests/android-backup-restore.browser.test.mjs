@@ -81,6 +81,15 @@ async function selectFile(contents, mimeType = 'application/json') {
   });
 }
 
+async function clickWithLoadingToast(button, message) {
+  // Sample on animation frames, including the short interval before synchronous decryption.
+  await Promise.all([
+    page.waitForFunction(text => [...document.querySelectorAll('.toast.loading.show')].some(toast =>
+      toast.textContent === text && Number(getComputedStyle(toast).opacity) > 0), message, { polling: 'raf', timeout: 5_000 }),
+    button.click(),
+  ]);
+}
+
 async function restore(...users) {
   const submit = page.locator('#restoreSubmitButton');
   await expect(submit).toBeEnabled({ timeout: 15_000 });
@@ -116,6 +125,25 @@ test('a generic binary file restores all accounts in a multi-account backup', as
     ['version_' + netid]: version,
   }), 'application/octet-stream');
   await restore(alice, bob);
+});
+
+test('restore clears the loading toast when the account write fails', async () => {
+  await openRestore(page);
+  await selectFile(JSON.stringify(alice));
+  const before = await savedAccounts();
+  await page.evaluate(key => {
+    const write = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (name, value) {
+      if (name === key) throw new DOMException('No space for account', 'QuotaExceededError');
+      return write.call(this, name, value);
+    };
+  }, accountKey(alice));
+  await clickWithLoadingToast(page.locator('#restoreSubmitButton'), 'Restoring accounts...');
+  await expect(page.locator('.toast.error')).toContainText('No space for account');
+  await expect(page.locator('.toast.loading.show')).toHaveCount(0);
+  await expect(page.locator('#restoreSubmitButton')).toBeEnabled();
+  assert.equal(confirmations, 1);
+  assert.deepEqual(await savedAccounts(), before);
 });
 
 test('invalid selected files show a backup error and leave existing accounts untouched', async () => {
@@ -165,18 +193,21 @@ test('a password-protected file containing a locked account restores with both p
   await page.waitForTimeout(750);
   await expect(page.locator('#restoreFileStatus')).not.toContainText(/unable to decrypt/i);
   await expect(lockGroup).toBeHidden();
-  await submit.click();
+  await clickWithLoadingToast(submit, 'Checking backup...');
   await expect(page.locator('#restoreFileStatus')).toContainText(/unable to decrypt/i, { timeout: 15_000 });
+  await expect(page.locator('.toast.loading.show')).toHaveCount(0);
   await filePassword.fill('file password');
   await page.waitForTimeout(750);
   await expect(lockGroup).toBeHidden();
   await submit.click();
   await expect(lockGroup).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('.toast.loading.show')).toHaveCount(0);
   assert.equal(confirmations, 0);
   assert.equal(await page.evaluate(key => localStorage.getItem(key), accountKey(alice)), null);
   await page.locator('#backupAccountLock').fill('incorrect account password');
   await submit.click();
   await expect(page.locator('.toast.error', { hasText: /account password/i })).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('.toast.loading.show')).toHaveCount(0);
   assert.equal(confirmations, 0);
   assert.equal(await page.evaluate(key => localStorage.getItem(key), accountKey(alice)), null);
   await page.locator('#backupAccountLock').fill('account password');
@@ -314,20 +345,23 @@ test('a mixed Drive backup previews skipped records and writes only after confir
   const before = await savedAccounts();
   const restore = page.locator('#restoreSubmitButton');
   await page.locator('#importPassword').fill(filePassword);
-  await restore.click();
+  await clickWithLoadingToast(restore, 'Checking backup...');
   const review = page.getByRole('dialog', { name: 'Review Google Drive restore' });
   await expect(review).toBeVisible();
+  await expect(page.locator('.toast.loading.show')).toHaveCount(0);
   await expect(review.getByRole('listitem').filter({ hasText: /bob/i })).toContainText(/network/i);
   await expect(review.getByRole('listitem').filter({ hasText: /local/i })).toContainText(/already|exist/i);
   await expect(review.getByRole('button', { name: 'Restore 1 account', exact: true })).toBeVisible();
   assert.deepEqual(await savedAccounts(), before);
   await review.getByRole('button', { name: 'Cancel' }).click();
   await expect(review).toBeHidden();
+  await expect(page.locator('.toast.loading.show')).toHaveCount(0);
   assert.deepEqual(await savedAccounts(), before);
 
   await restore.click();
-  await review.getByRole('button', { name: 'Restore 1 account', exact: true }).click();
+  await clickWithLoadingToast(review.getByRole('button', { name: 'Restore 1 account', exact: true }), 'Restoring accounts...');
   await expect(page.locator('.toast.success')).toContainText(/1 account restored.*2 skipped/i);
+  await expect(page.locator('.toast.loading.show')).toHaveCount(0);
   const saved = await savedAccounts();
   assert.deepEqual(JSON.parse(saved[accountKey(alice)]), alice);
   assert.equal(saved[accountKey(local)], before[accountKey(local)]);
