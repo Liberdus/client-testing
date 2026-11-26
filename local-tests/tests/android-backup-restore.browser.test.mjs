@@ -224,7 +224,9 @@ test('an encrypted All Accounts backup with a newline in another network’s ver
 
   const fresh = await newAndroidProfile();
   t.after(() => fresh.close());
-  await fresh.goto(origin);
+  // First launch stores the client version, then navigates back to Welcome.
+  await fresh.goto(origin, { waitUntil: 'commit' });
+  await fresh.waitForEvent('framenavigated', { predicate: frame => frame === fresh.mainFrame(), timeout: 15_000 });
   await fresh.locator('#openWelcomeMenu').click();
   assert.equal(await fresh.evaluate(() => localStorage.getItem('accounts')), null);
   await openRestore(fresh);
@@ -343,6 +345,7 @@ test('Drive reports all-invalid records and makes no changes', async () => {
   await pickDriveFile();
   const before = await savedAccounts();
   await page.locator('#importPassword').fill(filePassword);
+  await page.locator('#restoreSubmitButton').click();
   const status = page.locator('#restoreFileStatus');
   await expect(status).toContainText(/no accounts can be restored/i, { timeout: 15_000 });
   await expect(status.getByRole('listitem').filter({ hasText: /bob/i })).toContainText(/network/i);
@@ -371,8 +374,12 @@ test('Drive unlocks records individually and replaces an existing account only w
   const before = await savedAccounts();
   await page.locator('#importPassword').fill(filePassword);
   const password = page.locator('#backupAccountLock');
-  await expect(password).toBeVisible({ timeout: 15_000 });
+  await expect(password).toBeHidden();
   const submit = page.locator('#restoreSubmitButton');
+  await submit.click();
+  await expect(password).toBeVisible({ timeout: 15_000 });
+  assert.equal(confirmations, 0);
+  assert.deepEqual(await savedAccounts(), before);
   await password.fill('wrong');
   await submit.click();
   await expect(page.locator('.toast.error').filter({ hasText: /backup account password/i })).toBeVisible();
@@ -390,4 +397,81 @@ test('Drive unlocks records individually and replaces an existing account only w
   assert.deepEqual(JSON.parse(saved[accountKey(local)]), replacement);
   assert.equal(saved[accountKey(bob)], undefined);
   assert.equal(JSON.parse(saved.accounts).netids[netid].usernames.local.address, replacement.account.keys.address);
+});
+
+test('Drive prompts after download and retries the file password only on Restore', async () => {
+  const requests = await useDrive(await encryptFile({ [accountKey(alice)]: JSON.stringify(alice) }));
+  const password = page.locator('#importPassword');
+  const submit = page.locator('#restoreSubmitButton');
+  const status = page.locator('#restoreFileStatus');
+  const selected = page.locator('#selectedGoogleDriveFile');
+  const before = await savedAccounts();
+  await expect(password).toBeHidden();
+  await expect(submit).toBeDisabled();
+  await pickDriveFile();
+  await expect(page.locator('#googleDrivePickerModal')).toHaveCSS('opacity', '0');
+  await expect(page.locator('#importModal')).toHaveCSS('opacity', '1');
+  await expect(password).toBeVisible();
+  await expect(submit).toBeDisabled();
+
+  await password.fill('incorrect password');
+  // Let the former 500 ms input debounce elapse without submitting.
+  await page.waitForTimeout(750);
+  await expect(status).not.toContainText(/unable to decrypt/i);
+  await expect(submit).toBeEnabled();
+  assert.equal(confirmations, 0);
+  await submit.click();
+  await expect(status).toContainText(/unable to decrypt/i, { timeout: 15_000 });
+  await expect(selected).toContainText(driveName);
+  await expect(password).toBeVisible();
+  assert.equal(confirmations, 0);
+  assert.deepEqual(await savedAccounts(), before);
+
+  await password.fill(filePassword);
+  await restore(alice);
+  assert.deepEqual(requests, { authorizations: 1, downloads: 1, mutations: [] });
+});
+
+test('a cancelled picker or failed Drive download keeps File Password hidden', async () => {
+  await useDrive('unreadable file');
+  const password = page.locator('#importPassword');
+  const pick = page.locator('#pickGoogleDriveFile');
+  const file = page.locator('#googleDriveFileList').getByText(driveName, { exact: true });
+  // Finish a download after its picker was closed.
+  let releaseDownload;
+  const holdDownload = new Promise(resolve => { releaseDownload = resolve; });
+  const media = '**/drive/v3/files/demo?alt=media';
+  await page.route(media, async route => {
+    await holdDownload;
+    await route.fulfill({ body: 'old selection' });
+  }, { times: 1 });
+  await pick.click();
+  const requested = page.waitForRequest(media);
+  await file.click();
+  await requested;
+  await page.locator('#closeGoogleDrivePicker').click();
+  const completed = page.waitForResponse(media);
+  releaseDownload();
+  await completed;
+  await expect(password).toBeHidden();
+  await expect(page.locator('#selectedGoogleDriveFile')).toBeHidden();
+
+  await page.route(media, route => route.fulfill({ status: 503 }), { times: 1 });
+  await pick.click();
+  await file.click();
+  const error = page.locator('.toast.error').filter({ hasText: /download/i });
+  await expect(error).toBeVisible();
+  await expect(password).toBeHidden();
+  await expect(page.locator('#restoreSubmitButton')).toBeDisabled();
+  await expect(page.locator('#selectedGoogleDriveFile')).toBeHidden();
+
+  // A successful download reveals the field even if the file contents are unrecognized.
+  await error.getByRole('button', { name: 'Close' }).click();
+  await file.click();
+  await expect(page.locator('#selectedGoogleDriveFile')).toContainText(driveName);
+  await expect(password).toBeVisible();
+  await page.locator('#clearGoogleDriveFile').click();
+  await expect(password).toBeHidden();
+  await expect(page.locator('#restoreSubmitButton')).toBeDisabled();
+  assert.equal(confirmations, 0);
 });
