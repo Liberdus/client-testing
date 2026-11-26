@@ -224,7 +224,9 @@ test('an encrypted All Accounts backup with a newline in another network’s ver
 
   const fresh = await newAndroidProfile();
   t.after(() => fresh.close());
-  await fresh.goto(origin);
+  // First launch stores the client version, then navigates back to Welcome.
+  await fresh.goto(origin, { waitUntil: 'commit' });
+  await fresh.waitForEvent('framenavigated', { predicate: frame => frame === fresh.mainFrame(), timeout: 15_000 });
   await fresh.locator('#openWelcomeMenu').click();
   assert.equal(await fresh.evaluate(() => localStorage.getItem('accounts')), null);
   await openRestore(fresh);
