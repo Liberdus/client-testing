@@ -99,9 +99,12 @@ async function restore(...users) {
 
 test('Android permits a legacy backup labelled as plain text in the local picker', async () => {
   await openRestore(page);
+  const filePassword = page.locator('#importPassword');
+  await expect(filePassword).toBeHidden();
   const accept = await page.locator('#importFile').getAttribute('accept');
   assert.ok(!accept || accept.includes('*/*'), 'Android must allow files of any reported MIME type');
   await selectFile(JSON.stringify(alice), 'text/plain');
+  await expect(filePassword).toBeHidden();
   await restore(alice);
 });
 
@@ -127,6 +130,7 @@ test('invalid selected files show a backup error and leave existing accounts unt
   for (const body of invalid) {
     await selectFile(body);
     await expect(page.locator('#restoreFileStatus')).toHaveText(/Liberdus account backup/i);
+    await expect(page.locator('#importPassword')).toBeHidden();
     await expect(page.locator('#restoreSubmitButton')).toBeDisabled();
     await expect(page.locator('#backupAccountLockGroup')).toBeHidden();
     assert.equal(confirmations, 0);
@@ -151,21 +155,56 @@ test('a password-protected file containing a locked account restores with both p
     return encryptData(JSON.stringify(locked), 'file password');
   }, { key: accountKey(alice), alice });
   await selectFile(encrypted, 'text/plain');
-  await expect(page.locator('#restoreSubmitButton')).toBeDisabled();
-  await page.locator('#importPassword').fill('incorrect file password');
+  const filePassword = page.locator('#importPassword');
+  const lockGroup = page.locator('#backupAccountLockGroup');
+  const submit = page.locator('#restoreSubmitButton');
+  await expect(filePassword).toBeVisible();
+  await expect(submit).toBeDisabled();
+  await filePassword.fill('incorrect file password');
+  // Wait past the former 500 ms debounce to catch a password attempt triggered by typing.
+  await page.waitForTimeout(750);
+  await expect(page.locator('#restoreFileStatus')).not.toContainText(/unable to decrypt/i);
+  await expect(lockGroup).toBeHidden();
+  await submit.click();
   await expect(page.locator('#restoreFileStatus')).toContainText(/unable to decrypt/i, { timeout: 15_000 });
-  await expect(page.locator('#restoreSubmitButton')).toBeDisabled();
-  await page.locator('#importPassword').fill('file password');
-  await expect(page.locator('#backupAccountLockGroup')).toBeVisible({ timeout: 15_000 });
+  await filePassword.fill('file password');
+  await page.waitForTimeout(750);
+  await expect(lockGroup).toBeHidden();
+  await submit.click();
+  await expect(lockGroup).toBeVisible({ timeout: 15_000 });
   assert.equal(confirmations, 0);
+  assert.equal(await page.evaluate(key => localStorage.getItem(key), accountKey(alice)), null);
   await page.locator('#backupAccountLock').fill('incorrect account password');
-  await page.locator('#restoreSubmitButton').click();
+  await submit.click();
   await expect(page.locator('.toast.error', { hasText: /account password/i })).toBeVisible({ timeout: 15_000 });
   assert.equal(confirmations, 0);
   assert.equal(await page.evaluate(key => localStorage.getItem(key), accountKey(alice)), null);
-  // Correct the password immediately and click as soon as Load Account is enabled.
   await page.locator('#backupAccountLock').fill('account password');
   await restore(alice);
+});
+
+test('replacing or clearing a local file clears its password and selection state', async () => {
+  await openRestore(page);
+  const encrypted = await encryptFile(alice);
+  const filePassword = page.locator('#importPassword');
+  const submit = page.locator('#restoreSubmitButton');
+  await selectFile(encrypted);
+  await filePassword.fill('file password');
+  await selectFile(JSON.stringify(alice));
+  await expect(filePassword).toBeHidden();
+  await expect(filePassword).toHaveValue('');
+  await expect(submit).toBeEnabled();
+  await selectFile(encrypted);
+  await expect(filePassword).toBeVisible();
+  await expect(filePassword).toHaveValue('');
+  await expect(submit).toBeDisabled();
+  await filePassword.fill('file password');
+  await page.locator('#importFile').setInputFiles([]);
+  await expect(filePassword).toBeHidden();
+  await expect(filePassword).toHaveValue('');
+  await expect(submit).toBeDisabled();
+  assert.equal(confirmations, 0);
+  assert.equal(await page.evaluate(key => localStorage.getItem(key), accountKey(alice)), null);
 });
 
 test('an encrypted All Accounts backup with a newline in another network’s version restores on a fresh profile', async t => {
@@ -175,7 +214,7 @@ test('an encrypted All Accounts backup with a newline in another network’s ver
   }, otherNetwork);
   await page.locator('#welcomeOpenBackup').click();
   await expect(page.locator('#backupAllAccounts')).toBeChecked();
-  const password = 'sample file password';
+  const password = ' sample file password ';
   await page.locator('#backupPassword').fill(password);
   await page.locator('#backupPasswordConfirm').fill(password);
   const [download] = await Promise.all([
@@ -189,13 +228,14 @@ test('an encrypted All Accounts backup with a newline in another network’s ver
   await fresh.locator('#openWelcomeMenu').click();
   assert.equal(await fresh.evaluate(() => localStorage.getItem('accounts')), null);
   await openRestore(fresh);
+  await expect(fresh.locator('#importPassword')).toBeHidden();
   await fresh.locator('#importFile').setInputFiles({
     name: download.suggestedFilename(), mimeType: 'application/json', buffer: await readFile(await download.path()),
   });
   await fresh.locator('#importPassword').fill(password);
-  const load = fresh.locator('#restoreSubmitButton');
-  await expect(load).toBeEnabled();
-  await load.click();
+  const submit = fresh.locator('#restoreSubmitButton');
+  await expect(submit).toBeEnabled();
+  await submit.click();
   await expect(fresh.locator('.toast.success')).toHaveText(/1 account restored/);
   assert.equal(confirmations, 1);
   await fresh.locator('#importModal .modal-title').click();
