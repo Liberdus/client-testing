@@ -204,3 +204,150 @@ test('an encrypted All Accounts backup with a newline in another network’s ver
   const restored = await fresh.evaluate(key => JSON.parse(localStorage.getItem(key)), accountKey(local));
   assert.deepEqual(restored, local);
 });
+
+const driveName = 'liberdus-backup.json';
+const filePassword = 'file password';
+
+async function encryptFile(records) {
+  return page.evaluate(async ({ records, filePassword }) => {
+    const { encryptData } = await import('/crypto.js');
+    return encryptData(JSON.stringify(records), filePassword);
+  }, { records, filePassword });
+}
+
+async function useDrive(contents) {
+  const requests = { authorizations: 0, downloads: 0, mutations: [] };
+  // Keep the real authorization/picker/download flow offline.
+  await page.evaluate(() => {
+    window.open = () => ({ closed: false, close() { this.closed = true; } });
+  });
+  await page.route('**/auth/poll?*', route => {
+    requests.authorizations++;
+    return route.fulfill({ json: { success: true, token: 'synthetic-drive-token' } });
+  });
+  await page.route('https://www.googleapis.com/drive/**', route => {
+    const req = route.request();
+    const url = new URL(req.url());
+    if (req.method() !== 'GET') {
+      requests.mutations.push(req.method());
+      return route.abort();
+    }
+    if (url.pathname === '/drive/v3/files/demo' && url.searchParams.get('alt') === 'media') {
+      requests.downloads++;
+      return route.fulfill({ body: contents });
+    }
+    if (url.pathname !== '/drive/v3/files') return route.abort();
+    const files = url.searchParams.get('q')?.includes('application/vnd.google-apps.folder')
+      ? [{ id: 'folder' }]
+      : [{ id: 'demo', name: driveName, modifiedTime: '2026-01-01T12:00:00Z' }];
+    return route.fulfill({ json: { files } });
+  });
+  await openRestore(page);
+  await page.locator('#restoreSourceLocation').selectOption('google-drive', { force: true });
+  return requests;
+}
+
+async function pickDriveFile() {
+  await page.locator('#pickGoogleDriveFile').click();
+  await page.locator('#googleDriveFileList').getByText(driveName, { exact: true }).click();
+  await expect(page.locator('#selectedGoogleDriveFile')).toContainText(driveName);
+}
+
+function savedAccounts() {
+  return page.evaluate(() => Object.fromEntries(Object.entries(localStorage)
+    .filter(([key]) => key === 'accounts' || /_[0-9a-f]{64}$/.test(key))));
+}
+
+test('a mixed Drive backup previews skipped records and writes only after confirmation', async () => {
+  const existing = account('local', 'd');
+  const staleKey = 'bob_' + '8'.repeat(64);
+  const contents = await encryptFile({
+    [accountKey(alice)]: JSON.stringify(alice),
+    [accountKey(existing)]: JSON.stringify(existing),
+    [staleKey]: JSON.stringify(bob),
+    ['version_' + netid]: version + '\n',
+  });
+  const requests = await useDrive(contents);
+  await pickDriveFile();
+  const before = await savedAccounts();
+  const restore = page.locator('#restoreSubmitButton');
+  await page.locator('#importPassword').fill(filePassword);
+  await restore.click();
+  const review = page.getByRole('dialog', { name: 'Review Google Drive restore' });
+  await expect(review).toBeVisible();
+  await expect(review.getByRole('listitem').filter({ hasText: /bob/i })).toContainText(/network/i);
+  await expect(review.getByRole('listitem').filter({ hasText: /local/i })).toContainText(/already|exist/i);
+  await expect(review.getByRole('button', { name: 'Restore 1 account', exact: true })).toBeVisible();
+  assert.deepEqual(await savedAccounts(), before);
+  await review.getByRole('button', { name: 'Cancel' }).click();
+  await expect(review).toBeHidden();
+  assert.deepEqual(await savedAccounts(), before);
+
+  await restore.click();
+  await review.getByRole('button', { name: 'Restore 1 account', exact: true }).click();
+  await expect(page.locator('.toast.success')).toContainText(/1 account restored.*2 skipped/i);
+  const saved = await savedAccounts();
+  assert.deepEqual(JSON.parse(saved[accountKey(alice)]), alice);
+  assert.equal(saved[accountKey(local)], before[accountKey(local)]);
+  assert.equal(saved[staleKey], undefined);
+  assert.deepEqual(Object.keys(JSON.parse(saved.accounts).netids[netid].usernames).sort(), ['alice', 'local']);
+  assert.deepEqual(requests, { authorizations: 1, downloads: 1, mutations: [] });
+});
+
+test('Drive reports all-invalid records and makes no changes', async () => {
+  const staleKey = 'bob_' + '8'.repeat(64);
+  const requests = await useDrive(await encryptFile({
+    [staleKey]: JSON.stringify(bob),
+    ['Unknown Owner_' + netid]: 'invalid data',
+  }));
+  await pickDriveFile();
+  const before = await savedAccounts();
+  await page.locator('#importPassword').fill(filePassword);
+  const status = page.locator('#restoreFileStatus');
+  await expect(status).toContainText(/no accounts can be restored/i, { timeout: 15_000 });
+  await expect(status.getByRole('listitem').filter({ hasText: /bob/i })).toContainText(/network/i);
+  await expect(status.getByRole('listitem').filter({ hasText: /record 2/i })).toContainText(/unreadable/i);
+  await expect(page.locator('#restoreSubmitButton')).toBeDisabled();
+  assert.deepEqual(await savedAccounts(), before);
+  assert.equal(confirmations, 0);
+  assert.deepEqual(requests.mutations, []);
+});
+
+test('Drive unlocks records individually and replaces an existing account only with consent', async () => {
+  const replacement = account('local', 'd');
+  const contents = await page.evaluate(async ({ replacement, localKey, staleKey, filePassword }) => {
+    const { encryptData, passwordToKey } = await import('/crypto.js');
+    const accountKey = await passwordToKey('account passwordliberdusData');
+    const records = {
+      lock: await passwordToKey('account password'),
+      [localKey]: encryptData(JSON.stringify(replacement), accountKey, true),
+      [staleKey]: encryptData('unreadable record', 'different account password'),
+    };
+    return encryptData(JSON.stringify(records), filePassword);
+  }, { replacement, localKey: accountKey(local), staleKey: accountKey(bob), filePassword });
+  await useDrive(contents);
+  await pickDriveFile();
+  await page.locator('#overwriteAccountsCheckbox').check();
+  const before = await savedAccounts();
+  await page.locator('#importPassword').fill(filePassword);
+  const password = page.locator('#backupAccountLock');
+  await expect(password).toBeVisible({ timeout: 15_000 });
+  const submit = page.locator('#restoreSubmitButton');
+  await password.fill('wrong');
+  await submit.click();
+  await expect(page.locator('.toast.error').filter({ hasText: /backup account password/i })).toBeVisible();
+  const review = page.getByRole('dialog', { name: 'Review Google Drive restore' });
+  await expect(review).toBeHidden();
+  assert.deepEqual(await savedAccounts(), before);
+  await password.fill('account password');
+  await submit.click();
+  await expect(review).toContainText(/bob/i);
+  await expect(review).toContainText(/unlock|decrypt/i);
+  assert.deepEqual(await savedAccounts(), before);
+  await review.getByRole('button', { name: 'Restore 1 account', exact: true }).click();
+  await expect(page.locator('.toast.success')).toContainText(/1 account restored.*1 skipped/i);
+  const saved = await savedAccounts();
+  assert.deepEqual(JSON.parse(saved[accountKey(local)]), replacement);
+  assert.equal(saved[accountKey(bob)], undefined);
+  assert.equal(JSON.parse(saved.accounts).netids[netid].usernames.local.address, replacement.account.keys.address);
+});
